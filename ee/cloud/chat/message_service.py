@@ -34,6 +34,7 @@ from ee.cloud.realtime.events import (
     MessageNew,
     MessageReaction,
     MessageSent,
+    ThreadReply,
     UnreadUpdate,
 )
 from ee.cloud.shared.errors import Forbidden, NotFound
@@ -152,7 +153,10 @@ class MessageService:
         # Realtime fan-out: message.new to the group (sender excluded via
         # AudienceResolver reading data["sender"]), message.sent ack to the
         # sender only (keyed by data["sender_id"]).
-        await emit(MessageNew(data={**response, "group_id": group_id}))
+        if body.reply_to:
+            await emit(ThreadReply(data={**response, "group_id": group_id, "root_message_id": body.reply_to}))
+        else:
+            await emit(MessageNew(data={**response, "group_id": group_id}))
         await emit(MessageSent(data={**response, "group_id": group_id, "sender_id": user_id}))
 
         # Unread badge sync — every non-sender member receives a delta so their

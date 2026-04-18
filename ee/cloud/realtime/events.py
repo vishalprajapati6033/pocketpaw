@@ -131,6 +131,11 @@ class MessageSent(Event):
 
 
 @dataclass
+class ThreadReply(Event):
+    EVENT_TYPE: ClassVar[str] = "thread.reply"
+
+
+@dataclass
 class MessageEdited(Event):
     EVENT_TYPE: ClassVar[str] = "message.edited"
 

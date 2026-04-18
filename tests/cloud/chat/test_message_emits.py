@@ -426,3 +426,40 @@ async def test_send_reply_bumps_thread_count_on_parent():
 
     assert parent.thread_count == 1
     parent.save.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_reply_emits_thread_reply_not_message_new():
+    from types import SimpleNamespace
+
+    from ee.cloud.chat.message_service import MessageService
+    from ee.cloud.chat.schemas import SendMessageRequest
+    from ee.cloud.realtime.events import MessageNew, ThreadReply
+
+    recorded, fake_emit = _capture_emits()
+    group = _fake_group(owner="sender", members=["sender"])
+    parent = SimpleNamespace(id="parent1", thread_count=0, save=AsyncMock())
+    fake_msg_ns = SimpleNamespace(id="r1", createdAt=None, insert=AsyncMock(), thread_count=0)
+
+    fake_message_class = MagicMock(return_value=fake_msg_ns)
+    fake_message_class.find_one = AsyncMock(return_value=parent)
+
+    with (
+        patch("ee.cloud.chat.message_service.emit", new=fake_emit),
+        patch("ee.cloud.chat.message_service._get_group_or_404", new=AsyncMock(return_value=group)),
+        patch("ee.cloud.chat.message_service._require_can_post", new=MagicMock()),
+        patch("ee.cloud.chat.message_service.Message", new=fake_message_class),
+        patch("ee.cloud.chat.message_service._message_response", new=MagicMock(return_value={"_id": "r1"})),
+        patch("ee.cloud.chat.message_service.event_bus.emit", new=AsyncMock()),
+    ):
+        await MessageService.send_message(
+            "g1",
+            "sender",
+            SendMessageRequest(content="a reply", reply_to="507f1f77bcf86cd799439011"),
+        )
+
+    threads = [e for e in recorded if isinstance(e, ThreadReply)]
+    news = [e for e in recorded if isinstance(e, MessageNew)]
+    assert len(threads) == 1
+    assert threads[0].data.get("root_message_id") == "507f1f77bcf86cd799439011"
+    assert len(news) == 0  # no MessageNew on replies
