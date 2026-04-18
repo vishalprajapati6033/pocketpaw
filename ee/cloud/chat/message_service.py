@@ -25,6 +25,7 @@ from ee.cloud.chat.schemas import (
 )
 from ee.cloud.models.message import Attachment, Mention, Message, Reaction
 from ee.cloud.models.notification import NotificationSource
+from ee.cloud.chat.unread_service import UnreadService
 from ee.cloud.notifications.service import NotificationService
 from ee.cloud.realtime.emit import emit
 from ee.cloud.realtime.events import (
@@ -140,23 +141,33 @@ class MessageService:
         await emit(MessageNew(data={**response, "group_id": group_id}))
         await emit(MessageSent(data={**response, "group_id": group_id, "sender_id": user_id}))
 
-        # Derive mention notifications. Each @user mention in the payload
-        # creates a Notification row and emits notification.new (except for
-        # self-mentions).
+        # Derive mention notifications. Dedupe recipients across multiple
+        # mentions in the same message. Broadcast types (@here/@channel/@everyone)
+        # target every non-sender member. User mentions add the specific user.
         group_name = getattr(group, "name", "") or ""
+        broadcast_types = {"here", "channel", "everyone"}
+        recipients: set[str] = set()
+
         for mention in body.mentions or []:
-            if not isinstance(mention, dict) or mention.get("type") != "user":
+            if not isinstance(mention, dict):
                 continue
-            target = mention.get("id")
-            if not target or target == user_id:
-                continue
+            mtype = mention.get("type")
+            if mtype == "user":
+                target = mention.get("id")
+                if target and target != user_id:
+                    recipients.add(target)
+            elif mtype in broadcast_types:
+                for member in group.members:
+                    if member != user_id:
+                        recipients.add(member)
+            # "agent" and "channel_ref" skip — not a user notification trigger.
+
+        for target in recipients:
             await NotificationService.create(
                 workspace_id=str(group.workspace),
                 recipient=target,
                 kind="mention",
-                title=f"You were mentioned in #{group_name}"
-                if group_name
-                else "You were mentioned",
+                title=f"You were mentioned in #{group_name}" if group_name else "You were mentioned",
                 body=body.content[:200],
                 source=NotificationSource(
                     type="message",
@@ -164,6 +175,7 @@ class MessageService:
                     pocket_id=None,
                 ),
             )
+            await UnreadService.bump_mention(target, group_id)
 
         return response
 

@@ -9,18 +9,23 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 
-def _fake_group(group_id: str = "g1", owner: str = "u1") -> SimpleNamespace:
+def _fake_group(
+    group_id: str = "g1",
+    owner: str = "u1",
+    members: list[str] | None = None,
+) -> SimpleNamespace:
     """Minimal Group stand-in for permission checks."""
+    effective_members = members if members is not None else [owner]
     return SimpleNamespace(
         id=group_id,
         workspace="w1",
         owner=owner,
-        members=[owner],
+        members=effective_members,
         member_roles={owner: "admin"},
         archived=False,
         type="group",
@@ -58,6 +63,17 @@ def _fake_message(
         insert=AsyncMock(),
         save=AsyncMock(),
     )
+
+
+def _capture_emits() -> tuple[list, object]:
+    """Return (recorded, fake_emit) where fake_emit is an async callable that
+    appends each emitted event to the shared ``recorded`` list."""
+    recorded: list = []
+
+    async def fake_emit(ev):
+        recorded.append(ev)
+
+    return recorded, fake_emit
 
 
 @pytest.mark.asyncio
@@ -228,3 +244,117 @@ def test_router_no_longer_broadcasts_message_events():
     assert "manager.send_to_user" not in segment, (
         "message handler still calls send_to_user directly"
     )
+
+
+@pytest.mark.asyncio
+async def test_send_message_fans_out_everyone_mention_to_all_members():
+    """@everyone creates one notification per non-sender member and bumps their
+    mention counter."""
+    from types import SimpleNamespace
+
+    from ee.cloud.chat.message_service import MessageService
+    from ee.cloud.chat.schemas import SendMessageRequest
+
+    recorded, fake_emit = _capture_emits()
+    group = _fake_group(owner="sender", members=["sender", "u2", "u3"])
+
+    created_notifs: list[dict] = []
+    bumped: list[tuple[str, str]] = []
+
+    async def fake_notif(**kwargs):
+        created_notifs.append(kwargs)
+        return SimpleNamespace(id="n")
+
+    async def fake_bump(user_id, group_id):
+        bumped.append((user_id, group_id))
+
+    fake_msg_ns = SimpleNamespace(
+        id="m1",
+        createdAt=None,
+        insert=AsyncMock(),
+    )
+
+    with (
+        patch("ee.cloud.chat.message_service.emit", new=fake_emit),
+        patch(
+            "ee.cloud.chat.message_service._get_group_or_404",
+            new=AsyncMock(return_value=group),
+        ),
+        patch(
+            "ee.cloud.chat.message_service._require_can_post",
+            new=MagicMock(),
+        ),
+        patch(
+            "ee.cloud.chat.message_service.Message",
+            new=MagicMock(return_value=fake_msg_ns),
+        ),
+        patch(
+            "ee.cloud.chat.message_service._message_response",
+            new=MagicMock(return_value={"_id": "m1"}),
+        ),
+        patch(
+            "ee.cloud.chat.message_service.event_bus.emit",
+            new=AsyncMock(),
+        ),
+        patch(
+            "ee.cloud.chat.message_service.NotificationService.create",
+            new=fake_notif,
+        ),
+        patch(
+            "ee.cloud.chat.message_service.UnreadService.bump_mention",
+            new=fake_bump,
+        ),
+    ):
+        body = SendMessageRequest(
+            content="hello team",
+            mentions=[{"type": "everyone", "id": "", "display_name": "@everyone"}],
+        )
+        await MessageService.send_message("g1", "sender", body)
+
+    recipients = {n["recipient"] for n in created_notifs}
+    assert recipients == {"u2", "u3"}
+    assert set(bumped) == {("u2", "g1"), ("u3", "g1")}
+
+
+@pytest.mark.asyncio
+async def test_send_message_user_and_broadcast_mention_dedupes():
+    """If a message has both @user(u2) and @everyone, u2 only gets one
+    notification, not two."""
+    from types import SimpleNamespace
+
+    from ee.cloud.chat.message_service import MessageService
+    from ee.cloud.chat.schemas import SendMessageRequest
+
+    recorded, fake_emit = _capture_emits()
+    group = _fake_group(owner="sender", members=["sender", "u2", "u3"])
+
+    created_notifs: list[dict] = []
+
+    async def fake_notif(**kwargs):
+        created_notifs.append(kwargs)
+        return SimpleNamespace(id="n")
+
+    fake_msg_ns = SimpleNamespace(id="m1", createdAt=None, insert=AsyncMock())
+
+    with (
+        patch("ee.cloud.chat.message_service.emit", new=fake_emit),
+        patch("ee.cloud.chat.message_service._get_group_or_404", new=AsyncMock(return_value=group)),
+        patch("ee.cloud.chat.message_service._require_can_post", new=MagicMock()),
+        patch("ee.cloud.chat.message_service.Message", new=MagicMock(return_value=fake_msg_ns)),
+        patch("ee.cloud.chat.message_service._message_response", new=MagicMock(return_value={"_id": "m1"})),
+        patch("ee.cloud.chat.message_service.event_bus.emit", new=AsyncMock()),
+        patch("ee.cloud.chat.message_service.NotificationService.create", new=fake_notif),
+        patch("ee.cloud.chat.message_service.UnreadService.bump_mention", new=AsyncMock()),
+    ):
+        body = SendMessageRequest(
+            content="hi u2",
+            mentions=[
+                {"type": "user", "id": "u2", "display_name": "@u2"},
+                {"type": "everyone", "id": "", "display_name": "@everyone"},
+            ],
+        )
+        await MessageService.send_message("g1", "sender", body)
+
+    # Each recipient should appear exactly once.
+    recipients = [n["recipient"] for n in created_notifs]
+    assert sorted(recipients) == ["u2", "u3"]  # no duplicate u2
