@@ -329,8 +329,11 @@ class GroupService:
         """Join a public group. Adds user to members list."""
         group = await _get_group_or_404(group_id)
 
-        if group.type != "public":
-            raise Forbidden("group.not_public", "Only public groups can be joined directly")
+        if group.type not in ("public", "channel"):
+            raise Forbidden(
+                "group.not_joinable",
+                "Only public groups and channels can be joined directly",
+            )
         if group.archived:
             raise Forbidden("group.archived", "Cannot join an archived group")
 
