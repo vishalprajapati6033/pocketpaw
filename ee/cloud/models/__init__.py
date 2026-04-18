@@ -10,6 +10,7 @@ from ee.cloud.models.invite import Invite
 from ee.cloud.models.message import Attachment, Mention, Message, Reaction
 from ee.cloud.models.notification import Notification, NotificationSource
 from ee.cloud.models.pocket import Pocket, Widget, WidgetPosition
+from ee.cloud.models.read_state import ReadState
 from ee.cloud.models.session import Session
 from ee.cloud.models.user import OAuthAccount, User, WorkspaceMembership
 from ee.cloud.models.workspace import Workspace, WorkspaceSettings
@@ -45,6 +46,7 @@ __all__ = [
     "OAuthAccount",
     "Pocket",
     "Reaction",
+    "ReadState",
     "Session",
     "User",
     "Widget",
@@ -70,6 +72,7 @@ def get_all_documents():
         Invite,
         Group,
         Message,
+        ReadState,
     ]
 
 
