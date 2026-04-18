@@ -34,6 +34,7 @@ from ee.cloud.realtime.events import (
     MessageNew,
     MessageReaction,
     MessageSent,
+    UnreadUpdate,
 )
 from ee.cloud.shared.errors import Forbidden, NotFound
 from ee.cloud.shared.events import event_bus
@@ -140,6 +141,17 @@ class MessageService:
         # sender only (keyed by data["sender_id"]).
         await emit(MessageNew(data={**response, "group_id": group_id}))
         await emit(MessageSent(data={**response, "group_id": group_id, "sender_id": user_id}))
+
+        # Unread badge sync — every non-sender member receives a delta so their
+        # client can increment the sidebar counter without a full /unreads refetch.
+        for member in group.members:
+            if member == user_id:
+                continue
+            await emit(
+                UnreadUpdate(
+                    data={"group_id": group_id, "user_id": member, "delta": 1},
+                )
+            )
 
         # Derive mention notifications. Dedupe recipients across multiple
         # mentions in the same message. Broadcast types (@here/@channel/@everyone)

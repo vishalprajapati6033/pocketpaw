@@ -358,3 +358,35 @@ async def test_send_message_user_and_broadcast_mention_dedupes():
     # Each recipient should appear exactly once.
     recipients = [n["recipient"] for n in created_notifs]
     assert sorted(recipients) == ["u2", "u3"]  # no duplicate u2
+
+
+@pytest.mark.asyncio
+async def test_send_message_emits_unread_update_for_non_senders():
+    """Every non-sender member should receive an unread.update event."""
+    from types import SimpleNamespace
+
+    from ee.cloud.chat.message_service import MessageService
+    from ee.cloud.chat.schemas import SendMessageRequest
+    from ee.cloud.realtime.events import UnreadUpdate
+
+    recorded, fake_emit = _capture_emits()
+    group = _fake_group(owner="sender", members=["sender", "u2", "u3"])
+
+    fake_msg_ns = SimpleNamespace(id="m1", createdAt=None, insert=AsyncMock())
+
+    with (
+        patch("ee.cloud.chat.message_service.emit", new=fake_emit),
+        patch("ee.cloud.chat.message_service._get_group_or_404", new=AsyncMock(return_value=group)),
+        patch("ee.cloud.chat.message_service._require_can_post", new=MagicMock()),
+        patch("ee.cloud.chat.message_service.Message", new=MagicMock(return_value=fake_msg_ns)),
+        patch("ee.cloud.chat.message_service._message_response", new=MagicMock(return_value={"_id": "m1"})),
+        patch("ee.cloud.chat.message_service.event_bus.emit", new=AsyncMock()),
+    ):
+        await MessageService.send_message("g1", "sender", SendMessageRequest(content="hi"))
+
+    updates = [e for e in recorded if isinstance(e, UnreadUpdate)]
+    recipients = {e.data["user_id"] for e in updates}
+    assert recipients == {"u2", "u3"}
+    for e in updates:
+        assert e.data["group_id"] == "g1"
+        assert e.data["delta"] == 1

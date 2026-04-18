@@ -160,6 +160,11 @@ class MessageRead(Event):
     EVENT_TYPE: ClassVar[str] = "message.read"
 
 
+@dataclass
+class UnreadUpdate(Event):
+    EVENT_TYPE: ClassVar[str] = "unread.update"
+
+
 # Presence
 @dataclass
 class PresenceOnline(Event):
