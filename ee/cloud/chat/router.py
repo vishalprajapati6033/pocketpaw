@@ -26,6 +26,7 @@ from ee.cloud.chat.schemas import (
     WsOutbound,
 )
 from ee.cloud.chat.service import GroupService, MessageService
+from ee.cloud.chat.unread_service import UnreadService
 from ee.cloud.chat.ws import manager
 from ee.cloud.license import get_license, require_license
 from ee.cloud.shared.deps import (
@@ -334,6 +335,21 @@ async def get_or_create_agent_dm(
     return await GroupService.get_or_create_agent_dm(workspace_id, user_id, agent_id)
 
 
+# ---------------------------------------------------------------------------
+# Unreads
+# ---------------------------------------------------------------------------
+
+
+@_licensed.get("/unreads")
+async def list_unreads(
+    workspace_id: str = Depends(current_workspace_id),
+    user_id: str = Depends(current_user_id),
+):
+    from ee.cloud.chat.unread_service import UnreadService
+
+    return await UnreadService.list_unreads(user_id, workspace_id)
+
+
 # Include licensed REST routes
 router.include_router(_licensed)
 
@@ -524,6 +540,8 @@ async def _ws_read_ack(user_id: str, msg: WsInbound) -> None:
     members = await GroupService.list_member_ids(msg.group_id)
     if user_id not in members:
         return
+
+    await UnreadService.mark_read(user_id, msg.group_id, msg.message_id)
 
     await manager.send_to_room(
         msg.group_id,
