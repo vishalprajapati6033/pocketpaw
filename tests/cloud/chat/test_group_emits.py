@@ -18,6 +18,7 @@ from ee.cloud.realtime.events import (
     GroupAgentRemoved,
     GroupAgentUpdated,
     GroupCreated,
+    GroupJoined,
     GroupMemberAdded,
     GroupMemberRemoved,
     GroupMemberRole,
@@ -186,6 +187,7 @@ async def test_join_group_emits_member_added_and_invalidates_cache():
 
     with (
         patch("ee.cloud.chat.group_service.emit", new=fake_emit),
+        patch("ee.cloud.chat.group_service._group_response", new=_fake_group_response),
         patch(
             "ee.cloud.chat.group_service._get_group_or_404",
             new=AsyncMock(return_value=group),
@@ -197,6 +199,12 @@ async def test_join_group_emits_member_added_and_invalidates_cache():
     events = [e for e in recorded if isinstance(e, GroupMemberAdded)]
     assert len(events) == 1
     assert events[0].data == {"group_id": "g1", "user_id": "u2", "role": "edit"}
+    # group.joined — audience scoped to the joining user so their sidebar
+    # hydrates the room without a manual refresh.
+    joined = [e for e in recorded if isinstance(e, GroupJoined)]
+    assert len(joined) == 1
+    assert joined[0].data["member_ids"] == ["u2"]
+    assert joined[0].data["_id"] == "g1"
     resolver_mock.invalidate_group.assert_called_once_with("g1")
 
 
@@ -266,6 +274,7 @@ async def test_add_members_emits_one_event_per_newly_added_user():
 
     with (
         patch("ee.cloud.chat.group_service.emit", new=fake_emit),
+        patch("ee.cloud.chat.group_service._group_response", new=_fake_group_response),
         patch(
             "ee.cloud.chat.group_service._get_group_or_404",
             new=AsyncMock(return_value=group),
@@ -281,6 +290,12 @@ async def test_add_members_emits_one_event_per_newly_added_user():
     for ev in events:
         assert ev.data["group_id"] == "g1"
         assert ev.data["role"] == "edit"
+    # One group.joined scoped to the newly-added user ids so their sidebars
+    # hydrate the room without refreshing.
+    joined = [e for e in recorded if isinstance(e, GroupJoined)]
+    assert len(joined) == 1
+    assert joined[0].data["member_ids"] == ["u2", "u3", "u4"]
+    assert joined[0].data["_id"] == "g1"
     resolver_mock.invalidate_group.assert_called_once_with("g1")
 
 
