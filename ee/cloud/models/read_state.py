@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from pydantic import Field
+from pymongo import ASCENDING, IndexModel
 
 from ee.cloud.models.base import TimestampedDocument
 
@@ -23,5 +24,5 @@ class ReadState(TimestampedDocument):
     class Settings:
         name = "read_states"
         indexes = [
-            [("user", 1), ("group", 1)],
+            IndexModel([("user", ASCENDING), ("group", ASCENDING)], unique=True),
         ]
