@@ -139,6 +139,17 @@ def mount_cloud(app: FastAPI) -> None:
 
     register_agent_bridge()
 
+    # Initialise the realtime EventBus eagerly.
+    #
+    # The host app (src/pocketpaw/dashboard.py) uses a FastAPI ``lifespan``
+    # context manager, which supersedes ``@app.on_event("startup")`` —
+    # startup handlers registered here never fire. ``init_realtime()`` only
+    # sets module-level singletons (bus + resolver) with no async work, so
+    # it's safe to call synchronously at mount time. Without this, the
+    # first service that calls ``emit(...)`` fails with "EventBus not
+    # initialized".
+    init_realtime()
+
     # Start/stop agent pool with app lifecycle.
     #
     # Chat persistence lives entirely in ``MongoMemoryStore.save`` — it
@@ -148,8 +159,6 @@ def mount_cloud(app: FastAPI) -> None:
     # removed because it dual-wrote every turn.
     @app.on_event("startup")
     async def _start_agent_pool():
-        init_realtime()
-
         from pocketpaw.agents.pool import get_agent_pool
 
         await get_agent_pool().start()
