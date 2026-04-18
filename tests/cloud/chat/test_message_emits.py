@@ -53,6 +53,7 @@ def _fake_message(
         content=content,
         mentions=[],
         reply_to=None,
+        thread_count=0,
         attachments=[],
         reactions=[],
         edited=False,
@@ -390,3 +391,38 @@ async def test_send_message_emits_unread_update_for_non_senders():
     for e in updates:
         assert e.data["group_id"] == "g1"
         assert e.data["delta"] == 1
+
+
+@pytest.mark.asyncio
+async def test_send_reply_bumps_thread_count_on_parent():
+    """A message with reply_to set increments the parent message's thread_count."""
+    from types import SimpleNamespace
+
+    from ee.cloud.chat.message_service import MessageService
+    from ee.cloud.chat.schemas import SendMessageRequest
+
+    recorded, fake_emit = _capture_emits()
+    group = _fake_group(owner="sender", members=["sender", "u2"])
+
+    parent = SimpleNamespace(id="parent1", thread_count=0, save=AsyncMock())
+    fake_msg_ns = SimpleNamespace(id="reply1", createdAt=None, insert=AsyncMock())
+
+    fake_message_class = MagicMock(return_value=fake_msg_ns)
+    fake_message_class.find_one = AsyncMock(return_value=parent)
+
+    with (
+        patch("ee.cloud.chat.message_service.emit", new=fake_emit),
+        patch("ee.cloud.chat.message_service._get_group_or_404", new=AsyncMock(return_value=group)),
+        patch("ee.cloud.chat.message_service._require_can_post", new=MagicMock()),
+        patch("ee.cloud.chat.message_service.Message", new=fake_message_class),
+        patch("ee.cloud.chat.message_service._message_response", new=MagicMock(return_value={"_id": "reply1"})),
+        patch("ee.cloud.chat.message_service.event_bus.emit", new=AsyncMock()),
+    ):
+        await MessageService.send_message(
+            "g1",
+            "sender",
+            SendMessageRequest(content="a reply", reply_to="507f1f77bcf86cd799439011"),
+        )
+
+    assert parent.thread_count == 1
+    parent.save.assert_awaited_once()

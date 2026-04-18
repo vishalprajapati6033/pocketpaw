@@ -58,6 +58,7 @@ def _message_response(msg: Message) -> dict:
         "content": msg.content,
         "mentions": [m.model_dump() for m in msg.mentions],
         "replyTo": msg.reply_to,
+        "threadCount": msg.thread_count,
         "attachments": [a.model_dump() for a in msg.attachments],
         "reactions": [r.model_dump() for r in msg.reactions],
         "edited": msg.edited,
@@ -120,6 +121,18 @@ class MessageService:
         group.last_message_at = msg.createdAt
         group.message_count += 1
         await group.save()
+
+        if body.reply_to:
+            try:
+                from beanie import PydanticObjectId
+                parent_id = PydanticObjectId(body.reply_to)
+                parent = await Message.find_one({"_id": parent_id, "context_type": "group"})
+                if parent is not None:
+                    parent.thread_count = (parent.thread_count or 0) + 1
+                    await parent.save()
+            except Exception:
+                # Bad reply_to — skip bump; main send already succeeded
+                pass
 
         response = _message_response(msg)
 
