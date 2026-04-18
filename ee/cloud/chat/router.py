@@ -124,11 +124,6 @@ async def add_members(
     user_id: str = Depends(current_user_id),
 ):
     added = await GroupService.add_members(group_id, user_id, body.user_ids, body.role)
-    await _broadcast_members_event(
-        group_id,
-        "members.added",
-        {"group_id": group_id, "user_ids": added, "role": body.role},
-    )
     return {"ok": True, "added": added}
 
 
@@ -143,11 +138,6 @@ async def remove_member(
     user_id: str = Depends(current_user_id),
 ):
     await GroupService.remove_member(group_id, user_id, target_user_id)
-    await _broadcast_members_event(
-        group_id,
-        "members.removed",
-        {"group_id": group_id, "user_id": target_user_id},
-    )
 
 
 @_licensed.patch(
@@ -161,11 +151,6 @@ async def update_member_role(
     user_id: str = Depends(current_user_id),
 ):
     new_role = await GroupService.set_member_role(group_id, user_id, target_user_id, body.role)
-    await _broadcast_members_event(
-        group_id,
-        "members.role_changed",
-        {"group_id": group_id, "user_id": target_user_id, "role": new_role},
-    )
     return {"ok": True, "role": new_role}
 
 
@@ -341,26 +326,6 @@ router.include_router(_licensed)
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-async def _broadcast_members_event(group_id: str, event_type: str, data: dict) -> None:
-    """Broadcast a member/role change to all current group members.
-
-    Loads the group freshly so the broadcast reflects post-mutation membership
-    (a removed user, for example, no longer receives the event).
-    """
-    from beanie import PydanticObjectId
-
-    from ee.cloud.models.group import Group
-
-    group = await Group.get(PydanticObjectId(group_id))
-    if not group:
-        return
-    await manager.broadcast_to_group(
-        group_id,
-        group.members,
-        WsOutbound(type=event_type, data=data),
-    )
 
 
 # ---------------------------------------------------------------------------
