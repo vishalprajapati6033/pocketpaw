@@ -36,6 +36,7 @@ from ee.cloud.realtime.events import (
 )
 from ee.cloud.shared.errors import Forbidden, NotFound
 from ee.cloud.shared.events import event_bus
+from ee.cloud.shared.time import iso_utc
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +60,9 @@ def _message_response(msg: Message) -> dict:
         "attachments": [a.model_dump() for a in msg.attachments],
         "reactions": [r.model_dump() for r in msg.reactions],
         "edited": msg.edited,
-        "editedAt": msg.edited_at.isoformat() if msg.edited_at else None,
+        "editedAt": iso_utc(msg.edited_at),
         "deleted": msg.deleted,
-        "createdAt": msg.createdAt.isoformat() if msg.createdAt else None,
+        "createdAt": iso_utc(msg.createdAt),
     }
 
 

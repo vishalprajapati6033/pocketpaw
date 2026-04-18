@@ -91,7 +91,81 @@ async def _get_ripple_widget_context(user_message: str) -> str:
     )
 
 
-_POCKET_SYSTEM_CONTEXT = """\
+_POCKET_INTERACTION_CONTEXT = """\
+<pocket-interaction-context>
+You are chatting with the user INSIDE an existing pocket. A pocket is a
+themed workspace (dashboard / research page / mission-control view) with
+widgets, charts, tables, and UISpec content. The specific pocket is
+identified by the <current-pocket> tag elsewhere in this prompt.
+
+Your job now is to help the user with this pocket. You are NOT creating a
+new pocket — the pocket already exists.
+
+# STEP 1 — Classify the user's intent
+
+READ intent — the user is asking about the pocket:
+  Signals: "what's in this", "show me", "summarize", "explain", "tell me
+  about", "what does X mean", "why does it say Y", "where is Z".
+
+WRITE intent — the user wants to modify the pocket:
+  Signals: "add", "remove", "delete", "update", "change", "rename",
+  "replace", "swap", "refresh the numbers", "make it X", "recreate".
+
+CHAT intent — general conversation unrelated to this pocket:
+  Signals: the message doesn't mention widgets, data, layout, the pocket
+  name, or anything visible on the canvas.
+
+# STEP 2 — Execute
+
+READ intent:
+  1. Call the `get_pocket` tool (namespaced `mcp__pocketpaw_pocket__get_pocket`)
+     with the pocket_id from <current-pocket>. This returns the full document
+     including rippleSpec (the UI tree), widgets, metadata.
+  2. Answer the user's question using the returned JSON. Be specific —
+     reference actual widget titles, metric values, chart data points, table
+     rows. Do NOT say the pocket is empty unless the tool actually returns
+     an empty ui/widgets list.
+  3. Do NOT invoke add_widget / remove_widget / create_pocket for READ.
+
+WRITE intent:
+  1. Call `get_pocket` first so you know the current structure and ids.
+  2. Then invoke the mutation via the Bash CLI bridge:
+     - ADD a widget:
+       echo '{"pocket_id":"<id>","widget":{...}}' \\
+         | python -m pocketpaw.tools.cli add_widget
+     - REMOVE a widget (use ids from the get_pocket response):
+       echo '{"pocket_id":"<id>","widget_id":"<wid>"}' \\
+         | python -m pocketpaw.tools.cli remove_widget
+     - RECREATE the whole pocket (only if the user explicitly asks to
+       rebuild/start over — otherwise prefer incremental add/remove):
+       echo '{"title":...,"ui":{...}}' \\
+         | python -m pocketpaw.tools.cli create_pocket
+  3. Always use SINGLE QUOTES around the JSON — bash eats "$" in double
+     quotes and mangles prices like $74.30 → 4.30.
+
+CHAT intent:
+  Answer directly. Do NOT call any pocket tool — it would waste a turn.
+
+# STEP 3 — Hard rules
+
+- NEVER call `create_pocket` to answer a READ question. The pocket already
+  exists; creating another one spawns a duplicate.
+- NEVER guess at pocket contents. If the question is about what's in the
+  pocket, call `get_pocket` first — period.
+- NEVER use curl/fetch/HTTP to hit /api/v1/pockets. Use the CLI bridge.
+- NEVER write files to disk or generate HTML.
+- When ADDING data to a widget (chart points, table rows, metric values),
+  every value must be real and concrete. No "N/A", "TBD", "...", null.
+  If you're estimating, prefix with "~" (e.g. "~$5B").
+
+Colors (for new widgets): #30D158 green, #FF453A red, #FF9F0A orange,
+#0A84FF blue, #BF5AF2 purple, #5E5CE6 indigo.
+</pocket-interaction-context>
+
+"""
+
+
+_POCKET_CREATION_CONTEXT = """\
 <pocket-creation-context>
 You are running inside PocketPaw OS, a desktop workspace app.
 The user wants a "pocket" — a themed workspace with data widgets.
@@ -245,18 +319,9 @@ For generic/non-brand pockets, omit the logo field.
 Colors: #30D158 (green), #FF453A (red), #FF9F0A (orange),
 #0A84FF (blue), #BF5AF2 (purple), #5E5CE6 (indigo).
 
-MODIFYING EXISTING POCKETS:
-When a <current-pocket> tag is present in the user message, you are editing that pocket.
-- To ADD a widget:
-  echo '{"pocket_id":"<id>","widget":{...}}' \
-  | python -m pocketpaw.tools.cli add_widget
-- To REMOVE a widget:
-  echo '{"pocket_id":"<id>","widget_id":"<wid>"}' \
-  | python -m pocketpaw.tools.cli remove_widget
-- To RECREATE the entire pocket: echo '{"title":...}' | python -m pocketpaw.tools.cli create_pocket
-  (use 'ui' for UISpec, 'widgets' for flat dashboard, 'panes'+'layout' for multi-pane)
-- The pocket id and widget ids are provided in the <current-pocket> tag.
-- Do NOT use HTTP/curl/fetch — only use the CLI bridge commands above.
+If a <current-pocket> tag is present, the user is already INSIDE an
+existing pocket — follow the <pocket-interaction-context> rules instead
+of creating a new one.
 </pocket-creation-context>
 
 """
@@ -614,19 +679,33 @@ async def pocket_chat_stream(body: ChatRequest):
     chat_id = _extract_chat_id(body.session_id)
     safe_key = _to_safe_key(chat_id)
 
-    # Fetch relevant Ripple widget docs in parallel (non-blocking, ~10ms)
-    widget_context = await _get_ripple_widget_context(body.content)
-
-    # Build metadata with pocket context — static rules + dynamic widget knowledge
-    pocket_ctx = _POCKET_SYSTEM_CONTEXT
-    if widget_context:
-        pocket_ctx += widget_context
+    # Pick the right instructions based on whether the user is creating a
+    # new pocket or interacting with an existing one. Sending creation docs
+    # while the user is asking questions inside a live pocket is what caused
+    # the agent to respond with "the pocket is empty" and to attempt to
+    # re-create pockets from scratch.
+    is_interaction = bool(body.pocket_context and body.pocket_context.id)
+    if is_interaction:
+        pocket_ctx = _POCKET_INTERACTION_CONTEXT
+    else:
+        # Fetch Ripple widget docs only for the creation flow — they're
+        # about picking widget types/props, which the agent only needs when
+        # building a new pocket.
+        widget_context = await _get_ripple_widget_context(body.content)
+        pocket_ctx = _POCKET_CREATION_CONTEXT
+        if widget_context:
+            pocket_ctx += widget_context
 
     meta: dict = {
         "source": "pocket_chat",
         "pocket_system_context": pocket_ctx,
     }
     if body.pocket_context:
+        # Only the small descriptor travels through metadata — the agent
+        # retrieves the full pocket document on demand via the in-process
+        # `get_pocket` MCP tool (see agents/sdk_mcp_pocket.py). This keeps
+        # the system prompt well below the Windows CLI arg limit regardless
+        # of how large rippleSpec.ui is.
         meta["pocket_context"] = body.pocket_context.model_dump(exclude_none=True)
 
     # Subscribe bridge BEFORE publishing the message — otherwise the agent

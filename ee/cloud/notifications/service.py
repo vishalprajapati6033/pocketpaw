@@ -7,10 +7,10 @@ from beanie import PydanticObjectId
 from ee.cloud.models.notification import Notification, NotificationSource
 from ee.cloud.realtime.emit import emit
 from ee.cloud.realtime.events import NotificationCleared, NotificationNew, NotificationRead
+from ee.cloud.shared.time import iso_utc
 
 
 def _to_wire(n: Notification) -> dict:
-    created = getattr(n, "createdAt", None)
     return {
         "id": str(n.id),
         "user_id": n.recipient,
@@ -20,7 +20,7 @@ def _to_wire(n: Notification) -> dict:
         "body": n.body,
         "source_id": n.source.id if n.source else None,
         "read": n.read,
-        "created_at": created.isoformat() if created else None,
+        "created_at": iso_utc(getattr(n, "createdAt", None)),
     }
 
 

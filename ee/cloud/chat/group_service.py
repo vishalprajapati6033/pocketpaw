@@ -32,6 +32,7 @@ from ee.cloud.realtime.events import (
     GroupUpdated,
 )
 from ee.cloud.shared.errors import Forbidden, NotFound, ValidationError
+from ee.cloud.shared.time import iso_utc
 from pocketpaw.ee.guards.actions import GroupRole
 from pocketpaw.ee.guards.audit import log_denial
 
@@ -117,9 +118,9 @@ async def _group_response(group: Group) -> dict:
         "agents": populated_agents,
         "pinnedMessages": group.pinned_messages,
         "archived": group.archived,
-        "lastMessageAt": group.last_message_at.isoformat() if group.last_message_at else None,
+        "lastMessageAt": iso_utc(group.last_message_at),
         "messageCount": group.message_count,
-        "createdAt": group.createdAt.isoformat() if group.createdAt else None,
+        "createdAt": iso_utc(group.createdAt),
     }
 
 

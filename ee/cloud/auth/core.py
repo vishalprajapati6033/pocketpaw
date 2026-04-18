@@ -270,34 +270,40 @@ async def ensure_default_agent_all_workspaces() -> int:
 
     ``seed_workspace`` only runs on fresh installs — workspaces that predate
     agent seeding never got one. Call this on every boot so the DM target
-    exists regardless of install age. Returns the count seeded this run.
+    exists regardless of install age. Returns the number of agents actually
+    created this run (existing rows are not counted), so a second boot
+    reports ``0`` instead of misleadingly echoing the workspace count.
     """
     seeded = 0
     async for ws in Workspace.find_all():
         try:
-            agent = await seed_default_agent(str(ws.id), str(ws.owner))
-            if agent is not None:
+            _, created = await seed_default_agent(str(ws.id), str(ws.owner))
+            if created:
                 seeded += 1
         except Exception as exc:
             logger.warning("Failed to back-fill pocketpaw agent for ws=%s: %s", ws.id, exc)
     return seeded
 
 
-async def seed_default_agent(workspace_id: str, owner_id: str) -> Agent | None:  # noqa: F821
+async def seed_default_agent(
+    workspace_id: str, owner_id: str
+) -> tuple[Agent, bool] | tuple[None, bool]:  # noqa: F821
     """Create the default "pocketpaw" Agent for a workspace if missing.
 
     The frontend uses this agent's id as the DM room identifier (replacing
     the legacy ``__paw-runtime-dm__`` sentinel), and Session docs for DMs
     carry ``agent=<this agent's id>`` so per-agent history works.
 
-    Idempotent: returns the existing agent if one with slug="pocketpaw"
-    already exists in the workspace.
+    Idempotent. Returns ``(agent, created)`` — ``created`` is ``True`` only
+    when this call inserted a new row, so back-fill paths can report
+    accurate counts. Returns ``(None, False)`` if an exception would have
+    been raised on insert (callers wrap in try/except).
     """
     from ee.cloud.models.agent import Agent, AgentConfig
 
     existing = await Agent.find_one(Agent.workspace == workspace_id, Agent.slug == "pocketpaw")
     if existing is not None:
-        return existing
+        return existing, False
 
     agent = Agent(
         workspace=workspace_id,
@@ -320,4 +326,4 @@ async def seed_default_agent(workspace_id: str, owner_id: str) -> Agent | None: 
         workspace_id,
         agent.id,
     )
-    return agent
+    return agent, True

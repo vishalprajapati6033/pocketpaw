@@ -1,9 +1,9 @@
-"""MongoMemoryStore de-duplication against the chat_persistence write path.
+"""MongoMemoryStore de-duplication on identical back-to-back writes.
 
-The chat endpoint persists the user message the moment it arrives (with
-attachments). The agent loop subsequently calls ``memory.add_to_session``
-with the same content to seed context for the model. Without dedup both
-rows end up in Mongo and the UI renders the user's send twice on reload.
+Guards against agent-loop retries of the same turn landing two rows — the
+dedup window (5s) is short enough that legitimate back-to-back "ok"
+messages still persist separately, but long enough to absorb a
+synchronous in-request duplicate.
 """
 
 from __future__ import annotations

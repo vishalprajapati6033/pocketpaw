@@ -139,20 +139,26 @@ def mount_cloud(app: FastAPI) -> None:
 
     register_agent_bridge()
 
+    # Initialise the realtime EventBus eagerly.
+    #
+    # The host app (src/pocketpaw/dashboard.py) uses a FastAPI ``lifespan``
+    # context manager, which supersedes ``@app.on_event("startup")`` —
+    # startup handlers registered here never fire. ``init_realtime()`` only
+    # sets module-level singletons (bus + resolver) with no async work, so
+    # it's safe to call synchronously at mount time. Without this, the
+    # first service that calls ``emit(...)`` fails with "EventBus not
+    # initialized".
+    init_realtime()
+
     # Start/stop agent pool with app lifecycle.
     #
-    # Previously also called ``register_chat_persistence()`` to subscribe to
-    # outbound messages on Channel.WEBSOCKET and persist them to Mongo.
-    # That bridge dual-wrote every user + agent message — MongoMemoryStore
-    # already persists SESSION entries through the agent loop, so keeping
-    # the subscription turned every single chat turn into two rows (one
-    # with attachments, one without). The canonical write path is now
-    # ``MongoMemoryStore.save`` which receives attachments through
-    # InboundMessage.metadata.
+    # Chat persistence lives entirely in ``MongoMemoryStore.save`` — it
+    # writes the message row, auto-creates/touches the linked Session, and
+    # receives attachments via ``InboundMessage.metadata["attachments"]``.
+    # The old ``ee.cloud.shared.chat_persistence`` bus subscriber was
+    # removed because it dual-wrote every turn.
     @app.on_event("startup")
     async def _start_agent_pool():
-        init_realtime()
-
         from pocketpaw.agents.pool import get_agent_pool
 
         await get_agent_pool().start()

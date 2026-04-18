@@ -23,6 +23,7 @@ from ee.cloud.pockets.schemas import (
 from ee.cloud.ripple_normalizer import normalize_ripple_spec
 from ee.cloud.shared.errors import Forbidden, NotFound
 from ee.cloud.shared.events import event_bus
+from ee.cloud.shared.time import iso_utc
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +47,8 @@ def _pocket_response(pocket: Pocket) -> dict:
         "shareLinkToken": pocket.share_link_token,
         "shareLinkAccess": pocket.share_link_access,
         "sharedWith": pocket.shared_with,
-        "createdAt": pocket.createdAt.isoformat() if pocket.createdAt else None,
-        "updatedAt": pocket.updatedAt.isoformat() if pocket.updatedAt else None,
+        "createdAt": iso_utc(pocket.createdAt),
+        "updatedAt": iso_utc(pocket.updatedAt),
     }
 
 

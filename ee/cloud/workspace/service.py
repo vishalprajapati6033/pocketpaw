@@ -26,6 +26,7 @@ from ee.cloud.realtime.events import (
 )
 from ee.cloud.shared.errors import ConflictError, Forbidden, NotFound, SeatLimitError
 from ee.cloud.shared.events import event_bus
+from ee.cloud.shared.time import iso_utc
 from ee.cloud.workspace.schemas import (
     CreateInviteRequest,
     CreateWorkspaceRequest,
@@ -42,7 +43,7 @@ def _workspace_response(ws: Workspace, member_count: int = 0) -> dict:
         "owner": ws.owner,
         "plan": ws.plan,
         "seats": ws.seats,
-        "createdAt": ws.createdAt.isoformat() if ws.createdAt else None,
+        "createdAt": iso_utc(ws.createdAt),
         "memberCount": member_count,
     }
 
@@ -58,7 +59,7 @@ def _invite_response(invite: Invite) -> dict:
         "accepted": invite.accepted,
         "revoked": invite.revoked,
         "expired": invite.expired,
-        "expiresAt": invite.expires_at.isoformat() if invite.expires_at else None,
+        "expiresAt": iso_utc(invite.expires_at),
     }
 
 
@@ -202,7 +203,7 @@ class WorkspaceService:
                     "name": member.full_name,
                     "avatar": member.avatar,
                     "role": m.role,
-                    "joinedAt": m.joined_at.isoformat() if m.joined_at else None,
+                    "joinedAt": iso_utc(m.joined_at),
                 }
             )
         return result

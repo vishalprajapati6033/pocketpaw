@@ -46,8 +46,8 @@ def register_default_backend() -> None:
     # constructed at module-import time and called `get_memory_manager()`
     # before init_cloud_db ran), we must **swap ._store in place** instead
     # of replacing `_mm._manager`. Any cached `manager` reference held by
-    # `agent_loop.memory`, `chat_persistence`, etc. keeps working and
-    # automatically picks up MongoDB. If we rebind `_mm._manager` to a fresh
+    # `agent_loop.memory` keeps working and automatically picks up MongoDB.
+    # If we rebind `_mm._manager` to a fresh
     # instance, those cached references stay bound to the old FileMemoryStore
     # and silently write to disk instead of Mongo.
     try:
