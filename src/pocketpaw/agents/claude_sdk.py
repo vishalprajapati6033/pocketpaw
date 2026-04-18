@@ -488,6 +488,21 @@ class ClaudeSDKBackend:
                 continue
 
             servers[cfg.name] = entry
+
+        # In-process MCP server: exposes `get_pocket` so the agent can fetch
+        # the full pocket document on demand (rippleSpec.ui tree can be tens
+        # of KB, which would blow the Windows CLI limit if embedded in the
+        # system prompt).
+        try:
+            from pocketpaw.agents.sdk_mcp_pocket import build_pocket_context_server
+
+            pocket_server = build_pocket_context_server()
+            if pocket_server is not None:
+                name, cfg_entry = pocket_server
+                servers[name] = cfg_entry
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("pocket_context MCP server not registered: %s", exc)
+
         return servers
 
     async def _get_or_create_client(self, options: Any, *, session_key: str | None = None) -> Any:
@@ -773,6 +788,13 @@ class ClaudeSDKBackend:
             if len(allowed_tools) < len(all_sdk_tools):
                 blocked = set(all_sdk_tools) - set(allowed_tools)
                 logger.info("Tool policy blocked SDK tools: %s", blocked)
+
+            # In-process pocket-context tool — always allowed. The tool itself
+            # is a no-op for chats without a pocket_id, so it costs nothing to
+            # leave enabled for non-pocket sessions.
+            from pocketpaw.agents.sdk_mcp_pocket import GET_POCKET_TOOL_ID
+
+            allowed_tools.append(GET_POCKET_TOOL_ID)
 
             # Build hooks for security
             hooks = {

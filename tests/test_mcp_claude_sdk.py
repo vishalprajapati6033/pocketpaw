@@ -6,8 +6,16 @@ All SDK imports are mocked.
 from unittest.mock import patch
 
 from pocketpaw.agents.claude_sdk import ClaudeAgentSDK
+from pocketpaw.agents.sdk_mcp_pocket import SERVER_NAME as _POCKET_MCP_SERVER_NAME
 from pocketpaw.config import Settings
 from pocketpaw.mcp.config import MCPServerConfig
+
+
+def _strip_builtin_servers(result: dict) -> dict:
+    """Drop always-on in-process MCP servers so external-config assertions stay focused."""
+    out = dict(result)
+    out.pop(_POCKET_MCP_SERVER_NAME, None)
+    return out
 
 
 class TestClaudeSDKMCPServers:
@@ -29,7 +37,7 @@ class TestClaudeSDKMCPServers:
         sdk = self._make_sdk()
         with patch("pocketpaw.mcp.config.load_mcp_config", return_value=[]):
             result = sdk._get_mcp_servers()
-        assert result == {}
+        assert _strip_builtin_servers(result) == {}
 
     def test_enabled_stdio_server_passes(self):
         sdk = self._make_sdk()
@@ -38,11 +46,12 @@ class TestClaudeSDKMCPServers:
         ]
         with patch("pocketpaw.mcp.config.load_mcp_config", return_value=cfgs):
             result = sdk._get_mcp_servers()
-        assert len(result) == 1
-        assert "fs" in result
-        assert result["fs"]["type"] == "stdio"
-        assert result["fs"]["command"] == "npx"
-        assert result["fs"]["args"] == ["server"]
+        external = _strip_builtin_servers(result)
+        assert len(external) == 1
+        assert "fs" in external
+        assert external["fs"]["type"] == "stdio"
+        assert external["fs"]["command"] == "npx"
+        assert external["fs"]["args"] == ["server"]
 
     def test_disabled_server_filtered_out(self):
         sdk = self._make_sdk()
@@ -51,7 +60,7 @@ class TestClaudeSDKMCPServers:
         ]
         with patch("pocketpaw.mcp.config.load_mcp_config", return_value=cfgs):
             result = sdk._get_mcp_servers()
-        assert result == {}
+        assert _strip_builtin_servers(result) == {}
 
     def test_http_server_passes(self):
         """HTTP servers are supported by Claude SDK."""
@@ -73,7 +82,7 @@ class TestClaudeSDKMCPServers:
         ]
         with patch("pocketpaw.mcp.config.load_mcp_config", return_value=cfgs):
             result = sdk._get_mcp_servers()
-        assert result == {}
+        assert _strip_builtin_servers(result) == {}
 
     def test_sse_server_passes(self):
         """SSE servers are supported by Claude SDK."""
@@ -93,7 +102,7 @@ class TestClaudeSDKMCPServers:
         ]
         with patch("pocketpaw.mcp.config.load_mcp_config", return_value=cfgs):
             result = sdk._get_mcp_servers()
-        assert result == {}
+        assert _strip_builtin_servers(result) == {}
 
     def test_policy_denies_group_mcp(self):
         sdk = self._make_sdk(tools_deny=["group:mcp"])
@@ -102,7 +111,7 @@ class TestClaudeSDKMCPServers:
         ]
         with patch("pocketpaw.mcp.config.load_mcp_config", return_value=cfgs):
             result = sdk._get_mcp_servers()
-        assert result == {}
+        assert _strip_builtin_servers(result) == {}
 
     def test_env_passed_through(self):
         sdk = self._make_sdk()
@@ -128,9 +137,10 @@ class TestClaudeSDKMCPServers:
         ]
         with patch("pocketpaw.mcp.config.load_mcp_config", return_value=cfgs):
             result = sdk._get_mcp_servers()
-        assert len(result) == 2
-        assert "fs" in result
-        assert "web" in result
+        external = _strip_builtin_servers(result)
+        assert len(external) == 2
+        assert "fs" in external
+        assert "web" in external
 
     def test_mcp_import_error_returns_empty(self):
         """If mcp module is not installed, return empty dict."""
