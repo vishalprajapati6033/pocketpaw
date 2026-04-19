@@ -80,3 +80,29 @@ async def test_list_unreads_fresh_user_has_full_count():
         result = await UnreadService.list_unreads("u1", "w1")
 
     assert result == [{"group_id": "g1", "unread": 10, "mention_unread": 0}]
+
+
+@pytest.mark.asyncio
+async def test_list_unreads_empty_last_read_falls_through_to_message_count():
+    """If a ReadState row exists but last_read_message_id is '' (created by
+    bump_mention before any ack), fall through to message_count — never pass
+    an empty string to _count_messages_after which would silently return 0
+    and under-report unreads to 0 while mention_unread is non-zero."""
+    from ee.cloud.chat.unread_service import UnreadService
+
+    group = SimpleNamespace(id="g1", workspace="w1", message_count=10)
+    state = SimpleNamespace(user="u1", group="g1", last_read_message_id="", mention_unread=3)
+
+    with (
+        patch(
+            "ee.cloud.chat.unread_service._list_member_groups",
+            new=AsyncMock(return_value=[group]),
+        ),
+        patch(
+            "ee.cloud.chat.unread_service._get_read_state",
+            new=AsyncMock(return_value=state),
+        ),
+    ):
+        result = await UnreadService.list_unreads("u1", "w1")
+
+    assert result == [{"group_id": "g1", "unread": 10, "mention_unread": 3}]

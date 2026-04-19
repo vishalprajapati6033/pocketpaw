@@ -51,14 +51,21 @@ class UnreadService:
     @staticmethod
     async def list_unreads(user_id: str, workspace_id: str) -> list[dict]:
         """For each group the user is a member of, return
-        ``{group_id, unread, mention_unread}``."""
+        ``{group_id, unread, mention_unread}``.
+
+        A user with no ReadState row (never acked a read) OR a row whose
+        ``last_read_message_id`` is the empty string (row was created by
+        a ``bump_mention`` before any ack) both fall through to the
+        group's ``message_count`` — treating everything as unread is the
+        safe default; a subsequent ``mark_read`` corrects it.
+        """
         groups = await _list_member_groups(user_id, workspace_id)
         out: list[dict] = []
         for group in groups:
             state = await _get_read_state(user_id, str(group.id))
-            if state is None:
+            if state is None or not state.last_read_message_id:
                 unread = group.message_count
-                mention_unread = 0
+                mention_unread = state.mention_unread if state else 0
             else:
                 unread = await _count_messages_after(str(group.id), state.last_read_message_id)
                 mention_unread = state.mention_unread
@@ -69,34 +76,47 @@ class UnreadService:
 
     @staticmethod
     async def mark_read(user_id: str, group_id: str, last_message_id: str) -> None:
-        """Upsert read state for (user, group). Resets mention_unread to 0."""
-        state = await ReadState.find_one({"user": user_id, "group": group_id})
+        """Upsert read state for (user, group). Resets mention_unread to 0.
+
+        Uses an atomic ``find_one_and_update`` with ``upsert=True`` so that
+        two concurrent callers racing on the same (user, group) pair can
+        never both decide to insert — MongoDB serializes the upsert.
+        """
         now = datetime.now(timezone.utc)
-        if state is None:
-            await ReadState(
-                user=user_id,
-                group=group_id,
-                last_read_message_id=last_message_id,
-                mention_unread=0,
-            ).insert()
-            return
-        state.last_read_message_id = last_message_id
-        state.mention_unread = 0
-        state.last_read_at = now
-        await state.save()
+        await ReadState.get_pymongo_collection().find_one_and_update(
+            {"user": user_id, "group": group_id},
+            {
+                "$set": {
+                    "last_read_message_id": last_message_id,
+                    "mention_unread": 0,
+                    "last_read_at": now,
+                },
+                "$setOnInsert": {"user": user_id, "group": group_id},
+            },
+            upsert=True,
+        )
 
     @staticmethod
     async def bump_mention(user_id: str, group_id: str) -> None:
         """Increment mention_unread for (user, group). Creates the row if
-        missing with an empty last_read_message_id."""
-        state = await ReadState.find_one({"user": user_id, "group": group_id})
-        if state is None:
-            await ReadState(
-                user=user_id,
-                group=group_id,
-                last_read_message_id="",
-                mention_unread=1,
-            ).insert()
-            return
-        state.mention_unread += 1
-        await state.save()
+        missing with an empty ``last_read_message_id``.
+
+        Uses an atomic ``$inc`` with ``upsert=True`` so concurrent broadcast
+        mentions from two workers for the same recipient cannot produce a
+        DuplicateKeyError (the unique index on ``(user, group)`` would
+        otherwise reject the second insert).
+        """
+        now = datetime.now(timezone.utc)
+        await ReadState.get_pymongo_collection().find_one_and_update(
+            {"user": user_id, "group": group_id},
+            {
+                "$inc": {"mention_unread": 1},
+                "$setOnInsert": {
+                    "user": user_id,
+                    "group": group_id,
+                    "last_read_message_id": "",
+                    "last_read_at": now,
+                },
+            },
+            upsert=True,
+        )
