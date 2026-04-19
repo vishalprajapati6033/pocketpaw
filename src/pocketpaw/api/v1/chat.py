@@ -184,9 +184,11 @@ class _APISessionBridge:
             bus.unsubscribe_system(self._system_cb)
 
 
-async def _send_message(chat_request: ChatRequest) -> str:
-    """Publish an inbound message to the bus and return the chat_id."""
-    from pocketpaw.bus import get_message_bus
+async def _build_inbound_message(chat_request: ChatRequest):
+    """Build an InboundMessage for ``chat_request`` — shared by the bus
+    dispatch path (default loop) and the direct-call path (per-agent loop).
+    Returns ``(chat_id, InboundMessage)``.
+    """
     from pocketpaw.bus.events import Channel, InboundMessage
     from pocketpaw.uploads.resolver import resolve_media_with_records
 
@@ -195,6 +197,8 @@ async def _send_message(chat_request: ChatRequest) -> str:
     meta: dict = {"source": "rest_api"}
     if chat_request.file_context:
         meta["file_context"] = chat_request.file_context.model_dump(exclude_none=True)
+    if chat_request.agent_id:
+        meta["agent_id"] = chat_request.agent_id
 
     # Resolve ``/api/v1/uploads/{id}`` URLs to (path, FileRecord) pairs so the
     # agent prompt can carry filename / mime / size, not just a bare disk path.
@@ -254,9 +258,36 @@ async def _send_message(chat_request: ChatRequest) -> str:
         media=media,
         metadata=meta,
     )
+    return chat_id, msg
+
+
+async def _send_message(chat_request: ChatRequest) -> str:
+    """Dispatch the message to the default loop (via bus) or to a per-agent
+    loop directly when ``chat_request.agent_id`` is set.
+
+    Per-agent loops bypass the bus consumer to avoid racing with the
+    default loop for InboundMessages. Outbound events still flow through
+    the bus so the SSE bridge sees them unchanged.
+    """
+    from pocketpaw.bus import get_message_bus
+
+    chat_id, msg = await _build_inbound_message(chat_request)
+
+    if chat_request.agent_id:
+        try:
+            from pocketpaw.dashboard_state import get_agent_loop_for
+
+            loop = await get_agent_loop_for(chat_request.agent_id)
+            await loop.process_message(msg)
+            return chat_id
+        except Exception:
+            logger.exception(
+                "per-agent dispatch failed for agent %s; falling back to bus",
+                chat_request.agent_id,
+            )
+
     bus = get_message_bus()
     await bus.publish_inbound(msg)
-
     return chat_id
 
 
@@ -273,6 +304,7 @@ async def chat_send(body: ChatRequest):
             session_id=chat_id,
             media=body.media,
             file_context=body.file_context,
+            agent_id=body.agent_id,
         )
     )
 
@@ -322,10 +354,15 @@ async def chat_stream(body: ChatRequest):
         # stream — otherwise we'd kill a task that's just finishing up
         # memory storage for the previous (completed) message.
         try:
-            from pocketpaw.dashboard_state import agent_loop
+            from pocketpaw.dashboard_state import agent_loop, iter_per_agent_loops
 
             session_key = f"websocket:{chat_id}"
+            # Try the default loop first, then every per-agent loop — only
+            # one of them owns the task. ``cancel_task`` is a no-op when
+            # the key is unknown, so this is safe.
             agent_loop.cancel_task(session_key)
+            for loop in iter_per_agent_loops():
+                loop.cancel_task(session_key)
         except Exception:
             logger.debug("Could not cancel stale agent task", exc_info=True)
 
@@ -353,6 +390,7 @@ async def chat_stream(body: ChatRequest):
             session_id=chat_id,
             media=body.media,
             file_context=body.file_context,
+            agent_id=body.agent_id,
         )
     )
 
@@ -403,13 +441,16 @@ async def chat_stop(session_id: str = ""):
 
     # Also cancel the agent loop's processing task
     try:
-        from pocketpaw.dashboard_state import agent_loop
+        from pocketpaw.dashboard_state import agent_loop, iter_per_agent_loops
 
         # Derive chat_id from whatever format was given
         raw = session_id
         if raw.startswith(_WS_PREFIX):
             raw = raw[len(_WS_PREFIX) :]
-        agent_loop.cancel_task(f"websocket:{raw}")
+        session_key = f"websocket:{raw}"
+        agent_loop.cancel_task(session_key)
+        for loop in iter_per_agent_loops():
+            loop.cancel_task(session_key)
     except Exception:
         pass
 
