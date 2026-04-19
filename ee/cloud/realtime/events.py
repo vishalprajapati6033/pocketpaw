@@ -80,6 +80,18 @@ class GroupMemberAdded(Event):
 
 
 @dataclass
+class GroupJoined(Event):
+    """Full group payload delivered only to a newly-added user.
+
+    Lets the recipient's sidebar insert the room without a manual refresh.
+    Existing members don't need this (they already have the room); they
+    receive ``GroupMemberAdded`` instead.
+    """
+
+    EVENT_TYPE: ClassVar[str] = "group.joined"
+
+
+@dataclass
 class GroupMemberRemoved(Event):
     EVENT_TYPE: ClassVar[str] = "group.member_removed"
 

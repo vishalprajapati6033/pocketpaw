@@ -4,9 +4,11 @@ SESSION entries are stored as pocket-context rows in the `messages` collection,
 keyed by ``session_key`` (mirrors the protocol's own key). LONG_TERM and DAILY
 entries live in ``memory_facts``.
 
-Session metadata (title, lastActivity, messageCount) remains the responsibility
-of the API layer (`SessionService`). This store only writes message rows —
-the `sessions` collection stays user-facing / UI-owned.
+Session metadata (title stays user-facing / UI-owned) but per-turn upkeep —
+``lastActivity`` touch and ``messageCount`` increment — is done here because
+this adapter is the sole write path for chat turns. It also auto-creates a
+``Session`` doc for a new ``session_key`` so the "start chatting → session
+appears in the sidebar" UX works without a prior ``POST /sessions``.
 
 Tenant scope
 ------------
@@ -161,7 +163,7 @@ class MongoMemoryStore:
                     except Exception:
                         logger.warning("skipping malformed attachment on pocket message: %r", a)
 
-            workspace_id = await _resolve_session_workspace(normalized_key, entry)
+            session, workspace_id = await _resolve_or_create_session(normalized_key, entry)
             msg = Message(
                 context_type="pocket",
                 session_key=normalized_key,
@@ -172,6 +174,10 @@ class MongoMemoryStore:
                 attachments=attachment_docs,
             )
             await msg.insert()
+
+            if session is not None:
+                await _touch_session(session)
+
             return str(msg.id)
 
         # LONG_TERM / DAILY → memory_facts
@@ -433,21 +439,93 @@ async def _find_recent_twin(
         return None
 
 
-async def _resolve_session_workspace(session_key: str, entry: MemoryEntry) -> str | None:
-    """Best-effort lookup of the workspace for a SESSION row at write time.
+async def _resolve_or_create_session(
+    session_key: str, entry: MemoryEntry
+) -> tuple[Session | None, str | None]:
+    """Return (session, workspace_id) for a SESSION row at write time.
 
-    Order of preference:
-    1. ``entry.metadata["workspace_id"]`` if the caller already knows it
-       (e.g. an HTTP handler with the active workspace in scope).
-    2. The linked ``Session.workspace`` resolved by ``sessionId == session_key``.
+    Lookup order:
+    1. Existing ``Session`` row where ``sessionId == session_key`` — the
+       common case (client POSTed ``/sessions`` first or the session was
+       auto-created on a previous turn).
+    2. Auto-create a pocket ``Session`` so the "start chatting → session
+       appears in the sidebar" UX works when the client skipped the
+       explicit create. Owner is picked the same way the old
+       ``chat_persistence`` bridge did: first user with a workspace.
 
-    Returns ``None`` when neither is available — the row stays untagged but
-    still persists so OSS / single-tenant callers aren't blocked. Tenant-
-    scoped reads (``get_session_in_workspace``) won't return untagged rows,
-    which is the correct safe default.
+    The workspace_id prefers ``entry.metadata["workspace_id"]`` when the
+    caller already knows it (e.g. an HTTP handler with active workspace in
+    scope), falling back to ``Session.workspace``.
+
+    Returns ``(None, workspace_id_or_None)`` only when no session could be
+    resolved or created (no users/workspaces exist yet). The message row
+    still persists — it's just not counted against a session. Tenant-scoped
+    reads exclude untagged rows, which is the correct safe default.
     """
     md_ws = (entry.metadata or {}).get("workspace_id")
-    if isinstance(md_ws, str) and md_ws:
-        return md_ws
+    md_ws = md_ws if isinstance(md_ws, str) and md_ws else None
+
     session = await Session.find_one(Session.sessionId == session_key)
-    return session.workspace if session else None
+    if session is not None:
+        return session, md_ws or session.workspace
+
+    session = await _auto_create_pocket_session(session_key, workspace_id=md_ws)
+    if session is None:
+        return None, md_ws
+
+    return session, session.workspace
+
+
+async def _auto_create_pocket_session(
+    session_key: str, *, workspace_id: str | None = None
+) -> Session | None:
+    """Create a pocket ``Session`` doc for ``session_key`` when none exists.
+
+    Picks the first user in the target workspace (or any workspace user if
+    ``workspace_id`` is not provided) so the session has an owner. Returns
+    ``None`` when no suitable user exists — caller keeps writing the
+    message row without Session linkage.
+    """
+    from ee.cloud.models.user import User
+
+    query: dict
+    if workspace_id:
+        query = {"workspaces.workspace": workspace_id}
+    else:
+        query = {"workspaces": {"$ne": []}}
+    users = await User.find(query).limit(1).to_list()
+    if not users:
+        logger.warning("auto_create_pocket_session: no user with a workspace")
+        return None
+
+    user = users[0]
+    if workspace_id is None:
+        workspace_id = user.workspaces[0].workspace if user.workspaces else None
+    if not workspace_id:
+        return None
+
+    session = Session(
+        sessionId=session_key,
+        context_type="pocket",
+        workspace=workspace_id,
+        owner=str(user.id),
+        title="Chat",
+    )
+    await session.insert()
+    logger.info("auto-created pocket session: sessionId=%s owner=%s", session_key, user.id)
+    return session
+
+
+async def _touch_session(session: Session) -> None:
+    """Increment ``messageCount`` and refresh ``lastActivity`` on a Session.
+
+    Runs after every persisted pocket SESSION entry so the sidebar reflects
+    recency and totals without a separate API-layer hook. Failures log but
+    don't raise — the message row is already committed.
+    """
+    try:
+        session.lastActivity = datetime.now(UTC)
+        session.messageCount = (session.messageCount or 0) + 1
+        await session.save()
+    except Exception:
+        logger.warning("failed to touch Session %s", session.sessionId, exc_info=True)

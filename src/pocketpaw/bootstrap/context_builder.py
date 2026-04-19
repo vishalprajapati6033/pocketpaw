@@ -204,16 +204,35 @@ class AgentContextBuilder:
         if metadata and metadata.get("pocket_system_context"):
             blocks.append(("pocket_context", _Priority.HIGH, metadata["pocket_system_context"]))
 
-        # 4d. Inject current pocket info so the AI knows what pocket is open
+        # 4d. Inject current pocket info so the AI knows what pocket is open.
+        # The full pocket document is NOT embedded here — that would blow the
+        # Windows CLI arg limit for large rippleSpec.ui trees. The agent
+        # retrieves it on demand via the `mcp__pocketpaw_pocket__get_pocket`
+        # tool (in-process MCP server; see agents/sdk_mcp_pocket.py).
         if metadata and metadata.get("pocket_context"):
             import json
 
             pc = metadata["pocket_context"]
+            pocket_id = pc.get("id", "unknown")
+            widget_summary = pc.get("widgets", [])
             pocket_tag = (
                 f"\n<current-pocket>\n"
-                f"id: {pc.get('id', 'unknown')}\n"
+                f"id: {pocket_id}\n"
                 f"name: {pc.get('name', 'Untitled')}\n"
-                f"widgets: {json.dumps(pc.get('widgets', []))}\n"
+                f"widgets_summary: {json.dumps(widget_summary)}\n"
+                f"\n"
+                f"NOTE: `widgets_summary` is a shallow hint (names + types)\n"
+                f"and is OFTEN EMPTY for UISpec-tree pockets — absence here\n"
+                f"does NOT mean the pocket is empty. The real content lives\n"
+                f"in rippleSpec.ui.\n"
+                f"\n"
+                f"BEFORE answering any question about this pocket's contents,\n"
+                f"widgets, layout, data, or configuration, you MUST first call:\n"
+                f"  tool: mcp__pocketpaw_pocket__get_pocket\n"
+                f"  args: {{\"pocket_id\": \"{pocket_id}\"}}\n"
+                f"That returns the full document (rippleSpec, widgets,\n"
+                f"metadata, visibility). Base your answer on that, not on\n"
+                f"the summary above.\n"
                 f"</current-pocket>\n"
             )
             blocks.append(("current_pocket", _Priority.HIGH, pocket_tag))

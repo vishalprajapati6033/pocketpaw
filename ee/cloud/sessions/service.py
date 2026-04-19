@@ -17,6 +17,7 @@ from ee.cloud.sessions.schemas import (
 )
 from ee.cloud.shared.errors import Forbidden, NotFound
 from ee.cloud.shared.events import event_bus
+from ee.cloud.shared.time import iso_utc
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +34,9 @@ def _session_response(session: Session) -> dict:
         "group": session.group,
         "agent": session.agent,
         "messageCount": session.messageCount,
-        "lastActivity": session.lastActivity.isoformat() if session.lastActivity else None,
-        "createdAt": session.createdAt.isoformat() if session.createdAt else None,
-        "deletedAt": session.deleted_at.isoformat() if session.deleted_at else None,
+        "lastActivity": iso_utc(session.lastActivity),
+        "createdAt": iso_utc(session.createdAt),
+        "deletedAt": iso_utc(session.deleted_at),
     }
 
 
@@ -258,7 +259,7 @@ class SessionService:
                         "content": m.content,
                         "sender": m.sender,
                         "senderType": m.sender_type,
-                        "createdAt": m.createdAt.isoformat() if m.createdAt else None,
+                        "createdAt": iso_utc(m.createdAt),
                         "attachments": [a.model_dump() for a in (m.attachments or [])],
                     }
                     for m in messages
@@ -280,7 +281,7 @@ class SessionService:
                     "content": m.content,
                     "sender": m.sender,
                     "senderType": m.sender_type,
-                    "createdAt": m.createdAt.isoformat() if m.createdAt else None,
+                    "createdAt": iso_utc(m.createdAt),
                     "attachments": [a.model_dump() for a in (m.attachments or [])],
                 }
                 for m in messages
@@ -309,9 +310,7 @@ class SessionService:
                 data={
                     "session_id": str(session.id),
                     "user_id": session.owner,
-                    "last_message_at": session.lastActivity.isoformat()
-                    if session.lastActivity
-                    else None,
+                    "last_message_at": iso_utc(session.lastActivity),
                 }
             )
         )

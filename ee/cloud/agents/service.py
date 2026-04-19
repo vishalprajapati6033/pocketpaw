@@ -11,6 +11,7 @@ from ee.cloud.agents.schemas import (
 )
 from ee.cloud.models.agent import Agent, AgentConfig
 from ee.cloud.shared.errors import ConflictError, Forbidden, NotFound
+from ee.cloud.shared.time import iso_utc
 
 
 def _agent_response(agent: Agent) -> dict:
@@ -24,8 +25,8 @@ def _agent_response(agent: Agent) -> dict:
         "visibility": agent.visibility,
         "config": agent.config.model_dump(),
         "owner": agent.owner,
-        "createdOn": agent.createdAt.isoformat() if agent.createdAt else None,
-        "lastUpdatedOn": agent.updatedAt.isoformat() if agent.updatedAt else None,
+        "createdOn": iso_utc(agent.createdAt),
+        "lastUpdatedOn": iso_utc(agent.updatedAt),
     }
 
 

@@ -91,6 +91,11 @@ class AudienceResolver:
         if t == "group.member_removed":
             members = await self._group(d["group_id"])
             return list({*members, d["user_id"]})
+        if t == "group.joined":
+            # Scoped hydration event: audience is exactly the new user(s)
+            # carried in ``member_ids``. Existing members already have the
+            # room and receive ``group.member_added`` instead.
+            return list(d.get("member_ids", []))
         if t == "group.unread_delta":
             return [d["user_id"]]
 

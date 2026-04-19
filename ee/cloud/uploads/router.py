@@ -20,6 +20,7 @@ from fastapi.responses import StreamingResponse
 
 from ee.cloud.license import require_license
 from ee.cloud.shared.deps import current_user_id, current_workspace_id
+from ee.cloud.shared.time import iso_utc
 from ee.cloud.uploads.mongo_store import MongoFileStore
 from ee.cloud.uploads.service import EEUploadService
 from pocketpaw.uploads.config import INLINE_MIMES, UploadSettings
@@ -47,7 +48,7 @@ def _record_to_dict(rec) -> dict:
         "mime": rec.mime,
         "size": rec.size,
         "url": f"/api/v1/uploads/{rec.id}",
-        "created": rec.created.isoformat(),
+        "created": iso_utc(rec.created),
     }
 
 

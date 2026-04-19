@@ -26,12 +26,14 @@ from ee.cloud.realtime.events import (
     GroupAgentRemoved,
     GroupAgentUpdated,
     GroupCreated,
+    GroupJoined,
     GroupMemberAdded,
     GroupMemberRemoved,
     GroupMemberRole,
     GroupUpdated,
 )
 from ee.cloud.shared.errors import Forbidden, NotFound, ValidationError
+from ee.cloud.shared.time import iso_utc
 from pocketpaw.ee.guards.actions import GroupRole
 from pocketpaw.ee.guards.audit import log_denial
 
@@ -117,9 +119,9 @@ async def _group_response(group: Group) -> dict:
         "agents": populated_agents,
         "pinnedMessages": group.pinned_messages,
         "archived": group.archived,
-        "lastMessageAt": group.last_message_at.isoformat() if group.last_message_at else None,
+        "lastMessageAt": iso_utc(group.last_message_at),
         "messageCount": group.message_count,
-        "createdAt": group.createdAt.isoformat() if group.createdAt else None,
+        "createdAt": iso_utc(group.createdAt),
     }
 
 
@@ -343,6 +345,11 @@ class GroupService:
             await emit(
                 GroupMemberAdded(data={"group_id": group_id, "user_id": user_id, "role": "edit"})
             )
+            # The joining user has no local record of this group yet — a
+            # ``group.joined`` (audience = just them) hydrates the room in their
+            # sidebar so they don't have to refresh to see it.
+            resp = await _group_response(group)
+            await emit(GroupJoined(data={**resp, "member_ids": [user_id]}))
             get_resolver().invalidate_group(group_id)
 
     @staticmethod
@@ -402,6 +409,11 @@ class GroupService:
                 )
             )
         if newly_added:
+            # Newly-added members have no local record of this group yet — a
+            # ``group.joined`` (audience = just the new ids) hydrates the room
+            # in their sidebars so they don't have to refresh to see it.
+            resp = await _group_response(group)
+            await emit(GroupJoined(data={**resp, "member_ids": newly_added}))
             get_resolver().invalidate_group(group_id)
 
         return newly_added

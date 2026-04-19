@@ -139,16 +139,32 @@ def mount_cloud(app: FastAPI) -> None:
 
     register_agent_bridge()
 
-    # Initialise the realtime EventBus now, synchronously.
+    # Initialise the realtime EventBus eagerly.
     #
-    # This used to live in an ``@app.on_event("startup")`` handler, but the
-    # host app (dashboard.py / api/serve.py) is constructed with a custom
-    # ``lifespan=`` context manager. Starlette silently ignores
-    # ``on_event`` handlers registered after a custom lifespan is set, so
-    # the bus never got initialised and the first emit raised
-    # ``AssertionError: EventBus not initialized``. ``init_realtime`` is
-    # pure-sync, idempotent, and needs no event loop — safe at mount time.
-    # The agent pool's async start/stop lives in
-    # ``pocketpaw.dashboard_lifecycle`` so it participates in the real
-    # lifespan.
+    # The host app (src/pocketpaw/dashboard.py) uses a FastAPI ``lifespan``
+    # context manager, which supersedes ``@app.on_event("startup")`` —
+    # startup handlers registered here never fire. ``init_realtime()`` only
+    # sets module-level singletons (bus + resolver) with no async work, so
+    # it's safe to call synchronously at mount time. Without this, the
+    # first service that calls ``emit(...)`` fails with "EventBus not
+    # initialized".
     init_realtime()
+
+    # Start/stop agent pool with app lifecycle.
+    #
+    # Chat persistence lives entirely in ``MongoMemoryStore.save`` — it
+    # writes the message row, auto-creates/touches the linked Session, and
+    # receives attachments via ``InboundMessage.metadata["attachments"]``.
+    # The old ``ee.cloud.shared.chat_persistence`` bus subscriber was
+    # removed because it dual-wrote every turn.
+    @app.on_event("startup")
+    async def _start_agent_pool():
+        from pocketpaw.agents.pool import get_agent_pool
+
+        await get_agent_pool().start()
+
+    @app.on_event("shutdown")
+    async def _stop_agent_pool():
+        from pocketpaw.agents.pool import get_agent_pool
+
+        await get_agent_pool().stop()
