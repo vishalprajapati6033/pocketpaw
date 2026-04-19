@@ -174,6 +174,18 @@ class MessageService:
 
         response = _message_response(msg, parent=parent)
 
+        # Thread reply-target metadata into the event so the agent bridge can
+        # decide whether an ``auto``-mode agent should respond. A reply aimed
+        # at a human is a directed side-conversation and shouldn't summon
+        # auto agents; a reply aimed at an agent is a follow-up and should
+        # go through the normal respond-mode logic.
+        reply_meta: dict = {}
+        if body.reply_to:
+            reply_meta["reply_to"] = body.reply_to
+            if parent is not None:
+                reply_meta["reply_to_sender_type"] = parent.sender_type
+                reply_meta["reply_to_agent_id"] = parent.agent
+
         await event_bus.emit(
             "message.sent",
             {
@@ -184,6 +196,7 @@ class MessageService:
                 "content": body.content,
                 "mentions": body.mentions,
                 "workspace_id": group.workspace,
+                **reply_meta,
             },
         )
 

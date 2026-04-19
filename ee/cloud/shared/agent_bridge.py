@@ -70,6 +70,12 @@ async def _dispatch_agent_responses(data: dict) -> None:
     content = data.get("content", "")
     mentions = data.get("mentions", [])
     workspace_id = data.get("workspace_id", "")
+    # Reply metadata — used to skip ``auto``-mode agents when the message is
+    # a directed reply to another human (or to a different agent). Absent
+    # for top-level messages.
+    reply_to = data.get("reply_to")
+    reply_to_sender_type = data.get("reply_to_sender_type")
+    reply_to_agent_id = data.get("reply_to_agent_id")
 
     logger.info("Agent bridge: message in group %s from %s: %s", group_id, sender_id, content[:50])
 
@@ -93,7 +99,14 @@ async def _dispatch_agent_responses(data: dict) -> None:
     )
 
     for group_agent in group.agents:
-        should = await _should_agent_respond(group_agent, content, mentions)
+        should = await _should_agent_respond(
+            group_agent,
+            content,
+            mentions,
+            reply_to=reply_to,
+            reply_to_sender_type=reply_to_sender_type,
+            reply_to_agent_id=reply_to_agent_id,
+        )
         logger.info(
             "Agent bridge: agent %s respond_mode=%s should_respond=%s",
             group_agent.agent,
@@ -112,7 +125,15 @@ async def _dispatch_agent_responses(data: dict) -> None:
             )
 
 
-async def _should_agent_respond(group_agent: Any, content: str, mentions: list) -> bool:
+async def _should_agent_respond(
+    group_agent: Any,
+    content: str,
+    mentions: list,
+    *,
+    reply_to: str | None = None,
+    reply_to_sender_type: str | None = None,
+    reply_to_agent_id: str | None = None,
+) -> bool:
     """Determine if an agent should respond.
 
     Precedence:
@@ -121,7 +142,15 @@ async def _should_agent_respond(group_agent: Any, content: str, mentions: list) 
        agents respond. Non-mentioned agents — even those on ``auto`` — stay
        quiet so multiple auto agents don't all answer when the user is
        clearly addressing one.
-    3. With no agent mentions, fall back to per-agent mode:
+    3. If the message is a reply aimed at someone else, no agent chimes in
+       unless it was specifically mentioned (handled in step 2):
+       - Reply to a human → nobody auto-responds; the message is a directed
+         side-conversation between two users.
+       - Reply to a *different* agent → that agent's turn, not ours.
+       - Reply to *this* agent → fall through to the normal mode checks so
+         a follow-up actually gets answered.
+    4. With no agent mentions and no directed reply, fall back to per-agent
+       mode:
        - ``auto`` → respond
        - ``mention_only`` → don't respond
        - ``smart`` → ask a cheap LLM whether this agent is relevant
@@ -134,6 +163,13 @@ async def _should_agent_respond(group_agent: Any, content: str, mentions: list) 
     agent_mentions = [m for m in mentions if m.get("type") == "agent"]
     if agent_mentions:
         return any(m.get("id") == group_agent.agent for m in agent_mentions)
+
+    # Directed reply handling — see docstring step 3.
+    if reply_to:
+        if reply_to_sender_type == "user":
+            return False
+        if reply_to_sender_type == "agent" and reply_to_agent_id != group_agent.agent:
+            return False
 
     if mode == "auto":
         return True
