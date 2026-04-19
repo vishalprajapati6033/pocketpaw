@@ -32,21 +32,44 @@ from ee.cloud.shared.events import event_bus
 logger = logging.getLogger(__name__)
 
 
+_background_tasks: set[asyncio.Task] = set()
+
+
 async def on_message_for_agents(data: dict) -> None:
-    """Handle message.sent event — check if any agents should respond."""
+    """Handle message.sent event — check if any agents should respond.
+
+    Dispatches all the actual work (respond-mode checks, smart-mode LLM
+    calls, ``_run_agent_response``) to a background task so the ``event_bus``
+    emitter — which is awaited on the group-chat send path — returns
+    immediately. Before this, a ``smart``-mode agent blocked the
+    ``MessageSent`` realtime broadcast for the full duration of a Haiku
+    relevance-check call (5–10s), making the sender wait seconds to see
+    their own message ack.
+    """
     group_id = data.get("group_id")
-    sender_id = data.get("sender_id")
     sender_type = data.get("sender_type", "user")
     content = data.get("content", "")
-    mentions = data.get("mentions", [])
-    workspace_id = data.get("workspace_id", "")
 
     if not group_id or not content:
         return
-
-    # Don't respond to agent messages (prevent loops)
     if sender_type == "agent":
+        # Don't respond to agent messages (prevent loops)
         return
+
+    task = asyncio.create_task(_dispatch_agent_responses(data))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+async def _dispatch_agent_responses(data: dict) -> None:
+    """Background worker for ``on_message_for_agents`` — does the actual
+    respond-mode evaluation and per-agent response spawning. Runs
+    detached from the emitter's await chain."""
+    group_id = data.get("group_id")
+    sender_id = data.get("sender_id")
+    content = data.get("content", "")
+    mentions = data.get("mentions", [])
+    workspace_id = data.get("workspace_id", "")
 
     logger.info("Agent bridge: message in group %s from %s: %s", group_id, sender_id, content[:50])
 
