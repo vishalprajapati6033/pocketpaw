@@ -26,6 +26,7 @@ from ee.cloud.chat.schemas import (
     WsOutbound,
 )
 from ee.cloud.chat.service import GroupService, MessageService
+from ee.cloud.chat.unread_service import UnreadService
 from ee.cloud.chat.ws import manager
 from ee.cloud.license import get_license, require_license
 from ee.cloud.shared.deps import (
@@ -319,6 +320,94 @@ async def get_or_create_agent_dm(
     return await GroupService.get_or_create_agent_dm(workspace_id, user_id, agent_id)
 
 
+# ---------------------------------------------------------------------------
+# Unreads
+# ---------------------------------------------------------------------------
+
+
+@_licensed.get("/unreads")
+async def list_unreads(
+    workspace_id: str = Depends(current_workspace_id),
+    user_id: str = Depends(current_user_id),
+):
+    from ee.cloud.chat.unread_service import UnreadService
+
+    return await UnreadService.list_unreads(user_id, workspace_id)
+
+
+# ---------------------------------------------------------------------------
+# Mentions
+# ---------------------------------------------------------------------------
+
+
+@_licensed.get("/mentions/suggest")
+async def suggest_mentions(
+    q: str = Query("", max_length=64),
+    types: str = Query("user,agent,channel"),
+    workspace_id: str = Depends(current_workspace_id),
+    user_id: str = Depends(current_user_id),
+):
+    from ee.cloud.models.user import User
+    from ee.cloud.models.agent import Agent as AgentModel
+    from ee.cloud.models.group import Group
+
+    kinds = {k.strip() for k in types.split(",") if k.strip()}
+    q_lower = q.lower()
+    results: list[dict] = []
+
+    if "user" in kinds:
+        query: dict = {"workspaces.workspace": workspace_id}
+        if q:
+            query["$or"] = [
+                {"full_name": {"$regex": q, "$options": "i"}},
+                {"email": {"$regex": q, "$options": "i"}},
+            ]
+        users = await User.find(query).limit(8).to_list()
+        for u in users:
+            results.append({
+                "type": "user",
+                "id": str(u.id),
+                "display_name": u.full_name or u.email,
+            })
+
+    if "agent" in kinds:
+        aquery: dict = {"workspace": workspace_id}
+        if q:
+            aquery["$or"] = [
+                {"name": {"$regex": q, "$options": "i"}},
+                {"slug": {"$regex": q, "$options": "i"}},
+            ]
+        agents = await AgentModel.find(aquery).limit(8).to_list()
+        for a in agents:
+            results.append({
+                "type": "agent",
+                "id": str(a.id),
+                "display_name": a.name or a.slug,
+            })
+
+    if "channel" in kinds:
+        cquery: dict = {"workspace": workspace_id, "type": "channel", "archived": False}
+        if q:
+            cquery["$or"] = [
+                {"name": {"$regex": q, "$options": "i"}},
+                {"slug": {"$regex": q, "$options": "i"}},
+            ]
+        channels = await Group.find(cquery).limit(8).to_list()
+        for c in channels:
+            results.append({
+                "type": "channel_ref",
+                "id": str(c.id),
+                "display_name": c.name or c.slug,
+            })
+
+    # Broadcast tokens — always offered, filtered by prefix match when q is set.
+    for token, display in (("here", "@here"), ("channel", "@channel"), ("everyone", "@everyone")):
+        if not q or token.startswith(q_lower):
+            results.append({"type": token, "id": "", "display_name": display})
+
+    return results
+
+
 # Include licensed REST routes
 router.include_router(_licensed)
 
@@ -489,6 +578,8 @@ async def _ws_read_ack(user_id: str, msg: WsInbound) -> None:
     members = await GroupService.list_member_ids(msg.group_id)
     if user_id not in members:
         return
+
+    await UnreadService.mark_read(user_id, msg.group_id, msg.message_id)
 
     await manager.send_to_room(
         msg.group_id,

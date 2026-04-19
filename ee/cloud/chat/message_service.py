@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import logging
 import re
 from datetime import UTC, datetime
@@ -25,6 +27,7 @@ from ee.cloud.chat.schemas import (
 )
 from ee.cloud.models.message import Attachment, Mention, Message, Reaction
 from ee.cloud.models.notification import NotificationSource
+from ee.cloud.chat.unread_service import UnreadService
 from ee.cloud.notifications.service import NotificationService
 from ee.cloud.realtime.emit import emit
 from ee.cloud.realtime.events import (
@@ -33,6 +36,8 @@ from ee.cloud.realtime.events import (
     MessageNew,
     MessageReaction,
     MessageSent,
+    ThreadReply,
+    UnreadUpdate,
 )
 from ee.cloud.shared.errors import Forbidden, NotFound
 from ee.cloud.shared.events import event_bus
@@ -57,6 +62,7 @@ def _message_response(msg: Message) -> dict:
         "content": msg.content,
         "mentions": [m.model_dump() for m in msg.mentions],
         "replyTo": msg.reply_to,
+        "threadCount": msg.thread_count,
         "attachments": [a.model_dump() for a in msg.attachments],
         "reactions": [r.model_dump() for r in msg.reactions],
         "edited": msg.edited,
@@ -120,6 +126,18 @@ class MessageService:
         group.message_count += 1
         await group.save()
 
+        if body.reply_to:
+            try:
+                from beanie import PydanticObjectId
+                parent_id = PydanticObjectId(body.reply_to)
+                parent = await Message.find_one({"_id": parent_id, "context_type": "group"})
+                if parent is not None:
+                    parent.thread_count = (parent.thread_count or 0) + 1
+                    await parent.save()
+            except Exception:
+                # Bad reply_to — skip bump; main send already succeeded
+                pass
+
         response = _message_response(msg)
 
         await event_bus.emit(
@@ -138,26 +156,51 @@ class MessageService:
         # Realtime fan-out: message.new to the group (sender excluded via
         # AudienceResolver reading data["sender"]), message.sent ack to the
         # sender only (keyed by data["sender_id"]).
-        await emit(MessageNew(data={**response, "group_id": group_id}))
+        if body.reply_to:
+            await emit(ThreadReply(data={**response, "group_id": group_id, "root_message_id": body.reply_to}))
+        else:
+            await emit(MessageNew(data={**response, "group_id": group_id}))
         await emit(MessageSent(data={**response, "group_id": group_id, "sender_id": user_id}))
 
-        # Derive mention notifications. Each @user mention in the payload
-        # creates a Notification row and emits notification.new (except for
-        # self-mentions).
+        # Unread badge sync — every non-sender member receives a delta so their
+        # client can increment the sidebar counter without a full /unreads refetch.
+        # Concurrent emit() so a 1000-member channel isn't 999 sequential awaits
+        # on the sender's request path.
+        unread_tasks = [
+            emit(UnreadUpdate(data={"group_id": group_id, "user_id": member, "delta": 1}))
+            for member in group.members
+            if member != user_id
+        ]
+        if unread_tasks:
+            await asyncio.gather(*unread_tasks)
+
+        # Derive mention notifications. Dedupe recipients across multiple
+        # mentions in the same message. Broadcast types (@here/@channel/@everyone)
+        # target every non-sender member. User mentions add the specific user.
         group_name = getattr(group, "name", "") or ""
+        broadcast_types = {"here", "channel", "everyone"}
+        recipients: set[str] = set()
+
         for mention in body.mentions or []:
-            if not isinstance(mention, dict) or mention.get("type") != "user":
+            if not isinstance(mention, dict):
                 continue
-            target = mention.get("id")
-            if not target or target == user_id:
-                continue
+            mtype = mention.get("type")
+            if mtype == "user":
+                target = mention.get("id")
+                if target and target != user_id:
+                    recipients.add(target)
+            elif mtype in broadcast_types:
+                for member in group.members:
+                    if member != user_id:
+                        recipients.add(member)
+            # "agent" and "channel_ref" skip — not a user notification trigger.
+
+        async def _fan_out_mention(target: str) -> None:
             await NotificationService.create(
                 workspace_id=str(group.workspace),
                 recipient=target,
                 kind="mention",
-                title=f"You were mentioned in #{group_name}"
-                if group_name
-                else "You were mentioned",
+                title=f"You were mentioned in #{group_name}" if group_name else "You were mentioned",
                 body=body.content[:200],
                 source=NotificationSource(
                     type="message",
@@ -165,6 +208,10 @@ class MessageService:
                     pocket_id=None,
                 ),
             )
+            await UnreadService.bump_mention(target, group_id)
+
+        if recipients:
+            await asyncio.gather(*(_fan_out_mention(t) for t in recipients))
 
         return response
 

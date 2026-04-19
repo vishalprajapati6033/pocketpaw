@@ -143,6 +143,11 @@ class MessageSent(Event):
 
 
 @dataclass
+class ThreadReply(Event):
+    EVENT_TYPE: ClassVar[str] = "thread.reply"
+
+
+@dataclass
 class MessageEdited(Event):
     EVENT_TYPE: ClassVar[str] = "message.edited"
 
@@ -170,6 +175,11 @@ class MessageReaction(Event):
 @dataclass
 class MessageRead(Event):
     EVENT_TYPE: ClassVar[str] = "message.read"
+
+
+@dataclass
+class UnreadUpdate(Event):
+    EVENT_TYPE: ClassVar[str] = "unread.update"
 
 
 # Presence

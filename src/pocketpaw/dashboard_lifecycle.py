@@ -197,6 +197,16 @@ async def startup_event(
     except Exception as exc:
         logger.warning("Enterprise cloud DB init failed (cloud features disabled): %s", exc)
 
+    # Start the cloud agent pool GC task. Previously registered via
+    # ``@app.on_event("startup")`` inside ``mount_cloud()`` but that path is
+    # silenced when the app is built with a custom ``lifespan=``.
+    try:
+        from pocketpaw.agents.pool import get_agent_pool
+
+        await get_agent_pool().start()
+    except Exception as exc:
+        logger.warning("Agent pool start failed: %s", exc)
+
     # Start Agent Loop
     asyncio.create_task(agent_loop.start())
     logger.info("Agent Loop started")
@@ -396,6 +406,15 @@ async def shutdown_event(*, _stop_channel_adapter_fn=None):
     # Stop Agent Loop
     await agent_loop.stop()
     await ws_adapter.stop()
+
+    # Stop the cloud agent pool (best-effort; may not have started if the
+    # enterprise cloud module is not installed).
+    try:
+        from pocketpaw.agents.pool import get_agent_pool
+
+        await get_agent_pool().stop()
+    except Exception as exc:
+        logger.warning("Agent pool stop failed: %s", exc)
 
     # Stop all channel adapters
     if _stop_channel_adapter_fn:

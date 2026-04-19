@@ -598,3 +598,47 @@ async def test_get_or_create_agent_dm_no_emit_when_existing():
         await GroupService.get_or_create_agent_dm("w1", "u1", "a1")
 
     assert not [e for e in recorded if isinstance(e, GroupCreated)]
+
+
+@pytest.mark.asyncio
+async def test_join_group_allows_channel_type():
+    """Channels should be self-joinable just like public groups."""
+    from ee.cloud.chat.group_service import GroupService
+
+    recorded, fake_emit = _capture_emits()
+    group = _fake_group(gtype="channel", members=["u1"])
+    resolver_mock = MagicMock()
+
+    with (
+        patch("ee.cloud.chat.group_service.emit", new=fake_emit),
+        patch("ee.cloud.chat.group_service._group_response", new=_fake_group_response),
+        patch(
+            "ee.cloud.chat.group_service._get_group_or_404",
+            new=AsyncMock(return_value=group),
+        ),
+        patch("ee.cloud.chat.group_service.get_resolver", lambda: resolver_mock),
+    ):
+        await GroupService.join_group("g1", "u2")
+
+    assert "u2" in group.members
+    events = [e for e in recorded if isinstance(e, GroupMemberAdded)]
+    assert len(events) == 1
+    resolver_mock.invalidate_group.assert_called_once_with("g1")
+
+
+@pytest.mark.asyncio
+async def test_join_group_still_rejects_private():
+    """Private groups must remain invite-only."""
+    from ee.cloud.chat.group_service import GroupService
+    from ee.cloud.shared.errors import Forbidden
+
+    group = _fake_group(gtype="private", members=["u1"])
+
+    with (
+        patch(
+            "ee.cloud.chat.group_service._get_group_or_404",
+            new=AsyncMock(return_value=group),
+        ),
+    ):
+        with pytest.raises(Forbidden):
+            await GroupService.join_group("g1", "u2")

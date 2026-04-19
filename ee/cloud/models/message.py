@@ -58,6 +58,7 @@ class Message(TimestampedDocument):
     content: str = ""
     mentions: list[Mention] = Field(default_factory=list)
     reply_to: str | None = None
+    thread_count: int = 0
     attachments: list[Attachment] = Field(default_factory=list)
     reactions: list[Reaction] = Field(default_factory=list)
     edited: bool = False
