@@ -405,7 +405,13 @@ async def test_send_reply_does_not_bump_thread_count():
     _recorded, fake_emit = _capture_emits()
     group = _fake_group(owner="sender", members=["sender", "u2"])
 
-    parent = SimpleNamespace(id="parent1", thread_count=0, save=AsyncMock())
+    parent = SimpleNamespace(
+        id="parent1",
+        thread_count=0,
+        sender_type="user",
+        agent=None,
+        save=AsyncMock(),
+    )
     fake_msg_ns = SimpleNamespace(id="reply1", createdAt=None, insert=AsyncMock())
 
     fake_message_class = MagicMock(return_value=fake_msg_ns)
@@ -441,7 +447,13 @@ async def test_send_reply_emits_message_new_not_thread_reply():
 
     recorded, fake_emit = _capture_emits()
     group = _fake_group(owner="sender", members=["sender"])
-    parent = SimpleNamespace(id="parent1", thread_count=0, save=AsyncMock())
+    parent = SimpleNamespace(
+        id="parent1",
+        thread_count=0,
+        sender_type="user",
+        agent=None,
+        save=AsyncMock(),
+    )
     fake_msg_ns = SimpleNamespace(id="r1", createdAt=None, insert=AsyncMock(), thread_count=0)
 
     fake_message_class = MagicMock(return_value=fake_msg_ns)
