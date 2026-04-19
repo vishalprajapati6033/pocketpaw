@@ -12,6 +12,11 @@ Updated 2026-04-20: on connect, also send the new socket a snapshot of
 currently-online workspace peers. Without this, a user who joins after
 their peers are already online never learns they're there — the server
 only broadcasts presence deltas, not the current set.
+
+2026-04-19 (Cluster E sub-PR 2): added ``GET /chat/messages/search`` — a
+workspace-wide message search that delegates to
+``MessageService.search_workspace_messages`` and inherits its per-group
+scope filter.
 """
 
 from __future__ import annotations
@@ -308,6 +313,25 @@ async def search_messages(
     user_id: str = Depends(current_user_id),
 ):
     return await MessageService.search_messages(group_id, user_id, q)
+
+
+@_licensed.get("/messages/search")
+async def search_workspace_messages(
+    q: str = Query(..., min_length=1, max_length=200),
+    limit: int = Query(50, ge=1, le=100),
+    user_id: str = Depends(current_user_id),
+    workspace_id: str = Depends(current_workspace_id),
+):
+    """Workspace-wide message search.
+
+    Results are scoped to groups the caller can already read: public /
+    channel groups in the workspace plus private / DM groups where the
+    caller is a member. The query is regex-escaped before it hits Mongo,
+    and capped at 100 results. Cluster E sub-PR 2.
+    """
+    return await MessageService.search_workspace_messages(
+        workspace_id, user_id, q, limit=limit
+    )
 
 
 # ---------------------------------------------------------------------------
