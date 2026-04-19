@@ -1121,9 +1121,14 @@ class AgentLoop:
                 # Skip auto-learn on cancelled responses — partial data is unreliable.
                 # Also skip when soul is active — soul.observe() + reflect() handles
                 # fact extraction and memory consolidation, so auto_learn would duplicate.
+                # Per-agent loops share the global memory store with every other
+                # agent, so extracted facts would contaminate the default agent's
+                # identity context. Skip auto-learn for per-agent loops until we
+                # have per-agent namespaced fact storage.
                 should_auto_learn = (
                     not cancelled
                     and self._soul_manager is None
+                    and self.agent_id is None
                     and (
                         (self.settings.memory_backend == "mem0" and self.settings.mem0_auto_learn)
                         or (

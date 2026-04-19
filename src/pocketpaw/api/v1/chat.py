@@ -354,14 +354,14 @@ async def chat_stream(body: ChatRequest):
         # stream — otherwise we'd kill a task that's just finishing up
         # memory storage for the previous (completed) message.
         try:
-            from pocketpaw.dashboard_state import _agent_loops, agent_loop
+            from pocketpaw.dashboard_state import agent_loop, iter_per_agent_loops
 
             session_key = f"websocket:{chat_id}"
             # Try the default loop first, then every per-agent loop — only
             # one of them owns the task. ``cancel_task`` is a no-op when
             # the key is unknown, so this is safe.
             agent_loop.cancel_task(session_key)
-            for loop in list(_agent_loops.values()):
+            for loop in iter_per_agent_loops():
                 loop.cancel_task(session_key)
         except Exception:
             logger.debug("Could not cancel stale agent task", exc_info=True)
@@ -441,7 +441,7 @@ async def chat_stop(session_id: str = ""):
 
     # Also cancel the agent loop's processing task
     try:
-        from pocketpaw.dashboard_state import _agent_loops, agent_loop
+        from pocketpaw.dashboard_state import agent_loop, iter_per_agent_loops
 
         # Derive chat_id from whatever format was given
         raw = session_id
@@ -449,7 +449,7 @@ async def chat_stop(session_id: str = ""):
             raw = raw[len(_WS_PREFIX) :]
         session_key = f"websocket:{raw}"
         agent_loop.cancel_task(session_key)
-        for loop in list(_agent_loops.values()):
+        for loop in iter_per_agent_loops():
             loop.cancel_task(session_key)
     except Exception:
         pass

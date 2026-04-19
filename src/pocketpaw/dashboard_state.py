@@ -6,6 +6,7 @@ sub-modules (channels, auth, lifecycle, ws) need access to the same globals.
 
 import asyncio
 import importlib
+from typing import Any
 
 from pocketpaw.agents.loop import AgentLoop
 from pocketpaw.bus.adapters.websocket_adapter import WebSocketAdapter
@@ -32,7 +33,21 @@ _get_cmd_handler().set_agent_loop(agent_loop)
 # These loops don't consume from the bus (unlike the default ``agent_loop``);
 # they're invoked directly via ``process_message`` from the /chat/stream
 # handler when a request targets a specific cloud agent.
-_agent_loops: dict[str, AgentLoop] = {}
+#
+# Values hold the AgentLoop plus the Agent doc's ``updatedAt`` at build time
+# so we can detect staleness and rebuild when the operator edits the agent
+# in Mongo. A sentinel ``_NOT_FOUND`` is cached for agent ids whose doc
+# lookup returned ``None`` — avoids pounding Mongo with Agent.get() on every
+# message for a deleted agent.
+
+
+class _NotFound:
+    """Sentinel entry for agent ids that don't resolve to a Mongo doc."""
+
+
+_NOT_FOUND = _NotFound()
+_agent_loops: dict[str, AgentLoop | _NotFound] = {}
+_agent_loop_stamps: dict[str, Any] = {}  # agent_id -> Agent.updatedAt snapshot
 _agent_loops_lock = asyncio.Lock()
 
 
@@ -40,33 +55,63 @@ async def get_agent_loop_for(agent_id: str) -> AgentLoop:
     """Fetch-or-build the per-agent AgentLoop for ``agent_id``.
 
     Falls back to the default singleton loop when the agent doc can't be
-    loaded (e.g. Beanie/Mongo not initialised) so callers never hit a
-    hard failure — the default loop will still produce *some* response,
-    just without the per-agent persona/backend override.
+    loaded (e.g. Beanie/Mongo not initialised, or the id doesn't exist)
+    so callers never hit a hard failure — the default loop will still
+    produce *some* response, just without the per-agent persona/backend
+    override.
+
+    Cache invalidation mirrors ``AgentPool``: when the Agent doc's
+    ``updatedAt`` advances past the value we stored at build time, the
+    cached loop is discarded and rebuilt. Negative results (doc missing)
+    are cached as ``_NOT_FOUND`` to keep repeated lookups out of Mongo.
     """
-    if agent_id in _agent_loops:
-        return _agent_loops[agent_id]
+    from beanie import PydanticObjectId
+
+    from ee.cloud.models.agent import Agent
 
     async with _agent_loops_lock:
-        if agent_id in _agent_loops:
-            return _agent_loops[agent_id]
         try:
-            from beanie import PydanticObjectId
-
-            from ee.cloud.models.agent import Agent
-
             doc = await Agent.get(PydanticObjectId(agent_id))
-            if doc is None:
-                return agent_loop
-            loop = AgentLoop(
-                agent_id=agent_id,
-                agent_name=doc.name,
-                agent_config=dict(doc.config or {}),
-            )
         except Exception:
+            # Transient DB error — don't poison the cache; use the default
+            # loop for this request and retry lookup on the next one.
             return agent_loop
+
+        if doc is None:
+            _agent_loops[agent_id] = _NOT_FOUND
+            _agent_loop_stamps.pop(agent_id, None)
+            return agent_loop
+
+        cached = _agent_loops.get(agent_id)
+        stamp = _agent_loop_stamps.get(agent_id)
+        fresh = (
+            isinstance(cached, AgentLoop)
+            and stamp is not None
+            and doc.updatedAt is not None
+            and doc.updatedAt <= stamp
+        )
+        if fresh:
+            return cached  # type: ignore[return-value]
+
+        loop = AgentLoop(
+            agent_id=agent_id,
+            agent_name=doc.name,
+            agent_config=dict(doc.config or {}),
+        )
         _agent_loops[agent_id] = loop
+        _agent_loop_stamps[agent_id] = doc.updatedAt
         return loop
+
+
+def iter_per_agent_loops() -> list[AgentLoop]:
+    """Snapshot of live per-agent loops for cross-loop ops (cancel, stop).
+
+    Skips the ``_NOT_FOUND`` sentinel so callers only ever see real loops.
+    Reads the dict synchronously — safe under asyncio's single-threaded
+    scheduling, and avoids forcing every caller to hold ``_agent_loops_lock``
+    for a read-only snapshot.
+    """
+    return [v for v in _agent_loops.values() if isinstance(v, AgentLoop)]
 
 # Retain active_connections for legacy broadcasts until fully migrated
 active_connections: list[WebSocket] = []
