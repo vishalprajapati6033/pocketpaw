@@ -28,6 +28,46 @@ status_tracker = StatusTracker()
 # Wire up the agent loop so /kill can cancel in-flight sessions
 _get_cmd_handler().set_agent_loop(agent_loop)
 
+# Per-agent AgentLoop registry — cached on first use, keyed by cloud agent id.
+# These loops don't consume from the bus (unlike the default ``agent_loop``);
+# they're invoked directly via ``process_message`` from the /chat/stream
+# handler when a request targets a specific cloud agent.
+_agent_loops: dict[str, AgentLoop] = {}
+_agent_loops_lock = asyncio.Lock()
+
+
+async def get_agent_loop_for(agent_id: str) -> AgentLoop:
+    """Fetch-or-build the per-agent AgentLoop for ``agent_id``.
+
+    Falls back to the default singleton loop when the agent doc can't be
+    loaded (e.g. Beanie/Mongo not initialised) so callers never hit a
+    hard failure — the default loop will still produce *some* response,
+    just without the per-agent persona/backend override.
+    """
+    if agent_id in _agent_loops:
+        return _agent_loops[agent_id]
+
+    async with _agent_loops_lock:
+        if agent_id in _agent_loops:
+            return _agent_loops[agent_id]
+        try:
+            from beanie import PydanticObjectId
+
+            from ee.cloud.models.agent import Agent
+
+            doc = await Agent.get(PydanticObjectId(agent_id))
+            if doc is None:
+                return agent_loop
+            loop = AgentLoop(
+                agent_id=agent_id,
+                agent_name=doc.name,
+                agent_config=dict(doc.config or {}),
+            )
+        except Exception:
+            return agent_loop
+        _agent_loops[agent_id] = loop
+        return loop
+
 # Retain active_connections for legacy broadcasts until fully migrated
 active_connections: list[WebSocket] = []
 

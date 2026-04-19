@@ -284,11 +284,57 @@ class AgentLoop:
     openai_agents, google_adk, codex_cli, opencode, or copilot_sdk).
     """
 
-    def __init__(self):
-        self.settings = get_settings()
+    def __init__(
+        self,
+        agent_id: str | None = None,
+        agent_config: dict | None = None,
+        agent_name: str | None = None,
+    ):
+        """Build a loop, optionally scoped to a cloud Agent.
+
+        When ``agent_id`` is set, the loop uses a
+        :class:`CloudAgentBootstrapProvider` keyed by the agent's config so
+        the identity block in the system prompt matches the selected agent.
+        Per-agent backend overrides (``config.backend``, ``config.model``)
+        are applied when present. Per-agent loops are *not* bus consumers —
+        they're invoked directly via :meth:`process_message` so multiple
+        loops can coexist without racing each other for InboundMessages.
+        """
+        self.agent_id = agent_id
+        self.agent_config = agent_config or {}
+        self.agent_name = agent_name
+
+        base_settings = get_settings()
+        # Per-agent overrides: backend + model come from the agent doc.
+        if agent_id and self.agent_config:
+            overrides: dict = {}
+            be = (self.agent_config.get("backend") or "").strip()
+            mdl = (self.agent_config.get("model") or "").strip()
+            if be:
+                overrides["agent_backend"] = be
+            if mdl:
+                # Applies to the Anthropic provider — other providers read
+                # their own model fields from settings, so this is a
+                # best-effort override aligned with today's default backend.
+                overrides["anthropic_model"] = mdl
+            self.settings = (
+                base_settings.model_copy(update=overrides) if overrides else base_settings
+            )
+        else:
+            self.settings = base_settings
+
         self.bus = get_message_bus()
         self.memory = get_memory_manager()
         self.context_builder = AgentContextBuilder(memory_manager=self.memory)
+
+        # Point the context builder at a per-agent bootstrap when scoped.
+        if agent_id:
+            from pocketpaw.bootstrap.cloud_agent_provider import CloudAgentBootstrapProvider
+
+            self.context_builder.bootstrap = CloudAgentBootstrapProvider(
+                agent_name=agent_name or "Agent",
+                agent_config=self.agent_config,
+            )
 
         # Agent Router handles backend selection
         self._router: AgentRouter | None = None
@@ -311,12 +357,41 @@ class AgentLoop:
         self._running = False
 
     def _get_router(self) -> AgentRouter:
-        """Get or create the agent router (lazy initialization)."""
+        """Get or create the agent router (lazy initialization).
+
+        Per-agent loops honour their captured ``self.settings`` (which
+        already carries the agent's backend/model overrides) so we don't
+        reload from disk and clobber them on first router access.
+        """
         if self._router is None:
-            # Reload settings to pick up any changes
-            settings = Settings.load()
-            self._router = AgentRouter(settings)
+            if self.agent_id:
+                self._router = AgentRouter(self.settings)
+            else:
+                # Default loop: reload settings to pick up config changes.
+                self._router = AgentRouter(Settings.load())
         return self._router
+
+    async def process_message(self, message: InboundMessage) -> None:
+        """Public entry point — run the full processing pipeline on one
+        message without going through the bus consumer.
+
+        The default loop consumes InboundMessages from the bus in
+        ``_loop()``; per-agent loops skip that and are invoked directly
+        from the HTTP handler so multiple loops never race for messages.
+        Outbound events still go through the bus so SSE bridges and
+        other subscribers keep working unchanged.
+        """
+        session_key = message.session_key
+        task = asyncio.create_task(self._process_message(message))
+        self._background_tasks.add(task)
+        self._active_tasks[session_key] = task
+
+        def _on_done(t: asyncio.Task, key: str = session_key) -> None:
+            self._background_tasks.discard(t)
+            if self._active_tasks.get(key) is t:
+                self._active_tasks.pop(key, None)
+
+        task.add_done_callback(_on_done)
 
     async def start(self) -> None:
         """Start the agent loop."""
