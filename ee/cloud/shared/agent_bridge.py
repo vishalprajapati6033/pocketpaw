@@ -336,13 +336,18 @@ async def _run_agent_response(
     )
     await msg.insert()
 
-    # Broadcast final message
+    # Broadcast final message. ``temp_message_id`` is echoed from the
+    # matching ``stream_start`` so the FE can precisely replace the
+    # streaming placeholder — without it, a group with two agents
+    # responding concurrently would race on a startsWith('agent-stream-')
+    # lookup and finalize the wrong row.
     await emit(
         AgentStreamEnd(
             data={
                 "group_id": group_id,
                 "agent_id": agent_id,
                 "message_id": str(msg.id),
+                "temp_message_id": temp_msg_id,
                 "content": full_text,
                 "ripple_spec": ripple_spec,
                 "pocket_id": pocket_id,
