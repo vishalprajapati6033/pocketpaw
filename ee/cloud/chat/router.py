@@ -2,10 +2,16 @@
 
 REST routes live under ``/chat`` and require an enterprise license.
 The WebSocket endpoint at ``/ws/cloud`` authenticates via JWT query param.
+
+Updated 2026-04-19 (Task 19, Cluster A sub-PR 4): presence events are now
+emitted on WS connect and disconnect. PresenceOnline fires immediately when
+a user's first socket accepts; PresenceOffline fires after the existing
+30s grace window so quick reloads don't flap the online indicator.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -27,8 +33,10 @@ from ee.cloud.chat.schemas import (
 )
 from ee.cloud.chat.service import GroupService, MessageService
 from ee.cloud.chat.unread_service import UnreadService
-from ee.cloud.chat.ws import manager
+from ee.cloud.chat.ws import PRESENCE_GRACE_SECONDS, manager
 from ee.cloud.license import get_license, require_license
+from ee.cloud.realtime.emit import emit
+from ee.cloud.realtime.events import PresenceOffline, PresenceOnline
 from ee.cloud.shared.deps import (
     current_user_id,
     current_workspace_id,
@@ -444,9 +452,14 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
         await websocket.close(code=4001, reason="Invalid token")
         return
 
-    # Accept and register connection
+    # Accept and register connection. If this was the user's first active
+    # socket, announce them as online so every workspace peer's UI flips
+    # the presence dot immediately.
     await websocket.accept()
+    was_offline_before = not manager.is_online(user_id)
     await manager.connect(websocket, user_id)
+    if was_offline_before:
+        await emit(PresenceOnline(data={"user_id": user_id}))
 
     try:
         while True:
@@ -472,8 +485,40 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
     finally:
         last_user = await manager.disconnect(websocket)
         if last_user:
-            # Start grace period before marking offline
-            pass  # Presence broadcast handled by event handlers (Task 19)
+            # Kick off the grace-period offline broadcast. We delay a fixed
+            # window (`PRESENCE_GRACE_SECONDS`) so quick page reloads don't
+            # flap the online indicator. ``manager.connect`` cancels the
+            # pending task on reconnect so the offline event never fires if
+            # the user came back within the window.
+            await _schedule_presence_offline(last_user)
+
+
+async def _schedule_presence_offline(user_id: str) -> None:
+    """Queue a delayed ``presence.offline`` broadcast.
+
+    Registers the task with ``manager._offline_tasks`` so ``ConnectionManager.connect``
+    automatically cancels it when the user reconnects within the grace window.
+    """
+
+    async def _emit_after_delay() -> None:
+        try:
+            await asyncio.sleep(PRESENCE_GRACE_SECONDS)
+            # If the user reconnected while we were asleep the manager would
+            # have cancelled this task; double-check before emitting so races
+            # on shutdown don't ship a stale offline event.
+            if manager.is_online(user_id):
+                return
+            await emit(PresenceOffline(data={"user_id": user_id}))
+        except asyncio.CancelledError:
+            # Reconnect within the grace window — the manager cancels us.
+            raise
+
+    # Cancel any pending offline task (shouldn't happen normally, but belt
+    # and braces) and register the new one.
+    prev = manager._offline_tasks.pop(user_id, None)
+    if prev:
+        prev.cancel()
+    manager._offline_tasks[user_id] = asyncio.create_task(_emit_after_delay())
 
 
 # ---------------------------------------------------------------------------
