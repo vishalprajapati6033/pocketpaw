@@ -1,6 +1,9 @@
 # Refactored: Split from service.py — contains MessageService class and message-related
 # helper functions. Added create_agent_message() static method for use by agent_bridge
 # instead of creating Message documents directly.
+# 2026-04-19: ``message.sent`` event now carries ``attachments`` so agent_bridge
+# can surface filename/mime/size into the channel agent prompt (fixes silent
+# attachment drop on the channel path — DM path already had this).
 
 """Chat domain — message business logic (CRUD, reactions, threads, pins, search)."""
 
@@ -195,6 +198,12 @@ class MessageService:
                 "sender_type": "user",
                 "content": body.content,
                 "mentions": body.mentions,
+                # Attachments ride on the event so ``agent_bridge`` can inject
+                # filename / mime / size into the agent prompt. Mirrors the DM
+                # path's file-awareness contract; raw dicts match
+                # ``body.attachments``'s shape and downstream handlers no-op on
+                # unknown keys.
+                "attachments": body.attachments,
                 "workspace_id": group.workspace,
                 **reply_meta,
             },
