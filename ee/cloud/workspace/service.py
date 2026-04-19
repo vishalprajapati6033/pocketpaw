@@ -155,13 +155,45 @@ class WorkspaceService:
 
     @staticmethod
     async def delete(workspace_id: str, user: User) -> None:
-        """Soft-delete a workspace. Role check performed at route layer."""
+        """Soft-delete a workspace and cascade membership cleanup.
+
+        Route layer enforces the owner-only role check. This method does the
+        additional data-level housekeeping so the workspace disappears from
+        every member's UserMenu switcher immediately:
+
+        * Soft-delete the workspace document (``deleted_at``).
+        * Strip the workspace out of every user's ``workspaces`` list.
+        * Clear ``active_workspace`` on users who had the deleted workspace
+          selected; swap it for another membership if one exists, otherwise
+          reset to ``None`` so the first-run workspace modal fires again.
+        * Emit ``workspace.deleted`` so live clients can react.
+
+        Downstream artefacts (pockets, agents, groups, invites, sessions)
+        remain in the database but orphan naturally: their API endpoints
+        already scope reads by the caller's active workspace so they
+        disappear from the UI as soon as users flip away. A future offline
+        sweeper can purge them physically.
+        """
         ws = await Workspace.get(PydanticObjectId(workspace_id))
         if not ws or ws.deleted_at is not None:
             raise NotFound("workspace", workspace_id)
 
         ws.deleted_at = datetime.now(UTC)
         await ws.save()
+
+        # Strip the workspace out of every member's workspaces list so
+        # GET /workspaces stops returning it and the switcher no longer
+        # renders it as a choice.
+        members = await User.find({"workspaces.workspace": workspace_id}).to_list()
+        for member in members:
+            before = len(member.workspaces)
+            member.workspaces = [m for m in member.workspaces if m.workspace != workspace_id]
+            if len(member.workspaces) != before:
+                if member.active_workspace == workspace_id:
+                    member.active_workspace = (
+                        member.workspaces[0].workspace if member.workspaces else None
+                    )
+                await member.save()
 
         await emit(WorkspaceDeleted(data={"workspace_id": workspace_id}))
         get_resolver().invalidate_workspace(workspace_id)
