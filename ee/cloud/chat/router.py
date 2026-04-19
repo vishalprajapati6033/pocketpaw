@@ -467,6 +467,13 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
 
     except WebSocketDisconnect:
         pass
+    except RuntimeError as e:
+        # Starlette raises RuntimeError("WebSocket is not connected...") when
+        # receive_text() is called after the socket already transitioned to
+        # DISCONNECTED (e.g. a concurrent send/recv consumed the disconnect
+        # frame). Treat as a normal disconnect.
+        if "not connected" not in str(e).lower():
+            logger.exception("WebSocket error for user=%s", user_id)
     except Exception:
         logger.exception("WebSocket error for user=%s", user_id)
     finally:
