@@ -394,14 +394,15 @@ async def test_send_message_emits_unread_update_for_non_senders():
 
 
 @pytest.mark.asyncio
-async def test_send_reply_bumps_thread_count_on_parent():
-    """A message with reply_to set increments the parent message's thread_count."""
+async def test_send_reply_does_not_bump_thread_count():
+    """Inline-quoted replies replaced threads: parent.thread_count stays
+    untouched so we don't do a pointless parent write on every reply."""
     from types import SimpleNamespace
 
     from ee.cloud.chat.message_service import MessageService
     from ee.cloud.chat.schemas import SendMessageRequest
 
-    recorded, fake_emit = _capture_emits()
+    _recorded, fake_emit = _capture_emits()
     group = _fake_group(owner="sender", members=["sender", "u2"])
 
     parent = SimpleNamespace(id="parent1", thread_count=0, save=AsyncMock())
@@ -424,12 +425,14 @@ async def test_send_reply_bumps_thread_count_on_parent():
             SendMessageRequest(content="a reply", reply_to="507f1f77bcf86cd799439011"),
         )
 
-    assert parent.thread_count == 1
-    parent.save.assert_awaited_once()
+    assert parent.thread_count == 0
+    parent.save.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_send_reply_emits_thread_reply_not_message_new():
+async def test_send_reply_emits_message_new_not_thread_reply():
+    """Inline replies fan out via MessageNew; no ThreadReply event fires
+    because we no longer render a separate thread panel."""
     from types import SimpleNamespace
 
     from ee.cloud.chat.message_service import MessageService
@@ -460,6 +463,5 @@ async def test_send_reply_emits_thread_reply_not_message_new():
 
     threads = [e for e in recorded if isinstance(e, ThreadReply)]
     news = [e for e in recorded if isinstance(e, MessageNew)]
-    assert len(threads) == 1
-    assert threads[0].data.get("root_message_id") == "507f1f77bcf86cd799439011"
-    assert len(news) == 0  # no MessageNew on replies
+    assert len(threads) == 0
+    assert len(news) == 1
