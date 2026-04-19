@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import asyncio
-
 import logging
 import re
 from datetime import UTC, datetime
@@ -25,9 +24,9 @@ from ee.cloud.chat.schemas import (
     EditMessageRequest,
     SendMessageRequest,
 )
+from ee.cloud.chat.unread_service import UnreadService
 from ee.cloud.models.message import Attachment, Mention, Message, Reaction
 from ee.cloud.models.notification import NotificationSource
-from ee.cloud.chat.unread_service import UnreadService
 from ee.cloud.notifications.service import NotificationService
 from ee.cloud.realtime.emit import emit
 from ee.cloud.realtime.events import (
@@ -36,7 +35,6 @@ from ee.cloud.realtime.events import (
     MessageNew,
     MessageReaction,
     MessageSent,
-    ThreadReply,
     UnreadUpdate,
 )
 from ee.cloud.shared.errors import Forbidden, NotFound
@@ -51,8 +49,38 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _message_response(msg: Message) -> dict:
-    """Convert a Message document to a frontend-compatible dict."""
+_REPLY_PREVIEW_CHARS = 140
+
+
+def _reply_preview(parent: Message | None) -> dict | None:
+    """Build a small preview payload for an inline reply quote.
+
+    Rendered as the small quote bubble above a reply message. We keep the
+    text short so history payloads don't balloon for channels with lots
+    of replies. ``None`` when the parent is missing or soft-deleted — the
+    FE falls back to a "message deleted" placeholder.
+    """
+    if parent is None or parent.deleted:
+        return None
+    snippet = (parent.content or "")[:_REPLY_PREVIEW_CHARS]
+    return {
+        "id": str(parent.id),
+        "content": snippet,
+        "sender": parent.sender,
+        "senderType": parent.sender_type,
+        "agent": parent.agent,
+    }
+
+
+def _message_response(msg: Message, *, parent: Message | None = None) -> dict:
+    """Convert a Message document to a frontend-compatible dict.
+
+    When ``parent`` is supplied (because the caller already fetched it,
+    or prefetched a batch for a list view), a ``replyPreview`` field is
+    included so the FE can render the inline quote without a second
+    fetch. For replies where the parent isn't resolvable (deleted, or
+    caller chose not to fetch), ``replyPreview`` is ``None``.
+    """
     return {
         "_id": str(msg.id),
         "group": msg.group,
@@ -62,6 +90,7 @@ def _message_response(msg: Message) -> dict:
         "content": msg.content,
         "mentions": [m.model_dump() for m in msg.mentions],
         "replyTo": msg.reply_to,
+        "replyPreview": _reply_preview(parent) if msg.reply_to else None,
         "threadCount": msg.thread_count,
         "attachments": [a.model_dump() for a in msg.attachments],
         "reactions": [r.model_dump() for r in msg.reactions],
@@ -126,19 +155,24 @@ class MessageService:
         group.message_count += 1
         await group.save()
 
+        # Resolve the reply parent once so we can both embed a preview in
+        # the response and keep replies rendering inline in the main feed.
+        # The previous implementation also bumped ``parent.thread_count``
+        # and emitted a ``ThreadReply`` event — we've moved to inline
+        # quoted replies (Telegram-style), so neither is needed: the
+        # parent's counter isn't displayed anywhere and the reply fans out
+        # via ``MessageNew`` like any other message.
+        parent: Message | None = None
         if body.reply_to:
             try:
-                from beanie import PydanticObjectId
                 parent_id = PydanticObjectId(body.reply_to)
                 parent = await Message.find_one({"_id": parent_id, "context_type": "group"})
-                if parent is not None:
-                    parent.thread_count = (parent.thread_count or 0) + 1
-                    await parent.save()
             except Exception:
-                # Bad reply_to — skip bump; main send already succeeded
-                pass
+                # Bad reply_to — the reply still sends; FE will render it
+                # without a quote bubble.
+                parent = None
 
-        response = _message_response(msg)
+        response = _message_response(msg, parent=parent)
 
         await event_bus.emit(
             "message.sent",
@@ -155,11 +189,10 @@ class MessageService:
 
         # Realtime fan-out: message.new to the group (sender excluded via
         # AudienceResolver reading data["sender"]), message.sent ack to the
-        # sender only (keyed by data["sender_id"]).
-        if body.reply_to:
-            await emit(ThreadReply(data={**response, "group_id": group_id, "root_message_id": body.reply_to}))
-        else:
-            await emit(MessageNew(data={**response, "group_id": group_id}))
+        # sender only (keyed by data["sender_id"]). Inline replies share
+        # the same ``MessageNew`` channel as top-level messages — the quote
+        # bubble is rendered client-side from ``replyPreview``.
+        await emit(MessageNew(data={**response, "group_id": group_id}))
         await emit(MessageSent(data={**response, "group_id": group_id, "sender_id": user_id}))
 
         # Unread badge sync — every non-sender member receives a delta so their
@@ -406,7 +439,24 @@ class MessageService:
         if has_more:
             messages = messages[:limit]
 
-        items = [_message_response(m) for m in messages]
+        # Batch-fetch parents for any replies in this page so ``replyPreview``
+        # lands on each reply without an N+1 round-trip. Missing parents are
+        # tolerated — the FE falls back to a "message unavailable" bubble.
+        parent_ids = {m.reply_to for m in messages if m.reply_to}
+        parents_by_id: dict[str, Message] = {}
+        if parent_ids:
+            try:
+                oids = [PydanticObjectId(pid) for pid in parent_ids if pid]
+            except Exception:
+                oids = []
+            if oids:
+                parent_docs = await Message.find({"_id": {"$in": oids}}).to_list()
+                parents_by_id = {str(p.id): p for p in parent_docs}
+
+        items = [
+            _message_response(m, parent=parents_by_id.get(m.reply_to) if m.reply_to else None)
+            for m in messages
+        ]
 
         next_cursor: str | None = None
         if has_more and messages:
