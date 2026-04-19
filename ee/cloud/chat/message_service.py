@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import logging
 import re
 from datetime import UTC, datetime
@@ -161,14 +163,15 @@ class MessageService:
 
         # Unread badge sync — every non-sender member receives a delta so their
         # client can increment the sidebar counter without a full /unreads refetch.
-        for member in group.members:
-            if member == user_id:
-                continue
-            await emit(
-                UnreadUpdate(
-                    data={"group_id": group_id, "user_id": member, "delta": 1},
-                )
-            )
+        # Concurrent emit() so a 1000-member channel isn't 999 sequential awaits
+        # on the sender's request path.
+        unread_tasks = [
+            emit(UnreadUpdate(data={"group_id": group_id, "user_id": member, "delta": 1}))
+            for member in group.members
+            if member != user_id
+        ]
+        if unread_tasks:
+            await asyncio.gather(*unread_tasks)
 
         # Derive mention notifications. Dedupe recipients across multiple
         # mentions in the same message. Broadcast types (@here/@channel/@everyone)
@@ -191,7 +194,7 @@ class MessageService:
                         recipients.add(member)
             # "agent" and "channel_ref" skip — not a user notification trigger.
 
-        for target in recipients:
+        async def _fan_out_mention(target: str) -> None:
             await NotificationService.create(
                 workspace_id=str(group.workspace),
                 recipient=target,
@@ -205,6 +208,9 @@ class MessageService:
                 ),
             )
             await UnreadService.bump_mention(target, group_id)
+
+        if recipients:
+            await asyncio.gather(*(_fan_out_mention(t) for t in recipients))
 
         return response
 

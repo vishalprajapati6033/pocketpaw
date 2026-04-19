@@ -139,26 +139,16 @@ def mount_cloud(app: FastAPI) -> None:
 
     register_agent_bridge()
 
-    # Start/stop agent pool with app lifecycle.
+    # Initialise the realtime EventBus now, synchronously.
     #
-    # Previously also called ``register_chat_persistence()`` to subscribe to
-    # outbound messages on Channel.WEBSOCKET and persist them to Mongo.
-    # That bridge dual-wrote every user + agent message — MongoMemoryStore
-    # already persists SESSION entries through the agent loop, so keeping
-    # the subscription turned every single chat turn into two rows (one
-    # with attachments, one without). The canonical write path is now
-    # ``MongoMemoryStore.save`` which receives attachments through
-    # InboundMessage.metadata.
-    @app.on_event("startup")
-    async def _start_agent_pool():
-        init_realtime()
-
-        from pocketpaw.agents.pool import get_agent_pool
-
-        await get_agent_pool().start()
-
-    @app.on_event("shutdown")
-    async def _stop_agent_pool():
-        from pocketpaw.agents.pool import get_agent_pool
-
-        await get_agent_pool().stop()
+    # This used to live in an ``@app.on_event("startup")`` handler, but the
+    # host app (dashboard.py / api/serve.py) is constructed with a custom
+    # ``lifespan=`` context manager. Starlette silently ignores
+    # ``on_event`` handlers registered after a custom lifespan is set, so
+    # the bus never got initialised and the first emit raised
+    # ``AssertionError: EventBus not initialized``. ``init_realtime`` is
+    # pure-sync, idempotent, and needs no event loop — safe at mount time.
+    # The agent pool's async start/stop lives in
+    # ``pocketpaw.dashboard_lifecycle`` so it participates in the real
+    # lifespan.
+    init_realtime()

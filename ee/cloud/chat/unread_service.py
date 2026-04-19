@@ -29,6 +29,12 @@ async def _count_messages_after(group_id: str, last_message_id: str) -> int:
 
     ObjectIds sort monotonically by creation time, so $gt on _id works as
     an ordered cursor without a separate timestamp field.
+
+    We filter on ``group`` alone (not ``context_type``) because legacy rows
+    written before ``context_type`` existed in the schema have the field
+    absent in MongoDB — a strict ``context_type="group"`` equality would
+    exclude them and silently under-report unreads. The ``group`` field
+    is set on group messages only, so it's a sufficient discriminator.
     """
     from beanie import PydanticObjectId
 
@@ -39,7 +45,6 @@ async def _count_messages_after(group_id: str, last_message_id: str) -> int:
 
     return await Message.find(
         {
-            "context_type": "group",
             "group": group_id,
             "_id": {"$gt": after},
             "deleted": False,
