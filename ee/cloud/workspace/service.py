@@ -409,12 +409,23 @@ class WorkspaceService:
 
     @staticmethod
     async def validate_invite(token: str) -> dict:
-        """Find an invite by token and return its status. No auth required."""
+        """Find an invite by token and return its status. No auth required.
+
+        Enriches the base invite shape with ``valid`` + ``workspace_name`` so
+        the /invite/[token] frontend can render the destination without a
+        second round-trip (otherwise the subtitle renders a blank name).
+        """
         invite = await Invite.find_one(Invite.token == token)
         if not invite:
             raise NotFound("invite")
 
-        return _invite_response(invite)
+        ws = await Workspace.get(PydanticObjectId(invite.workspace))
+        workspace_name = ws.name if ws and ws.deleted_at is None else ""
+
+        response = _invite_response(invite)
+        response["valid"] = not (invite.accepted or invite.revoked or invite.expired)
+        response["workspace_name"] = workspace_name
+        return response
 
     @staticmethod
     async def accept_invite(token: str, user: User) -> None:
