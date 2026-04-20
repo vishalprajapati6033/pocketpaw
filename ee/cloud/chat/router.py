@@ -7,6 +7,11 @@ Updated 2026-04-19 (Task 19, Cluster A sub-PR 4): presence events are now
 emitted on WS connect and disconnect. PresenceOnline fires immediately when
 a user's first socket accepts; PresenceOffline fires after the existing
 30s grace window so quick reloads don't flap the online indicator.
+
+Updated 2026-04-20: on connect, also send the new socket a snapshot of
+currently-online workspace peers. Without this, a user who joins after
+their peers are already online never learns they're there — the server
+only broadcasts presence deltas, not the current set.
 """
 
 from __future__ import annotations
@@ -42,6 +47,7 @@ from ee.cloud.shared.deps import (
     current_workspace_id,
     require_group_action,
 )
+from ee.cloud.workspace.service import WorkspaceService
 
 logger = logging.getLogger(__name__)
 
@@ -460,6 +466,21 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
     await manager.connect(websocket, user_id)
     if was_offline_before:
         await emit(PresenceOnline(data={"user_id": user_id}))
+
+    # Send a one-shot snapshot of currently-online peers to THIS socket so the
+    # client's presence store is seeded before any deltas arrive. Goes directly
+    # to the socket (not the bus) because the payload is addressed to this
+    # connection only. Without it, a late joiner sees only their own dot until
+    # someone else flaps online/offline.
+    try:
+        peer_ids = await WorkspaceService.list_peer_ids(user_id)
+        for peer_id in peer_ids:
+            if manager.is_online(peer_id):
+                await websocket.send_json(
+                    {"type": "presence.online", "data": {"user_id": peer_id}}
+                )
+    except Exception:
+        logger.exception("Failed to send presence snapshot to user=%s", user_id)
 
     try:
         while True:
