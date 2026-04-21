@@ -340,6 +340,14 @@ async def query_audit(
         None, description="Filter by category: decision|data|config|security"
     ),
     event: str | None = Query(None, description="Filter by event type"),
+    actor: str | None = Query(
+        None,
+        description=(
+            "Filter by fully-qualified actor string (e.g. ``agent:abc123`` "
+            "or ``user:maya``). Exact match — added 2026-04-19 for the "
+            "AgentReasoningTab's per-agent reasoning-trace view."
+        ),
+    ),
     limit: int = Query(100, ge=1, le=1000, description="Max entries to return"),
 ):
     """Query instinct audit log entries with optional filters.
@@ -357,6 +365,7 @@ async def query_audit(
         pocket_id=pocket_id,
         category=category,
         event=event,
+        actor=actor,
         limit=limit,
     )
     return AuditListResponse(entries=entries, total=len(entries))
