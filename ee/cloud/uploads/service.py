@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 from fastapi import UploadFile
 
@@ -45,12 +45,72 @@ class EEUploadService:
         adapter: StorageAdapter,
         meta: MongoFileStore,
         cfg: UploadSettings,
+        is_chat_member: Callable[[str, str, str], Awaitable[bool]] | None = None,
+        is_workspace_admin: Callable[[str, str], Awaitable[bool]] | None = None,
     ) -> None:
         self._adapter = adapter
         self._meta = meta
         self._cfg = cfg
+        # Optional collaborator checks. When ``None``, the corresponding
+        # branch is skipped and the gate reduces to owner-only — preserving
+        # behaviour for tests and callers that don't wire them.
+        self._is_chat_member = is_chat_member
+        self._is_workspace_admin = is_workspace_admin
         # Use a null meta under OSS service so we control Mongo writes here
         self._oss = UploadService(adapter=adapter, meta=_NullMeta(), cfg=cfg)  # type: ignore[arg-type]
+
+    async def _assert_can_write(
+        self,
+        rec: FileRecord,
+        requester_id: str,
+        workspace: str,
+    ) -> None:
+        """Gate a write on a file record.
+
+        Owner OR workspace admin/owner only. Chat-member does NOT grant
+        write. Mirrors :meth:`_assert_can_read` but does not fall through
+        silently — callers translate the raised exception to a 403.
+        """
+        if rec.owner_id == requester_id:
+            return
+        if self._is_workspace_admin is not None:
+            try:
+                if await self._is_workspace_admin(requester_id, workspace):
+                    return
+            except Exception:
+                pass
+        raise PermissionError("files.forbidden")
+
+    async def _assert_can_read(
+        self,
+        rec: FileRecord,
+        requester_id: str,
+        workspace: str,
+    ) -> None:
+        """Gate a read on a file record.
+
+        Allows owner, chat-members (when the file is pinned to a chat), and
+        workspace admins/owners. Every denial raises :class:`NotFound` so
+        callers cannot distinguish "missing" from "forbidden".
+        """
+        if rec.owner_id == requester_id:
+            return
+        chat_id = getattr(rec, "chat_id", None)
+        if chat_id and self._is_chat_member is not None:
+            try:
+                if await self._is_chat_member(chat_id, requester_id, workspace):
+                    return
+            except Exception:
+                # Defensive: collaborator lookup must never leak info or
+                # convert a 404 into a 500.
+                pass
+        if self._is_workspace_admin is not None:
+            try:
+                if await self._is_workspace_admin(requester_id, workspace):
+                    return
+            except Exception:
+                pass
+        raise NotFound()
 
     async def upload(
         self,
@@ -58,8 +118,11 @@ class EEUploadService:
         owner_id: str,
         chat_id: str | None,
         workspace: str,
+        folder_path: str = "/",
     ) -> FileRecord:
-        result = await self.upload_many([file], owner_id, chat_id, workspace)
+        result = await self.upload_many(
+            [file], owner_id, chat_id, workspace, folder_path=folder_path
+        )
         if result.failed:
             f = result.failed[0]
             _raise(f.code, f.reason)
@@ -71,12 +134,15 @@ class EEUploadService:
         owner_id: str,
         chat_id: str | None,
         workspace: str,
+        folder_path: str = "/",
     ) -> BulkUploadResult:
         # Delegate validation + adapter writes; metadata is discarded inside OSS
         result = await self._oss.upload_many(files, owner_id, chat_id)
         # Persist each successful record in Mongo with workspace scoping
         for rec in result.uploaded:
-            await self._meta.save_scoped(rec, workspace=workspace)
+            await self._meta.save_scoped(
+                rec, workspace=workspace, folder_path=folder_path
+            )
             # Only chat-scoped uploads are realtime-broadcastable; avatars
             # and knowledge uploads aren't rendered in chat timelines.
             if rec.chat_id:
@@ -103,9 +169,7 @@ class EEUploadService:
         rec = await self._meta.get_scoped(file_id, workspace=workspace)
         if rec is None:
             raise NotFound()
-        if rec.owner_id != requester_id:
-            # v1: owner-only. Chat-member check is a follow-up.
-            raise NotFound()
+        await self._assert_can_read(rec, requester_id, workspace)
         return rec, self._adapter.open(rec.storage_key)
 
     async def presigned_get(
@@ -118,8 +182,7 @@ class EEUploadService:
         rec = await self._meta.get_scoped(file_id, workspace=workspace)
         if rec is None:
             raise NotFound()
-        if rec.owner_id != requester_id:
-            raise NotFound()
+        await self._assert_can_read(rec, requester_id, workspace)
         url = await self._adapter.presigned_get(rec.storage_key, ttl_seconds)
         return rec, url
 
