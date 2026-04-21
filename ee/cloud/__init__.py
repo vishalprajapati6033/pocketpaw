@@ -1,8 +1,10 @@
 """PocketPaw Enterprise Cloud — domain-driven architecture.
 
 Updated: Added kb (knowledge base) domain router to mount_cloud().
+Updated: 2026-04-19 (Cluster C / PR1) — Mounted ee.cloud.kb.knowledge_router,
+    which exposes GET /api/v1/knowledge/articles as a workspace-level aggregate.
 
-Domains: auth, workspace, chat, pockets, sessions, agents, kb.
+Domains: auth, workspace, chat, pockets, sessions, agents, kb, knowledge.
 Each has router.py (thin), service.py (logic), schemas.py (validation).
 """
 
@@ -70,11 +72,13 @@ def mount_cloud(app: FastAPI) -> None:
     app.include_router(pockets_router, prefix="/api/v1")
     app.include_router(sessions_router, prefix="/api/v1")
 
+    from ee.cloud.kb.knowledge_router import router as knowledge_router
     from ee.cloud.kb.router import router as kb_router
     from ee.cloud.notifications.router import router as notifications_router
     from ee.cloud.uploads.router import router as uploads_router
 
     app.include_router(kb_router, prefix="/api/v1")
+    app.include_router(knowledge_router, prefix="/api/v1")
     app.include_router(uploads_router, prefix="/api/v1")
     app.include_router(notifications_router, prefix="/api/v1")
 
