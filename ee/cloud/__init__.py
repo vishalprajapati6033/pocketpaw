@@ -72,6 +72,7 @@ def mount_cloud(app: FastAPI) -> None:
     app.include_router(pockets_router, prefix="/api/v1")
     app.include_router(sessions_router, prefix="/api/v1")
 
+    from ee.cloud.files.router import router as files_router
     from ee.cloud.kb.knowledge_router import router as knowledge_router
     from ee.cloud.kb.router import router as kb_router
     from ee.cloud.notifications.router import router as notifications_router
@@ -82,6 +83,7 @@ def mount_cloud(app: FastAPI) -> None:
     app.include_router(knowledge_router, prefix="/api/v1")
     app.include_router(uploads_router, prefix="/api/v1")
     app.include_router(notifications_router, prefix="/api/v1")
+    app.include_router(files_router, prefix="/api/v1")
     # paw_print lives outside ee/cloud/ but is mounted alongside the cloud
     # routers so the admin UI (paw-enterprise /pockets/<id> Paw Print tab) can
     # reach /api/v1/paw-print/* without a second app setup entry point.
