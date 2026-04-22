@@ -57,9 +57,7 @@ class TestRequireScopeNoFullAccessMarker:
     def test_request_with_no_auth_markers_is_rejected(self):
         app = _build_app_with_state(api_key=None, oauth_token=None)
         resp = TestClient(app).get("/protected")
-        assert resp.status_code == 403, (
-            "require_scope must fail closed when no auth marker is set"
-        )
+        assert resp.status_code == 403, "require_scope must fail closed when no auth marker is set"
 
     def test_request_with_full_access_marker_is_allowed(self):
         app = _build_app_with_state(api_key=None, oauth_token=None, full_access=True)
@@ -67,37 +65,27 @@ class TestRequireScopeNoFullAccessMarker:
         assert resp.status_code == 200
 
     def test_apikey_without_required_scope_is_rejected(self):
-        app = _build_app_with_state(
-            api_key=_APIKey(scopes=["chat"]), oauth_token=None
-        )
+        app = _build_app_with_state(api_key=_APIKey(scopes=["chat"]), oauth_token=None)
         resp = TestClient(app).get("/protected")
         assert resp.status_code == 403
 
     def test_apikey_with_required_scope_is_allowed(self):
-        app = _build_app_with_state(
-            api_key=_APIKey(scopes=["memory"]), oauth_token=None
-        )
+        app = _build_app_with_state(api_key=_APIKey(scopes=["memory"]), oauth_token=None)
         resp = TestClient(app).get("/protected")
         assert resp.status_code == 200
 
     def test_apikey_with_admin_scope_is_allowed(self):
-        app = _build_app_with_state(
-            api_key=_APIKey(scopes=["admin"]), oauth_token=None
-        )
+        app = _build_app_with_state(api_key=_APIKey(scopes=["admin"]), oauth_token=None)
         resp = TestClient(app).get("/protected")
         assert resp.status_code == 200
 
     def test_oauth_without_required_scope_is_rejected(self):
-        app = _build_app_with_state(
-            api_key=None, oauth_token=_OAuthToken(scope="chat")
-        )
+        app = _build_app_with_state(api_key=None, oauth_token=_OAuthToken(scope="chat"))
         resp = TestClient(app).get("/protected")
         assert resp.status_code == 403
 
     def test_oauth_with_required_scope_is_allowed(self):
-        app = _build_app_with_state(
-            api_key=None, oauth_token=_OAuthToken(scope="memory chat")
-        )
+        app = _build_app_with_state(api_key=None, oauth_token=_OAuthToken(scope="memory chat"))
         resp = TestClient(app).get("/protected")
         assert resp.status_code == 200
 

@@ -51,8 +51,8 @@ logger = logging.getLogger(__name__)
 
 # #941 graduation knobs
 DEFAULT_WINDOW_DAYS = 30
-DEFAULT_PIN_THRESHOLD = 10          # Promoting interactions in window → pin
-DEFAULT_ARCHIVE_DAYS = 60           # Untouched longer than this → archive
+DEFAULT_PIN_THRESHOLD = 10  # Promoting interactions in window → pin
+DEFAULT_ARCHIVE_DAYS = 60  # Untouched longer than this → archive
 _PROMOTING_ACTIONS = ("open", "edit", "click")
 
 # #942 co-occurrence knobs

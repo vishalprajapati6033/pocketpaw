@@ -129,8 +129,7 @@ class MessageBus:
                 raise  # Re-raise to let gather capture it
 
         await asyncio.gather(
-            *[_safe_publish(i, sub) for i, sub in enumerate(subs)],
-            return_exceptions=True
+            *[_safe_publish(i, sub) for i, sub in enumerate(subs)], return_exceptions=True
         )
 
     async def broadcast_outbound(
@@ -146,9 +145,7 @@ class MessageBus:
             try:
                 await self.publish_outbound(channel_msg)
             except Exception as e:
-                logger.error(
-                    f"🚨 Broadcast to channel {channel.value} FAILED: {e}"
-                )
+                logger.error(f"🚨 Broadcast to channel {channel.value} FAILED: {e}")
 
     # =========================================================================
     # System Events (Internal)

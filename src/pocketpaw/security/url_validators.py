@@ -26,16 +26,14 @@ _ALLOWED_SCHEMES: frozenset[str] = frozenset({"http", "https"})
 # operator explicitly opts in via ``POCKETPAW_ALLOW_INTERNAL_URLS=true``.
 # Dev-mode defaults (`http://localhost:4096`, `http://localhost:11434`, …)
 # rely on this opt-in; OSS / production deployments should leave it off.
-_BLOCKED_HOSTS: frozenset[str] = frozenset(
-    {"localhost", "ip6-localhost", "ip6-loopback"}
-)
+_BLOCKED_HOSTS: frozenset[str] = frozenset({"localhost", "ip6-localhost", "ip6-loopback"})
 _BLOCKED_NETWORKS: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = (
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("10.0.0.0/8"),
     ipaddress.ip_network("172.16.0.0/12"),
     ipaddress.ip_network("192.168.0.0/16"),
     ipaddress.ip_network("169.254.0.0/16"),  # link-local / EC2 metadata
-    ipaddress.ip_network("100.64.0.0/10"),   # carrier-grade NAT
+    ipaddress.ip_network("100.64.0.0/10"),  # carrier-grade NAT
     ipaddress.ip_network("0.0.0.0/8"),
     ipaddress.ip_network("::1/128"),
     ipaddress.ip_network("fc00::/7"),
@@ -78,9 +76,7 @@ def validate_external_url(value: str) -> str:
 
     parts = urlsplit(value)
     if parts.scheme not in _ALLOWED_SCHEMES:
-        raise ValueError(
-            f"URL scheme '{parts.scheme or '(none)'}' not allowed — use http or https"
-        )
+        raise ValueError(f"URL scheme '{parts.scheme or '(none)'}' not allowed — use http or https")
     if not parts.hostname:
         raise ValueError(f"URL has no host: {value!r}")
 

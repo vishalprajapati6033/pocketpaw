@@ -359,11 +359,7 @@ class TestDownstreamProjection:
 
         res = client.get("/widgets/usage?window_days=30")
         assert res.status_code == 200
-        rows = [
-            r
-            for r in res.json()["entries"]
-            if r["widget_name"] == "metrics_chart"
-        ]
+        rows = [r for r in res.json()["entries"] if r["widget_name"] == "metrics_chart"]
         assert len(rows) == 1
         assert rows[0]["count"] == 3
         assert rows[0]["promoting_count"] == 2
