@@ -13,6 +13,10 @@ from fastapi.testclient import TestClient
 
 from pocketpaw.api.v1.files import router as files_router
 
+# This whole file exercises the fail-closed scope enforcement path, so it
+# must opt out of the conftest's _TESTING_FULL_ACCESS bypass.
+pytestmark = pytest.mark.enforce_scope
+
 
 @pytest.fixture
 def app_with_scopeless_apikey(tmp_path):
