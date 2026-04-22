@@ -6,9 +6,6 @@ from __future__ import annotations
 import threading
 import time
 
-import pytest
-
-
 # ---------------------------------------------------------------------------
 # #891 — Rate limiter TOCTOU race
 # ---------------------------------------------------------------------------
