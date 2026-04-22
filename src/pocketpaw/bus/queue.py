@@ -112,11 +112,13 @@ class MessageBus:
                     f"⛔ Isolation FAILED for {msg.channel.value} subscriber {idx}; "
                     f"falling back to shallow copy (reduced isolation): {e}"
                 )
-                # Shallow copy fallback as a safer middle ground
+                # Shallow copy fallback as a safer middle ground. Guard
+                # against None explicitly — the dataclass defaults are empty
+                # containers but a caller can still pass None at construction.
                 isolated_msg = replace(
                     msg,
-                    metadata=dict(msg.metadata),
-                    media=list(msg.media),
+                    metadata=dict(msg.metadata) if msg.metadata else {},
+                    media=list(msg.media) if msg.media else [],
                 )
 
             # 2. Deliver message
