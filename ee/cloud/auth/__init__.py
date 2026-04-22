@@ -14,7 +14,9 @@ from ee.cloud.auth.core import (  # noqa: F401
     get_jwt_strategy,
     get_user_db,
     get_user_manager,
+    ensure_default_agent_all_workspaces,
     seed_admin,
+    seed_default_agent,
     seed_workspace,
 )
 from ee.cloud.auth.router import router  # noqa: F401

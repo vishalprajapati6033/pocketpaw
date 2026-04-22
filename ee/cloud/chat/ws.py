@@ -37,6 +37,8 @@ class ConnectionManager:
         self._offline_tasks: dict[str, asyncio.Task] = {}
         # Typing timers: (group_id, user_id) -> Task
         self._typing_timers: dict[tuple[str, str], asyncio.Task] = {}
+        # Current room per socket (at most one): ws -> group_id
+        self._ws_to_room: dict[WebSocket, str] = {}
 
     async def connect(self, websocket: WebSocket, user_id: str) -> None:
         """Register an authenticated WebSocket connection."""
@@ -63,6 +65,9 @@ class ConnectionManager:
         should start a grace-period offline timer).  Returns ``None`` if the
         user still has other active connections or the websocket was unknown.
         """
+        # Always clear any room association, regardless of user mapping.
+        self._ws_to_room.pop(websocket, None)
+
         user_id = self._ws_to_user.pop(websocket, None)
         if not user_id:
             return None
@@ -110,6 +115,49 @@ class ConnectionManager:
             if uid == exclude_user:
                 continue
             await self.send_to_user(uid, message)
+
+    # ------------------------------------------------------------------
+    # Room tracking (at most one current room per socket)
+    # ------------------------------------------------------------------
+
+    def join_room(self, websocket: WebSocket, group_id: str) -> None:
+        """Associate a socket with a single current room. Replaces any prior room."""
+        self._ws_to_room[websocket] = group_id
+
+    def leave_room(self, websocket: WebSocket) -> None:
+        """Clear the socket's current room. Idempotent."""
+        self._ws_to_room.pop(websocket, None)
+
+    def current_room(self, websocket: WebSocket) -> str | None:
+        """Return the socket's current room, or None if not in any room."""
+        return self._ws_to_room.get(websocket)
+
+    async def send_to_room(
+        self,
+        group_id: str,
+        message: WsOutbound,
+        *,
+        exclude_user: str | None = None,
+    ) -> None:
+        """Send to every socket currently joined to the room.
+
+        Does not know group membership — membership was enforced at join time
+        by the handler (the router dispatcher validates the joiner is allowed
+        in the group before calling ``join_room``).
+        """
+        data = message.model_dump(mode="json")
+        dead: list[WebSocket] = []
+        for ws, room in list(self._ws_to_room.items()):
+            if room != group_id:
+                continue
+            if exclude_user and self._ws_to_user.get(ws) == exclude_user:
+                continue
+            try:
+                await ws.send_json(data)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            await self.disconnect(ws)
 
     # ------------------------------------------------------------------
     # Typing indicators

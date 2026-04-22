@@ -131,6 +131,8 @@ class WsInbound(BaseModel):
         "typing.stop",
         "presence.update",
         "read.ack",
+        "room.join",
+        "room.leave",
     ]
     group_id: str | None = None
     message_id: str | None = None

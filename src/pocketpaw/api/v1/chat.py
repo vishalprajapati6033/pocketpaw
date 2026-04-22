@@ -162,6 +162,16 @@ class _APISessionBridge:
                         "data": {"mutation": data.get("mutation", {})},
                     }
                 )
+            elif evt.event_type == "session_titled":
+                await self.queue.put(
+                    {
+                        "event": "session_titled",
+                        "data": {
+                            "session_id": data.get("session_id", ""),
+                            "title": data.get("title", ""),
+                        },
+                    }
+                )
             elif evt.event_type == "error":
                 await self.queue.put(
                     {"event": "error", "data": {"detail": data.get("message", "")}}
@@ -184,25 +194,108 @@ class _APISessionBridge:
             bus.unsubscribe_system(self._system_cb)
 
 
-async def _send_message(chat_request: ChatRequest) -> str:
-    """Publish an inbound message to the bus and return the chat_id."""
-    from pocketpaw.bus import get_message_bus
+async def _build_inbound_message(chat_request: ChatRequest):
+    """Build an InboundMessage for ``chat_request`` — shared by the bus
+    dispatch path (default loop) and the direct-call path (per-agent loop).
+    Returns ``(chat_id, InboundMessage)``.
+    """
     from pocketpaw.bus.events import Channel, InboundMessage
+    from pocketpaw.uploads.resolver import resolve_media_with_records
 
     chat_id = _extract_chat_id(chat_request.session_id)
 
     meta: dict = {"source": "rest_api"}
     if chat_request.file_context:
         meta["file_context"] = chat_request.file_context.model_dump(exclude_none=True)
+    if chat_request.agent_id:
+        meta["agent_id"] = chat_request.agent_id
+
+    # Resolve ``/api/v1/uploads/{id}`` URLs to (path, FileRecord) pairs so the
+    # agent prompt can carry filename / mime / size, not just a bare disk path.
+    # Falls back to the EE Mongo store when OSS JSONL misses — common in
+    # self-hosted EE where uploads go through the workspace-scoped router.
+    resolved = await resolve_media_with_records(chat_request.media or [])
+    media = [r.path for r in resolved]
+    media_info = [
+        {
+            "path": r.path,
+            "filename": r.record.filename,
+            "mime": r.record.mime,
+            "size": r.record.size,
+        }
+        for r in resolved
+        if r.record is not None
+    ]
+    if media_info:
+        meta["media_info"] = media_info
+
+    # Persistence-friendly Attachment payloads for Mongo history. Kept on the
+    # original upload URL (not the resolved disk path) so the FE can <img
+    # src> the stored message on reload without server-side rewriting. These
+    # travel through ``meta["attachments"]`` so the single write path in
+    # ``MongoMemoryStore.save`` owns persistence — writing directly from
+    # here AND letting MongoMemoryStore write from the agent-loop path
+    # produced two user rows per send (one with attachments, one without).
+    attachments: list[dict] = []
+    for original_url, r in zip(chat_request.media or [], resolved, strict=False):
+        if r.record is None:
+            continue
+        kind = (
+            "image"
+            if r.record.mime.startswith("image/")
+            else ("audio" if r.record.mime.startswith("audio/") else "file")
+        )
+        attachments.append(
+            {
+                "type": kind,
+                "url": original_url,
+                "name": r.record.filename,
+                "meta": {
+                    "mime": r.record.mime,
+                    "size": r.record.size,
+                    "id": r.record.id,
+                },
+            }
+        )
+    if attachments:
+        meta["attachments"] = attachments
 
     msg = InboundMessage(
         channel=Channel.WEBSOCKET,
         sender_id="api_client",
         chat_id=chat_id,
         content=chat_request.content,
-        media=chat_request.media,
+        media=media,
         metadata=meta,
     )
+    return chat_id, msg
+
+
+async def _send_message(chat_request: ChatRequest) -> str:
+    """Dispatch the message to the default loop (via bus) or to a per-agent
+    loop directly when ``chat_request.agent_id`` is set.
+
+    Per-agent loops bypass the bus consumer to avoid racing with the
+    default loop for InboundMessages. Outbound events still flow through
+    the bus so the SSE bridge sees them unchanged.
+    """
+    from pocketpaw.bus import get_message_bus
+
+    chat_id, msg = await _build_inbound_message(chat_request)
+
+    if chat_request.agent_id:
+        try:
+            from pocketpaw.dashboard_state import get_agent_loop_for
+
+            loop = await get_agent_loop_for(chat_request.agent_id)
+            await loop.process_message(msg)
+            return chat_id
+        except Exception:
+            logger.exception(
+                "per-agent dispatch failed for agent %s; falling back to bus",
+                chat_request.agent_id,
+            )
+
     bus = get_message_bus()
     await bus.publish_inbound(msg)
     return chat_id
@@ -221,6 +314,7 @@ async def chat_send(body: ChatRequest):
             session_id=chat_id,
             media=body.media,
             file_context=body.file_context,
+            agent_id=body.agent_id,
         )
     )
 
@@ -270,10 +364,15 @@ async def chat_stream(body: ChatRequest):
         # stream — otherwise we'd kill a task that's just finishing up
         # memory storage for the previous (completed) message.
         try:
-            from pocketpaw.dashboard_state import agent_loop
+            from pocketpaw.dashboard_state import agent_loop, iter_per_agent_loops
 
             session_key = f"websocket:{chat_id}"
+            # Try the default loop first, then every per-agent loop — only
+            # one of them owns the task. ``cancel_task`` is a no-op when
+            # the key is unknown, so this is safe.
             agent_loop.cancel_task(session_key)
+            for loop in iter_per_agent_loops():
+                loop.cancel_task(session_key)
         except Exception:
             logger.debug("Could not cancel stale agent task", exc_info=True)
 
@@ -301,6 +400,7 @@ async def chat_stream(body: ChatRequest):
             session_id=chat_id,
             media=body.media,
             file_context=body.file_context,
+            agent_id=body.agent_id,
         )
     )
 
@@ -351,13 +451,16 @@ async def chat_stop(session_id: str = ""):
 
     # Also cancel the agent loop's processing task
     try:
-        from pocketpaw.dashboard_state import agent_loop
+        from pocketpaw.dashboard_state import agent_loop, iter_per_agent_loops
 
         # Derive chat_id from whatever format was given
         raw = session_id
         if raw.startswith(_WS_PREFIX):
             raw = raw[len(_WS_PREFIX) :]
-        agent_loop.cancel_task(f"websocket:{raw}")
+        session_key = f"websocket:{raw}"
+        agent_loop.cancel_task(session_key)
+        for loop in iter_per_agent_loops():
+            loop.cancel_task(session_key)
     except Exception:
         pass
 

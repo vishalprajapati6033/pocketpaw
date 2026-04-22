@@ -35,33 +35,43 @@ async def create_session(
 
 @router.get("", dependencies=[Depends(require_action_any_workspace("session.read_own"))])
 async def list_sessions(
+    agent_id: str | None = None,
     workspace_id: str = Depends(current_workspace_id),
     user_id: str = Depends(current_user_id),
 ) -> list[dict]:
+    """List the user's sessions. ``?agent_id=X`` filters to DM sessions for
+    that agent (used by the frontend to resolve the DM room)."""
+    if agent_id:
+        return await SessionService.list_by_agent(workspace_id, user_id, agent_id)
     return await SessionService.list_sessions(workspace_id, user_id)
 
 
 @router.get("/runtime")
 async def list_runtime_sessions(limit: int = 50) -> dict:
-    """List sessions from PocketPaw's native runtime file store."""
+    """List sessions from the active memory store's session index.
+
+    Dispatches on the store: MongoMemoryStore exposes an async variant,
+    FileMemoryStore a sync one. Stores without either return empty.
+    """
     from pocketpaw.memory import get_memory_manager
 
     manager = get_memory_manager()
     store = manager._store
 
-    if not hasattr(store, "_load_session_index"):
+    if hasattr(store, "_load_session_index_async"):
+        index = await store._load_session_index_async()
+    elif hasattr(store, "_load_session_index"):
+        index = store._load_session_index()
+    else:
         return {"sessions": [], "total": 0}
 
-    index = store._load_session_index()
     entries = sorted(
         index.items(),
         key=lambda kv: kv[1].get("last_activity", ""),
         reverse=True,
     )[:limit]
 
-    sessions = []
-    for safe_key, meta in entries:
-        sessions.append({"id": safe_key, **meta})
+    sessions = [{"id": safe_key, **meta} for safe_key, meta in entries]
 
     return {"sessions": sessions, "total": len(index)}
 
@@ -110,25 +120,15 @@ async def delete_session(
 async def get_session_history(
     session_id: str,
     limit: int = 50,
+    user_id: str = Depends(current_user_id),
 ) -> dict:
-    """Get session history. Tries MongoDB session first, falls back to runtime."""
-    # Try runtime directly (handles both general and pocket sessions)
+    """Return session history from the unified Mongo messages store."""
+    from ee.cloud.shared.errors import NotFound
+
     try:
-        from pocketpaw.memory import get_memory_manager
-
-        manager = get_memory_manager()
-        sid = session_id
-        for key in [sid, sid.replace("_", ":", 1), f"websocket:{sid}"]:
-            try:
-                entries = await manager.get_session_history(key, limit=limit)
-                if entries:
-                    return {"messages": entries}
-            except Exception:
-                continue
-    except Exception:
-        pass
-
-    return {"messages": []}
+        return await SessionService.get_history(session_id, user_id, limit=limit)
+    except NotFound:
+        return {"messages": []}
 
 
 @router.post("/{session_id}/touch", status_code=204)

@@ -264,6 +264,17 @@ def _strip_tts_links(text: str) -> str:
     return text.strip()
 
 
+def _format_bytes(n: int) -> str:
+    """Human-readable byte size (e.g. ``414.7 KB``) for prompt injection."""
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f} KB"
+    if n < 1024 * 1024 * 1024:
+        return f"{n / (1024 * 1024):.1f} MB"
+    return f"{n / (1024 * 1024 * 1024):.1f} GB"
+
+
 class AgentLoop:
     """
     Main agent execution loop.
@@ -273,11 +284,57 @@ class AgentLoop:
     openai_agents, google_adk, codex_cli, opencode, or copilot_sdk).
     """
 
-    def __init__(self):
-        self.settings = get_settings()
+    def __init__(
+        self,
+        agent_id: str | None = None,
+        agent_config: dict | None = None,
+        agent_name: str | None = None,
+    ):
+        """Build a loop, optionally scoped to a cloud Agent.
+
+        When ``agent_id`` is set, the loop uses a
+        :class:`CloudAgentBootstrapProvider` keyed by the agent's config so
+        the identity block in the system prompt matches the selected agent.
+        Per-agent backend overrides (``config.backend``, ``config.model``)
+        are applied when present. Per-agent loops are *not* bus consumers —
+        they're invoked directly via :meth:`process_message` so multiple
+        loops can coexist without racing each other for InboundMessages.
+        """
+        self.agent_id = agent_id
+        self.agent_config = agent_config or {}
+        self.agent_name = agent_name
+
+        base_settings = get_settings()
+        # Per-agent overrides: backend + model come from the agent doc.
+        if agent_id and self.agent_config:
+            overrides: dict = {}
+            be = (self.agent_config.get("backend") or "").strip()
+            mdl = (self.agent_config.get("model") or "").strip()
+            if be:
+                overrides["agent_backend"] = be
+            if mdl:
+                # Applies to the Anthropic provider — other providers read
+                # their own model fields from settings, so this is a
+                # best-effort override aligned with today's default backend.
+                overrides["anthropic_model"] = mdl
+            self.settings = (
+                base_settings.model_copy(update=overrides) if overrides else base_settings
+            )
+        else:
+            self.settings = base_settings
+
         self.bus = get_message_bus()
         self.memory = get_memory_manager()
         self.context_builder = AgentContextBuilder(memory_manager=self.memory)
+
+        # Point the context builder at a per-agent bootstrap when scoped.
+        if agent_id:
+            from pocketpaw.bootstrap.cloud_agent_provider import CloudAgentBootstrapProvider
+
+            self.context_builder.bootstrap = CloudAgentBootstrapProvider(
+                agent_name=agent_name or "Agent",
+                agent_config=self.agent_config,
+            )
 
         # Agent Router handles backend selection
         self._router: AgentRouter | None = None
@@ -297,15 +354,78 @@ class AgentLoop:
         # Soul Protocol (optional)
         self._soul_manager: Any = None  # SoulManager | None
 
+        # Strong refs to fire-and-forget background tasks (chat titling, etc.)
+        # so the event loop doesn't GC them mid-flight.
+        self._bg_tasks: set[asyncio.Task] = set()
+
         self._running = False
 
     def _get_router(self) -> AgentRouter:
-        """Get or create the agent router (lazy initialization)."""
+        """Get or create the agent router (lazy initialization).
+
+        Per-agent loops honour their captured ``self.settings`` (which
+        already carries the agent's backend/model overrides) so we don't
+        reload from disk and clobber them on first router access.
+        """
         if self._router is None:
-            # Reload settings to pick up any changes
-            settings = Settings.load()
-            self._router = AgentRouter(settings)
+            if self.agent_id:
+                self._router = AgentRouter(self.settings)
+            else:
+                # Default loop: reload settings to pick up config changes.
+                self._router = AgentRouter(Settings.load())
         return self._router
+
+    async def _generate_and_emit_title(self, session_key: str, first_message: str) -> None:
+        """Generate a chat title from ``first_message`` and publish a
+        ``session_titled`` SystemEvent. Best-effort; never raises."""
+        try:
+            from pocketpaw.memory.titler import generate_title
+
+            title = await generate_title(
+                first_message,
+                model=self.settings.chat_title_model,
+                api_key=self.settings.anthropic_api_key or None,
+            )
+            if not title:
+                return
+            # session_key is "channel:chat_id" — expose the safe_key form
+            # ("channel_chat_id") so web clients can correlate with their
+            # session_id directly.
+            safe_key = session_key.replace(":", "_")
+            await self.bus.publish_system(
+                SystemEvent(
+                    event_type="session_titled",
+                    data={
+                        "session_key": session_key,
+                        "session_id": safe_key,
+                        "title": title,
+                    },
+                )
+            )
+        except Exception:
+            logger.debug("session titling failed for %s", session_key, exc_info=True)
+
+    async def process_message(self, message: InboundMessage) -> None:
+        """Public entry point — run the full processing pipeline on one
+        message without going through the bus consumer.
+
+        The default loop consumes InboundMessages from the bus in
+        ``_loop()``; per-agent loops skip that and are invoked directly
+        from the HTTP handler so multiple loops never race for messages.
+        Outbound events still go through the bus so SSE bridges and
+        other subscribers keep working unchanged.
+        """
+        session_key = message.session_key
+        task = asyncio.create_task(self._process_message(message))
+        self._background_tasks.add(task)
+        self._active_tasks[session_key] = task
+
+        def _on_done(t: asyncio.Task, key: str = session_key) -> None:
+            self._background_tasks.discard(t)
+            if self._active_tasks.get(key) is t:
+                self._active_tasks.pop(key, None)
+
+        task.add_done_callback(_on_done)
 
     async def start(self) -> None:
         """Start the agent loop."""
@@ -654,6 +774,14 @@ class AgentLoop:
             store_meta = {
                 k: v for k, v in (message.metadata or {}).items() if k != "pocket_system_context"
             }
+            # Detect first-message state *before* persisting so titler can fire once.
+            is_first_message = False
+            try:
+                prior = await self.memory._store.get_session(session_key)
+                is_first_message = len(prior) == 0
+            except (AttributeError, TypeError):
+                is_first_message = False
+
             await self.memory.add_to_session(
                 session_key=session_key,
                 role="user",
@@ -661,14 +789,45 @@ class AgentLoop:
                 metadata=store_meta,
             )
 
+            # 1a. Fire-and-forget chat title generation on the first user message.
+            # Publishes a ``session_titled`` SystemEvent; persistence is the
+            # caller's responsibility (cloud: Mongo; OSS: in-memory/SSE only).
+            if is_first_message:
+                from pocketpaw.features import chat_titles_enabled
+
+                if chat_titles_enabled(self.settings):
+                    task = asyncio.create_task(
+                        self._generate_and_emit_title(session_key, content)
+                    )
+                    self._bg_tasks.add(task)
+                    task.add_done_callback(self._bg_tasks.discard)
+
             # 1b. Inject inbound media file paths so the agent can use them
             # Also detect whether this is a voice message so we can auto-TTS the reply.
             is_voice_message = any(
                 Path(p).suffix.lower() in _AUDIO_EXTS for p in (message.media or [])
             )
             if message.media:
-                paths_info = ", ".join(message.media)
-                content += f"\n[Media files on disk: {paths_info}]"
+                # Prefer the richer form when the chat bridge populated metadata
+                # (filename + mime + size per path). The plain path list is still
+                # a correct fallback — e.g. Telegram / Discord / WhatsApp adapters
+                # that don't produce upload records will drop in here.
+                media_info = (message.metadata or {}).get("media_info") or []
+                if media_info:
+                    lines = []
+                    for info in media_info:
+                        filename = info.get("filename") or Path(info.get("path", "")).name or "file"
+                        mime = info.get("mime") or "application/octet-stream"
+                        size = info.get("size")
+                        size_str = _format_bytes(size) if isinstance(size, int) else ""
+                        meta_suffix = f", {size_str}" if size_str else ""
+                        lines.append(
+                            f"- {filename} ({mime}{meta_suffix}) at {info.get('path', '')}"
+                        )
+                    content += "\n\nAttached files:\n" + "\n".join(lines)
+                else:
+                    paths_info = ", ".join(message.media)
+                    content += f"\n[Media files on disk: {paths_info}]"
 
             # 2. Build system prompt + session history concurrently (independent I/O)
             sender_id = message.sender_id
@@ -1042,9 +1201,14 @@ class AgentLoop:
                 # Skip auto-learn on cancelled responses — partial data is unreliable.
                 # Also skip when soul is active — soul.observe() + reflect() handles
                 # fact extraction and memory consolidation, so auto_learn would duplicate.
+                # Per-agent loops share the global memory store with every other
+                # agent, so extracted facts would contaminate the default agent's
+                # identity context. Skip auto-learn for per-agent loops until we
+                # have per-agent namespaced fact storage.
                 should_auto_learn = (
                     not cancelled
                     and self._soul_manager is None
+                    and self.agent_id is None
                     and (
                         (self.settings.memory_backend == "mem0" and self.settings.mem0_auto_learn)
                         or (

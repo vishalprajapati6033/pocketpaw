@@ -19,7 +19,21 @@ from ee.cloud.chat.schemas import (
     UpdateGroupRequest,
 )
 from ee.cloud.models.group import Group, GroupAgent, MemberRole
+from ee.cloud.realtime.bus import get_resolver
+from ee.cloud.realtime.emit import emit
+from ee.cloud.realtime.events import (
+    GroupAgentAdded,
+    GroupAgentRemoved,
+    GroupAgentUpdated,
+    GroupCreated,
+    GroupJoined,
+    GroupMemberAdded,
+    GroupMemberRemoved,
+    GroupMemberRole,
+    GroupUpdated,
+)
 from ee.cloud.shared.errors import Forbidden, NotFound, ValidationError
+from ee.cloud.shared.time import iso_utc
 from pocketpaw.ee.guards.actions import GroupRole
 from pocketpaw.ee.guards.audit import log_denial
 
@@ -105,9 +119,9 @@ async def _group_response(group: Group) -> dict:
         "agents": populated_agents,
         "pinnedMessages": group.pinned_messages,
         "archived": group.archived,
-        "lastMessageAt": group.last_message_at.isoformat() if group.last_message_at else None,
+        "lastMessageAt": iso_utc(group.last_message_at),
         "messageCount": group.message_count,
-        "createdAt": group.createdAt.isoformat() if group.createdAt else None,
+        "createdAt": iso_utc(group.createdAt),
     }
 
 
@@ -240,7 +254,9 @@ class GroupService:
             owner=user_id,
         )
         await group.insert()
-        return await _group_response(group)
+        resp = await _group_response(group)
+        await emit(GroupCreated(data={**resp, "member_ids": list(group.members)}))
+        return resp
 
     @staticmethod
     async def list_groups(workspace_id: str, user_id: str) -> list[dict]:
@@ -297,6 +313,8 @@ class GroupService:
             group.type = body.type
 
         await group.save()
+        patched = body.model_dump(exclude_unset=True)
+        await emit(GroupUpdated(data={"group_id": group_id, **patched}))
         return await _group_response(group)
 
     @staticmethod
@@ -306,20 +324,33 @@ class GroupService:
         _require_group_admin(group, user_id)
         group.archived = True
         await group.save()
+        await emit(GroupUpdated(data={"group_id": group_id, "archived": True}))
 
     @staticmethod
     async def join_group(group_id: str, user_id: str) -> None:
         """Join a public group. Adds user to members list."""
         group = await _get_group_or_404(group_id)
 
-        if group.type != "public":
-            raise Forbidden("group.not_public", "Only public groups can be joined directly")
+        if group.type not in ("public", "channel"):
+            raise Forbidden(
+                "group.not_joinable",
+                "Only public groups and channels can be joined directly",
+            )
         if group.archived:
             raise Forbidden("group.archived", "Cannot join an archived group")
 
         if user_id not in group.members:
             group.members.append(user_id)
             await group.save()
+            await emit(
+                GroupMemberAdded(data={"group_id": group_id, "user_id": user_id, "role": "edit"})
+            )
+            # The joining user has no local record of this group yet — a
+            # ``group.joined`` (audience = just them) hydrates the room in their
+            # sidebar so they don't have to refresh to see it.
+            resp = await _group_response(group)
+            await emit(GroupJoined(data={**resp, "member_ids": [user_id]}))
+            get_resolver().invalidate_group(group_id)
 
     @staticmethod
     async def leave_group(group_id: str, user_id: str) -> None:
@@ -335,6 +366,8 @@ class GroupService:
 
         group.members.remove(user_id)
         await group.save()
+        await emit(GroupMemberRemoved(data={"group_id": group_id, "user_id": user_id}))
+        get_resolver().invalidate_group(group_id)
 
     @staticmethod
     async def add_members(
@@ -369,6 +402,20 @@ class GroupService:
         if newly_added or role in ("admin", "view"):
             await group.save()
 
+        for added_user_id in newly_added:
+            await emit(
+                GroupMemberAdded(
+                    data={"group_id": group_id, "user_id": added_user_id, "role": role}
+                )
+            )
+        if newly_added:
+            # Newly-added members have no local record of this group yet — a
+            # ``group.joined`` (audience = just the new ids) hydrates the room
+            # in their sidebars so they don't have to refresh to see it.
+            resp = await _group_response(group)
+            await emit(GroupJoined(data={**resp, "member_ids": newly_added}))
+            get_resolver().invalidate_group(group_id)
+
         return newly_added
 
     @staticmethod
@@ -386,6 +433,8 @@ class GroupService:
         group.members.remove(target_user_id)
         group.member_roles.pop(target_user_id, None)
         await group.save()
+        await emit(GroupMemberRemoved(data={"group_id": group_id, "user_id": target_user_id}))
+        get_resolver().invalidate_group(group_id)
 
     @staticmethod
     async def set_member_role(
@@ -417,6 +466,9 @@ class GroupService:
             group.member_roles[target_user_id] = role
 
         await group.save()
+        await emit(
+            GroupMemberRole(data={"group_id": group_id, "user_id": target_user_id, "role": role})
+        )
         return role
 
     @staticmethod
@@ -441,6 +493,15 @@ class GroupService:
             )
         )
         await group.save()
+        await emit(
+            GroupAgentAdded(
+                data={
+                    "group_id": group_id,
+                    "agent_id": body.agent_id,
+                    "respond_mode": body.respond_mode,
+                }
+            )
+        )
 
     @staticmethod
     async def update_agent(
@@ -454,6 +515,15 @@ class GroupService:
             if agent.agent == agent_id:
                 agent.respond_mode = body.respond_mode
                 await group.save()
+                await emit(
+                    GroupAgentUpdated(
+                        data={
+                            "group_id": group_id,
+                            "agent_id": agent_id,
+                            "respond_mode": body.respond_mode,
+                        }
+                    )
+                )
                 return
 
         raise NotFound("agent", agent_id)
@@ -470,6 +540,7 @@ class GroupService:
             raise NotFound("agent", agent_id)
 
         await group.save()
+        await emit(GroupAgentRemoved(data={"group_id": group_id, "agent_id": agent_id}))
 
     @staticmethod
     async def get_or_create_dm(workspace_id: str, user_id: str, target_user_id: str) -> dict:
@@ -498,7 +569,9 @@ class GroupService:
             owner=user_id,
         )
         await group.insert()
-        return await _group_response(group)
+        resp = await _group_response(group)
+        await emit(GroupCreated(data={**resp, "member_ids": list(group.members)}))
+        return resp
 
     @staticmethod
     async def get_or_create_agent_dm(workspace_id: str, user_id: str, agent_id: str) -> dict:
@@ -550,4 +623,25 @@ class GroupService:
             owner=user_id,
         )
         await group.insert()
-        return await _group_response(group)
+        resp = await _group_response(group)
+        await emit(GroupCreated(data={**resp, "member_ids": list(group.members)}))
+        return resp
+
+    # ------------------------------------------------------------------
+    # Realtime helpers (audience lookups)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _fetch_group(group_id: str):
+        """Wrapped for testability."""
+        try:
+            oid = PydanticObjectId(group_id)
+        except Exception:
+            return None
+        return await Group.get(oid)
+
+    @staticmethod
+    async def list_member_ids(group_id: str) -> list[str]:
+        """Return the user_ids that are members of the group. Empty if missing."""
+        group = await GroupService._fetch_group(group_id)
+        return list(group.members) if group else []

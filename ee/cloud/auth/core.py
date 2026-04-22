@@ -251,7 +251,79 @@ async def seed_workspace(admin: User | None = None) -> Workspace | None:
         except Exception as exc:
             logger.warning("Failed to create default group (non-fatal): %s", exc)
 
+        # Seed the default "pocketpaw" agent — the agent that users DM
+        # through the runtime SSE chat endpoint. Gives DMs a stable
+        # identity so sessions can be keyed by agent_id.
+        try:
+            await seed_default_agent(str(ws.id), str(admin.id))
+        except Exception as exc:
+            logger.warning("Failed to seed default agent (non-fatal): %s", exc)
+
         return ws
     except Exception as exc:
         logger.error("Failed to seed workspace: %s", exc)
         return None
+
+
+async def ensure_default_agent_all_workspaces() -> int:
+    """Back-fill the pocketpaw agent for every existing workspace.
+
+    ``seed_workspace`` only runs on fresh installs — workspaces that predate
+    agent seeding never got one. Call this on every boot so the DM target
+    exists regardless of install age. Returns the number of agents actually
+    created this run (existing rows are not counted), so a second boot
+    reports ``0`` instead of misleadingly echoing the workspace count.
+    """
+    seeded = 0
+    async for ws in Workspace.find_all():
+        try:
+            _, created = await seed_default_agent(str(ws.id), str(ws.owner))
+            if created:
+                seeded += 1
+        except Exception as exc:
+            logger.warning("Failed to back-fill pocketpaw agent for ws=%s: %s", ws.id, exc)
+    return seeded
+
+
+async def seed_default_agent(
+    workspace_id: str, owner_id: str
+) -> tuple[Agent, bool] | tuple[None, bool]:  # noqa: F821
+    """Create the default "pocketpaw" Agent for a workspace if missing.
+
+    The frontend uses this agent's id as the DM room identifier (replacing
+    the legacy ``__paw-runtime-dm__`` sentinel), and Session docs for DMs
+    carry ``agent=<this agent's id>`` so per-agent history works.
+
+    Idempotent. Returns ``(agent, created)`` — ``created`` is ``True`` only
+    when this call inserted a new row, so back-fill paths can report
+    accurate counts. Returns ``(None, False)`` if an exception would have
+    been raised on insert (callers wrap in try/except).
+    """
+    from ee.cloud.models.agent import Agent, AgentConfig
+
+    existing = await Agent.find_one(Agent.workspace == workspace_id, Agent.slug == "pocketpaw")
+    if existing is not None:
+        return existing, False
+
+    agent = Agent(
+        workspace=workspace_id,
+        name="PocketPaw",
+        slug="pocketpaw",
+        avatar="",
+        owner=owner_id,
+        visibility="workspace",
+        config=AgentConfig(
+            system_prompt=(
+                "You are PocketPaw — the default assistant in this workspace. "
+                "Help the user with their tasks. Be concise, accurate, and honest."
+            ),
+            soul_persona="PocketPaw",
+        ),
+    )
+    await agent.insert()
+    logger.info(
+        "Default 'pocketpaw' agent seeded in workspace %s (id: %s)",
+        workspace_id,
+        agent.id,
+    )
+    return agent, True

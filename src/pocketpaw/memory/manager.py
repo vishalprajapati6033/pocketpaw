@@ -53,6 +53,12 @@ def create_memory_store(
     Returns:
         MemoryStoreProtocol implementation
     """
+    if backend == "mongodb":
+        # Lazy import so OSS builds don't need motor/beanie loaded.
+        from ee.cloud.memory.mongo_store import MongoMemoryStore  # type: ignore[import-not-found]
+
+        logger.info("Using MongoDB memory backend (ee)")
+        return MongoMemoryStore()
     if backend == "mem0":
         try:
             # Check if mem0 is actually available before creating store
