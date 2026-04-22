@@ -19,7 +19,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-KB_BIN = os.environ.get("POCKETPAW_KB_BIN", "kb")
+KB_BIN = os.environ.get("POCKETPAW_KB_BIN", "kb-go")
 
 
 def _kb(*args: str, input_text: str | None = None, timeout: int = 120) -> dict | list | str:
@@ -31,13 +31,15 @@ def _kb(*args: str, input_text: str | None = None, timeout: int = 120) -> dict |
             input=input_text,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
     except FileNotFoundError:
         raise RuntimeError(
             f"kb binary not found at '{KB_BIN}'. "
             "Install: go install github.com/qbtrix/kb-go@latest "
-            "or set POCKETPAW_KB_BIN to the binary path."
+            "or set POCKETPAW_KB_BIN to the binary path (e.g. kb-go)."
         )
     if result.returncode != 0:
         logger.warning("kb failed (exit %d): %s", result.returncode, result.stderr[:200])
@@ -72,24 +74,42 @@ class KnowledgeService:
             return {"error": str(exc), "url": url}
 
     @staticmethod
-    async def ingest_file(agent_id: str, file_path: str) -> dict:
-        """Extract file content (PDF/DOCX via Python if needed), pipe to kb."""
-        try:
-            path = Path(file_path)
-            if path.suffix in (".pdf", ".docx", ".doc", ".png", ".jpg", ".jpeg"):
-                text = await _extract_file(file_path)
-                return _kb(
-                    "ingest",
-                    "--scope",
-                    f"agent:{agent_id}",
-                    "--source",
-                    file_path,
-                    input_text=text,
-                )
-            # Text/code files go directly to kb
-            return _kb("ingest", file_path, "--scope", f"agent:{agent_id}")
-        except Exception as exc:
-            return {"error": str(exc)}
+    async def ingest_file(
+        agent_id: str, file_path: str, source: str | None = None
+    ) -> dict:
+        """Extract file content (PDF/DOCX via Python if needed), pipe to kb.
+
+        ``source`` overrides the stored title/source — pass the original
+        filename so the KB doesn't store temp paths.
+        """
+        path = Path(file_path)
+        label = source or path.name
+        if path.suffix.lower() in (".pdf", ".docx", ".doc", ".png", ".jpg", ".jpeg"):
+            text = await _extract_file(file_path)
+            return _kb(
+                "ingest",
+                "--scope",
+                f"agent:{agent_id}",
+                "--source",
+                label,
+                input_text=text,
+            )
+        # Text/code files go directly to kb
+        return _kb(
+            "ingest", file_path, "--scope", f"agent:{agent_id}", "--source", label
+        )
+
+    @staticmethod
+    async def list_articles(agent_id: str) -> list[dict]:
+        """List ingested articles for an agent."""
+        result = _kb("list", "--scope", f"agent:{agent_id}")
+        return result if isinstance(result, list) else []
+
+    @staticmethod
+    async def get_article(agent_id: str, article_id: str) -> dict:
+        """Fetch a single article's full body."""
+        result = _kb("show", article_id, "--scope", f"agent:{agent_id}")
+        return result if isinstance(result, dict) else {"content": str(result)}
 
     @staticmethod
     async def search(agent_id: str, query: str, limit: int = 5) -> list[str]:
