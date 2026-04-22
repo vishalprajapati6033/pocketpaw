@@ -108,8 +108,14 @@ _PII_PATTERNS: list[tuple[str, PIIType, int]] = [
         PIIType.PASSPORT,
         re.IGNORECASE,
     ),
-    # IBAN (2-letter country code + 2 check digits + up to 30 alphanumeric)
-    (r"\b[A-Z]{2}\d{2}[A-Z0-9]{4,30}\b", PIIType.BANK_ACCOUNT, 0),
+    # IBAN — contextual: requires "iban" keyword nearby to avoid false positives
+    # on arbitrary uppercase strings (e.g. AWS resource ARNs, UUIDs).
+    # Real IBANs are 15-34 chars: CC (country) + 2 check digits + 11-30 alphanumeric.
+    (
+        r"\biban\b[\s:]*[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b",
+        PIIType.BANK_ACCOUNT,
+        re.IGNORECASE,
+    ),
 ]
 
 _COMPILED_PII: list[tuple[re.Pattern, PIIType]] = [
