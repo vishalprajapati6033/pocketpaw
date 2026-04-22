@@ -937,6 +937,9 @@ class AgentLoop:
             full_response = ""
             media_paths: list[str] = []
             cancelled = False
+            # Most recent token_usage payload from the backend, attached to the
+            # final OutboundMessage so chat API / SSE / WebSocket clients get it.
+            last_usage: dict[str, Any] = {}
             # Streaming redaction: accumulate raw content and track what has
             # already been sent (redacted) so secrets split across chunk
             # boundaries are still caught.
@@ -999,6 +1002,7 @@ class AgentLoop:
                         )
 
                     elif etype == "token_usage":
+                        last_usage = dict(meta)
                         await self.bus.publish_system(
                             SystemEvent(
                                 event_type="token_usage",
@@ -1153,6 +1157,15 @@ class AgentLoop:
             seen: set[str] = set()
             media_paths = [p for p in media_paths if not (p in seen or seen.add(p))]
             metadata_out: dict[str, Any] = {}
+            if last_usage:
+                metadata_out["usage"] = {
+                    "input_tokens": last_usage.get("input_tokens", 0),
+                    "output_tokens": last_usage.get("output_tokens", 0),
+                    "cached_input_tokens": last_usage.get("cached_input_tokens", 0),
+                    "total_cost_usd": last_usage.get("total_cost_usd"),
+                    "model": last_usage.get("model"),
+                    "backend": last_usage.get("backend"),
+                }
             if voice_media_paths:
                 metadata_out["voice_media_paths"] = voice_media_paths
             await self.bus.publish_outbound(
