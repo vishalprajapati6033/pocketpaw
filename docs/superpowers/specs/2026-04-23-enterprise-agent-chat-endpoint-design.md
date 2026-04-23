@@ -21,6 +21,7 @@ Add a fully separate enterprise agent chat endpoint that:
 4. Broadcasts the finished assistant message (and agent typing state) to other scope members over the existing `/ws/cloud` WebSocket.
 5. Mounts pocket-scoped tools for pocket runs, without leaking them to other scopes.
 6. Shares the underlying AgentLoop engine with OSS — we wrap, we do not fork.
+7. Routes soul observation and self-evaluation to the **target agent's** soul, fixing the current bug where the default PocketPaw soul is updated no matter which agent was actually addressed.
 
 Non-goals:
 
@@ -159,6 +160,35 @@ A new `CloudContextProvider` assembles a compact block for the system prompt via
 
 This gives the agent the minimum situational awareness to address participants by name and tailor tone (DM vs group) without bloating the prompt.
 
+## Soul routing (per-agent, not global)
+
+**Current bug:** every turn on the AgentLoop path calls the process-global `SoulManager` (`AgentLoop._soul_manager`, registered as the module singleton `pocketpaw.soul.manager._manager`) in `_soul_observe_and_emit`. That soul represents the default PocketPaw agent. When a cloud user chats with a specific agent, the *default PocketPaw soul* observes the turn and evolves — the target agent's soul never updates. `AgentPool.observe(agent_id, ...)` exists for per-agent observation but is bypassed by the AgentLoop fast path.
+
+**Fix:** the cloud agent chat run must route soul observation and self-evaluation to the **target agent's** soul, and must **not** touch the global PocketPaw soul (unless the target agent happens to be the default PocketPaw agent itself).
+
+### Design
+
+1. `ScopeContext.resolve_target_agent()` determines the single agent that is producing the reply for this run:
+   - `dm` with an agent peer → that agent.
+   - `group` → `request.agent_id` (required when >1 agent is a member; defaulted when exactly one agent is a member).
+   - `pocket` → the pocket's primary agent, or `request.agent_id` if the pocket has multiple agents.
+2. `CloudAgentBridge` accepts `target_agent_id` and passes it to the run. It sets a per-run flag `suppress_global_soul_observe=True` on the AgentLoop invocation so the AgentLoop's global observation branch is skipped for this turn.
+3. After `stream_end`, the bridge calls `AgentPool.observe(target_agent_id, user_input, assistant_output)` — which loads/creates a **per-agent `SoulManager` keyed by `agent_id`** and runs observe + self-evaluate against that soul file.
+4. Per-agent soul files live at `~/.pocketpaw/souls/{agent_id}.soul` (local) and are persisted via the workspace-scoped soul store for cloud-managed agents. The default PocketPaw soul stays at its current path.
+5. The bootstrap provider used for system-prompt assembly also switches per-run to the target agent's `SoulManager.bootstrap_provider`, so the agent's own identity, OCEAN, and memory are in the prompt — not the default PocketPaw soul's.
+
+### AgentLoop changes (minimal, OSS-safe)
+
+- Add an optional `suppress_global_soul_observe: bool` field on the per-run context (already threaded through `InboundMessage.metadata` or a new typed run config). When true, `_soul_observe_and_emit` is skipped for that turn.
+- OSS behavior unchanged: the flag defaults to false, so `uv run pocketpaw` keeps updating the default PocketPaw soul exactly as before.
+
+### Tests
+
+- Cloud chat with agent A (not default) → A's soul file is updated; default PocketPaw soul file is byte-identical before/after.
+- Cloud chat with the default PocketPaw agent → default soul updates as today.
+- Group with two agents, `agent_id=B` in request → only B's soul updates.
+- Pocket with primary agent C → C's soul updates.
+
 ## Error handling
 
 - **Auth / license / membership:** rejected with 401/403/402 *before* opening the SSE stream. An auth error must never be streamed.
@@ -192,9 +222,11 @@ New:
 
 Modified:
 
-- `backend/ee/cloud/shared/agent_bridge.py` — accept `ScopeContext` + runtime toolset; emit ripple events untouched.
+- `backend/ee/cloud/shared/agent_bridge.py` — accept `ScopeContext` + runtime toolset + `target_agent_id`; set `suppress_global_soul_observe=True`; call `AgentPool.observe(target_agent_id, …)` on stream_end; swap bootstrap provider to target agent's soul for the run.
 - `backend/ee/cloud/chat/router.py` — include the new `agent_router`.
 - `backend/ee/cloud/models/pocket.py` — add `tool_specs: list[dict]` field if not already present.
+- `backend/src/pocketpaw/agents/loop.py` — honor `suppress_global_soul_observe` per-run flag; default false so OSS behavior is unchanged.
+- `backend/src/pocketpaw/agents/pool.py` — ensure `observe(agent_id, …)` loads/creates a per-agent `SoulManager` keyed by `agent_id` with its own soul file path.
 
 Unchanged:
 
