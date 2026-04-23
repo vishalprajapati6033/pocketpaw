@@ -198,3 +198,51 @@ def _pick_target_agent(agent_ids: list[str], hint: str | None) -> str:
         "agent.ambiguous",
         "Multiple agents in scope — pass agent_id",
     )
+
+
+# ---------------------------------------------------------------------------
+# Toolset assembly
+# ---------------------------------------------------------------------------
+
+
+def _tool_identity(spec: dict[str, Any]) -> tuple:
+    """Stable tuple for deduping tool specs of different kinds."""
+    kind = spec.get("kind", "")
+    if kind == "builtin":
+        return ("builtin", spec.get("id", ""))
+    if kind == "mcp":
+        return ("mcp", spec.get("server", ""), spec.get("name", ""))
+    if kind == "inline":
+        return ("inline", spec.get("name", ""))
+    return (kind, repr(sorted(spec.items())))
+
+
+def assemble_toolset(
+    ctx: ScopeContext, *, base: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Merge base + pocket-scoped tools. Dedupes by identity, base wins."""
+    if ctx.kind is not ScopeKind.POCKET or not ctx.pocket_tool_specs:
+        return list(base)
+    seen: set[tuple] = {_tool_identity(t) for t in base}
+    merged = list(base)
+    for spec in ctx.pocket_tool_specs:
+        ident = _tool_identity(spec)
+        if ident in seen:
+            continue
+        seen.add(ident)
+        merged.append(spec)
+    return merged
+
+
+# ---------------------------------------------------------------------------
+# Context block for system prompt
+# ---------------------------------------------------------------------------
+
+
+def build_context_block(ctx: ScopeContext) -> str:
+    """Compact string the agent prompt embeds so the model knows who is here."""
+    member_list = ", ".join(ctx.members) if ctx.members else "(none)"
+    return (
+        f"<scope>{ctx.kind.value} {ctx.scope_id}</scope>\n"
+        f"<participants>{member_list}</participants>"
+    )
