@@ -95,6 +95,14 @@ async def post_agent_chat(
             status_code=getattr(e, "status_code", 400),
             detail={"code": e.code, "message": str(e)},
         )
+    except Exception:
+        # Any other failure (Mongo error, Pydantic validation, …) must also
+        # clear the slot so subsequent requests for this (scope, scope_id,
+        # user_id) don't see a dangling cancel event. Re-raise so FastAPI
+        # surfaces the original failure unchanged.
+        if _active_runs.get(key) is cancel_event:
+            _active_runs.pop(key, None)
+        raise
 
     async def gen() -> AsyncIterator[bytes]:
         try:
