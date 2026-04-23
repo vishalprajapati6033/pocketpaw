@@ -157,6 +157,8 @@ class WebSocketAdapter(BaseChannelAdapter):
                 payload: dict[str, Any] = {"type": "stream_end"}
                 if message.media:
                     payload["media"] = message.media
+                if message.metadata and "usage" in message.metadata:
+                    payload["usage"] = message.metadata["usage"]
                 await ws.send_json(payload)
                 return
 

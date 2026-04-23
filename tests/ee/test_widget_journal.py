@@ -383,7 +383,7 @@ class TestCooccurrenceSignatureFix:
         assert sig_ab != ""
 
     def test_signature_is_empty_when_queries_collapse_to_same_tokens(self) -> None:
-        """"renewal discount" and "discount renewal" are the same
+        """ "renewal discount" and "discount renewal" are the same
         semantic question phrased two ways — the signature should
         collapse to empty so they don't spawn a fake co-occurrence
         suggestion (carry-over from #942's test).
@@ -442,8 +442,7 @@ class TestCooccurrenceProjection:
         report = scan_for_cooccurrences(store.projection)
         assert report.scanned_pairs >= 1
         assert any(
-            {c.widget_a, c.widget_b} == {"alpha_chart", "beta_chart"}
-            for c in report.candidates
+            {c.widget_a, c.widget_b} == {"alpha_chart", "beta_chart"} for c in report.candidates
         )
 
 
@@ -508,18 +507,14 @@ class TestIncrementalEqualsRebuild:
         )
 
         live_usage = {(r.widget_name, r.surface) for r in live.projection.usage()}
-        live_grad = {
-            (r.widget_name, r.current_tier) for r in live.projection.graduation_state()
-        }
+        live_grad = {(r.widget_name, r.current_tier) for r in live.projection.graduation_state()}
 
         cold = WidgetJournalStore(journal, projection=WidgetProjection())
         applied = cold.bootstrap()
         assert applied == 6  # 5 interactions + 1 graduation
 
         cold_usage = {(r.widget_name, r.surface) for r in cold.projection.usage()}
-        cold_grad = {
-            (r.widget_name, r.current_tier) for r in cold.projection.graduation_state()
-        }
+        cold_grad = {(r.widget_name, r.current_tier) for r in cold.projection.graduation_state()}
 
         assert cold_usage == live_usage
         assert cold_grad == live_grad
@@ -559,6 +554,7 @@ class TestArchiveRule:
         # last_interaction was stamped slightly before that, so it
         # falls on the archive side.
         import time
+
         time.sleep(0.01)  # Guarantee archive_cutoff > last_interaction.
         report = scan_for_widget_graduations(
             store.projection,

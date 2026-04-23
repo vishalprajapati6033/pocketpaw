@@ -29,6 +29,7 @@ import base64
 import io
 import json
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -104,18 +105,6 @@ from pocketpaw.security.redact import safe_install_error
 from pocketpaw.skills import get_skill_loader
 from pocketpaw.tunnel import get_tunnel_manager
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # startup
-    await _startup_event()
-
-    yield
-
-    # shutdown
-    await _shutdown_event()
-
-
 logger = logging.getLogger(__name__)
 
 # Module-level uvicorn server reference (set by run_dashboard, read by restart_server)
@@ -178,6 +167,9 @@ _EXTRA_ORIGINS = list(set(_BUILTIN_ORIGINS + _custom_origins))
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
     """Add security headers to all responses."""
+    nonce = secrets.token_urlsafe(16)
+    request.state.csp_nonce = nonce
+
     response = await call_next(request)
 
     # Allow the file-content endpoint to be embedded in same-origin iframes
@@ -191,10 +183,10 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    # CSP: allow self + CDN + inline styles/scripts (required by Alpine.js/UnoCSS)
+    # CSP: allow self + CDN + strictly nonced scripts (Alpine evaluates allowed via unsafe-eval)
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
+        f"script-src 'self' 'nonce-{nonce}' 'unsafe-eval' "
         "https://cdn.jsdelivr.net https://unpkg.com; "
         "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
@@ -263,14 +255,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-async def startup_event():
-    await _startup_event(_start_channel_adapter_fn=_start_channel_adapter)
-
-
-async def shutdown_event():
-    await _shutdown_event(_stop_channel_adapter_fn=_stop_channel_adapter)
 
 
 # ==================== MCP Server API ====================
