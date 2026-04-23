@@ -9,7 +9,7 @@ a security boundary.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from fastapi import File as FastAPIFile
 from starlette.responses import Response
 
@@ -180,6 +180,29 @@ async def search_knowledge(agent_id: str, q: str = Query(..., min_length=1), lim
     return {"results": results}
 
 
+@router.get("/{agent_id}/knowledge")
+async def list_knowledge(agent_id: str):
+    """List all knowledge articles for an agent."""
+    from ee.cloud.agents.knowledge import KnowledgeService
+
+    try:
+        articles = await KnowledgeService.list_articles(agent_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to list knowledge: {exc}")
+    return {"items": articles}
+
+
+@router.get("/{agent_id}/knowledge/{article_id}")
+async def get_knowledge_article(agent_id: str, article_id: str):
+    """Fetch the full body of a single knowledge article."""
+    from ee.cloud.agents.knowledge import KnowledgeService
+
+    try:
+        return await KnowledgeService.get_article(agent_id, article_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=404, detail=f"Article not found: {exc}")
+
+
 # ---------------------------------------------------------------------------
 # Profile Picture Upload
 # ---------------------------------------------------------------------------
@@ -243,7 +266,7 @@ async def upload_and_ingest(
     from ee.cloud.agents.knowledge import KnowledgeService
 
     if not file.filename:
-        return {"error": "No filename provided"}
+        raise HTTPException(status_code=400, detail="No filename provided")
 
     suffix = Path(file.filename).suffix.lower()
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -252,7 +275,14 @@ async def upload_and_ingest(
         tmp_path = tmp.name
 
     try:
-        result = await KnowledgeService.ingest_file(agent_id, tmp_path)
+        try:
+            result = await KnowledgeService.ingest_file(
+                agent_id, tmp_path, source=file.filename
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=f"Knowledge ingestion failed: {exc}")
+        if not isinstance(result, dict):
+            result = {"result": result}
         result["originalName"] = file.filename
         result["size"] = len(content)
         return result
