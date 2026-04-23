@@ -7,9 +7,8 @@ initialization, which isn't available in a unit test without a live MongoDB.
 storage behavior of ``tool_specs``; schema-level validation of the field shape
 is exercised at the integration layer in later tasks.
 """
-from __future__ import annotations
 
-import pytest
+from __future__ import annotations
 
 from ee.cloud.models.pocket import Pocket
 
