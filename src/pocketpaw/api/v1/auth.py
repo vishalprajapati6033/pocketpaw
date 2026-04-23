@@ -19,12 +19,12 @@ from pocketpaw.api.v1.schemas.auth import (
     SessionTokenResponse,
     TokenRegenerateResponse,
 )
+from pocketpaw.http_utils import is_request_secure
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Auth"])
 
-from pocketpaw.http_utils import is_request_secure
 
 @router.post("/auth/session", response_model=SessionTokenResponse)
 async def exchange_session_token(request: Request):

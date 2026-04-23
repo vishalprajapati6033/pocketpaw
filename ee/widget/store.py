@@ -416,9 +416,7 @@ class WidgetJournalStore:
 
                 prev_entry, prev_seq = last
                 try:
-                    entry = entry.model_copy(
-                        update={"prev_hash": _hash_link(prev_entry, prev_seq)}
-                    )
+                    entry = entry.model_copy(update={"prev_hash": _hash_link(prev_entry, prev_seq)})
                 except Exception:
                     # Match Journal.append's policy: a hash-link failure
                     # is logged upstream and does not block the write.

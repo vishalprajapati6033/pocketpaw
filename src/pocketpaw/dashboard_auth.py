@@ -334,7 +334,9 @@ async def _auth_dispatch(request: Request) -> Response | None:
             )
         request.state.rate_limit_headers = rl_info.headers()
 
-    # Exempt routes — return None to let the request through
+    # Exempt routes — return None to let the request through without any
+    # token verification. Used for genuinely-unauth endpoints (login, docs,
+    # webhooks, OAuth callbacks).
     exempt_paths = [
         "/static",
         "/uploads",
@@ -360,19 +362,29 @@ async def _auth_dispatch(request: Request) -> Response | None:
         "/api/v1/auth/bearer/login",
         "/api/v1/auth/me",
         "/api/v1/license",
-        # Enterprise cloud endpoints — JWT auth handled by fastapi-users, not this middleware
+        "/ws/cloud",
+    ]
+
+    # Shared-prefix routes — ee.cloud mounts JWT-authed routers at these paths,
+    # but the non-ee v1 routers (pocketpaw.api.v1.chat/pockets/sessions) also
+    # mount there and rely on require_scope() reading request.state.full_access.
+    # We must run the token-verification cascade so dashboard session cookies
+    # populate state, but skip the final 401 — ee routes authenticate at the
+    # route level via fastapi-users (#888 follow-up).
+    auth_optional_prefixes = (
         "/api/v1/chat",
         "/api/v1/workspaces",
         "/api/v1/pockets",
         "/api/v1/sessions",
         "/api/v1/agents",
         "/api/v1/users",
-        "/ws/cloud",
-    ]
+    )
 
     for exempt in exempt_paths:
         if path.startswith(exempt):
             return None  # allow through
+
+    is_auth_optional = any(path.startswith(p) for p in auth_optional_prefixes)
 
     # Rate limiting — pick tier based on path
     client_ip = request.client.host if request.client else "unknown"
@@ -513,7 +525,12 @@ async def _auth_dispatch(request: Request) -> Response | None:
     # Previously only API/WS paths were gated here, meaning any non-exempt
     # path that didn't start with /api or /ws (e.g. /internal/*, /v1/agents)
     # would silently fall through unauthenticated.
-    if not is_valid:
+    #
+    # auth_optional_prefixes (ee.cloud shared paths) skip this 401 because
+    # their routes authenticate at the route level via fastapi-users JWT.
+    # State populated above (full_access from dashboard session cookies, etc.)
+    # is still available to any non-ee router mounted at the same prefix.
+    if not is_valid and not is_auth_optional:
         return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
 
     return None  # allow through

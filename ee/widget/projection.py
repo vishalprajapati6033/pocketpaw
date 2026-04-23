@@ -31,7 +31,7 @@ from __future__ import annotations
 import logging
 from bisect import insort
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -249,9 +249,7 @@ class WidgetProjection:
         if entry.action not in ALL_WIDGET_ACTIONS:
             return
 
-        payload: dict[str, Any] = (
-            dict(entry.payload) if isinstance(entry.payload, dict) else {}
-        )
+        payload: dict[str, Any] = dict(entry.payload) if isinstance(entry.payload, dict) else {}
         seq = getattr(entry, "seq", None) or 0
         if seq > self._cursor:
             self._cursor = seq
@@ -292,7 +290,7 @@ class WidgetProjection:
         # Evict oldest once we pass the cap — keep the tail (newest).
         if len(self._interactions) > self._max:
             overflow = len(self._interactions) - self._max
-            del self._interactions[: overflow]
+            del self._interactions[:overflow]
 
         # Co-occurrence fold — runs over the same events.
         self._maybe_record_pair(view)
@@ -484,9 +482,7 @@ class WidgetProjection:
 
         since = datetime.now(UTC) - timedelta(days=window_days)
         interactions = [
-            row.view
-            for row in self._interactions
-            if _ensure_aware(row.view.ts) >= since
+            row.view for row in self._interactions if _ensure_aware(row.view.ts) >= since
         ]
         if scope:
             interactions = [r for r in interactions if scope in r.scope]

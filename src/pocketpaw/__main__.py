@@ -424,6 +424,14 @@ def main() -> None:
     args = parser.parse_args()
     _resolve_subargs(args)
 
+    # Reject combining --telegram with other channel flags. Telegram is the
+    # legacy pairing-only path; other channels require the dashboard.
+    _other_channel_flags = ("discord", "slack", "whatsapp", "signal", "matrix", "teams", "gchat")
+    if getattr(args, "telegram", False) and any(
+        getattr(args, f, False) for f in _other_channel_flags
+    ):
+        parser.error("--telegram cannot be combined with other channel flags")
+
     # ── Early-exit commands (no settings, health, or env setup needed) ──
     if args.command in _EARLY_COMMANDS:
         exit_code = _handle_early_command(args)
