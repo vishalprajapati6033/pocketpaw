@@ -5,6 +5,7 @@ to the caller while persisting the user message and (at stream end) the
 assistant message. Agent run mechanics live in Task 7 — this module owns
 the HTTP + SSE plumbing and scope/auth guards.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -366,9 +367,7 @@ async def _run_agent_stream(
         except Exception:
             candidate = None
             logger.debug("Ripple parse failed", exc_info=True)
-        if isinstance(candidate, dict) and (
-            "lifecycle" in candidate or "widgets" in candidate
-        ):
+        if isinstance(candidate, dict) and ("lifecycle" in candidate or "widgets" in candidate):
             spec: dict[str, Any] = candidate
             try:
                 from ee.cloud.ripple_normalizer import normalize_ripple_spec

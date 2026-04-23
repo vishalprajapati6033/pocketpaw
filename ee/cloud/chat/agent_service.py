@@ -7,6 +7,7 @@ handles *what the agent sees*:
   ``ScopeContext`` including the target agent id, members, and
   pocket-scoped tool specs where applicable.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -129,9 +130,7 @@ async def _resolve_group_like(
     )
 
 
-async def _resolve_pocket(
-    scope_id: str, user_id: str, agent_id_hint: str | None
-) -> ScopeContext:
+async def _resolve_pocket(scope_id: str, user_id: str, agent_id_hint: str | None) -> ScopeContext:
     pocket = await _get_pocket(scope_id)
     if pocket is None:
         raise NotFound("pocket", scope_id)
@@ -217,9 +216,7 @@ def _tool_identity(spec: dict[str, Any]) -> tuple:
     return (kind, repr(sorted(spec.items())))
 
 
-def assemble_toolset(
-    ctx: ScopeContext, *, base: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
+def assemble_toolset(ctx: ScopeContext, *, base: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Merge base + pocket-scoped tools. Dedupes by identity, base wins."""
     if ctx.kind is not ScopeKind.POCKET or not ctx.pocket_tool_specs:
         return list(base)

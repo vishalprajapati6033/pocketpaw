@@ -5,6 +5,7 @@ back a typed SSE event sequence. See
 ``docs/superpowers/specs/2026-04-23-enterprise-agent-chat-endpoint-design.md``
 for the full protocol.
 """
+
 from __future__ import annotations
 
 from enum import StrEnum
