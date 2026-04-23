@@ -40,6 +40,7 @@ async def test_soul_observe_runs_when_flag_absent():
     al = loop_mod.AgentLoop.__new__(loop_mod.AgentLoop)
     al._soul_manager = MagicMock()
     al._soul_observe_and_emit = AsyncMock()
+    al._background_tasks = set()
 
     message = MagicMock()
     message.content = "hello"
