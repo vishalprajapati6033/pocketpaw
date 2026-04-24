@@ -60,6 +60,10 @@ class Pocket(TimestampedDocument):
     share_link_token: str | None = None
     share_link_access: str = Field(default="view", pattern="^(view|comment|edit)$")
     shared_with: list[str] = Field(default_factory=list)  # User IDs with explicit access
+    # Pocket-scoped tool specs merged into the base toolset for agent runs
+    # performed inside this pocket. Each entry is free-form so built-in IDs,
+    # workspace MCP refs, and inline declarative tools can coexist.
+    tool_specs: list[dict[str, Any]] = Field(default_factory=list)
 
     model_config = {"populate_by_name": True}
 

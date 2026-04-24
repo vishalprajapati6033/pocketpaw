@@ -28,6 +28,7 @@ import os
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 
+from ee.cloud.chat.agent_router import router as agent_router
 from ee.cloud.chat.schemas import (
     AddGroupAgentRequest,
     AddGroupMembersRequest,
@@ -460,6 +461,7 @@ async def suggest_mentions(
 
 # Include licensed REST routes
 router.include_router(_licensed)
+router.include_router(agent_router)
 
 
 # ---------------------------------------------------------------------------
