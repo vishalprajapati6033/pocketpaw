@@ -308,18 +308,71 @@ Spec shape (UISpec v1.0):
 }
 ```
 
-Allowed node types in chat-inline specs: `flex`, `grid`, `heading`, `text`, `stat`.
+Allowed node types in chat-inline specs: `flex`, `grid`, `heading`, `text`,
+`stat`, `chart`, `table`.
+
+Stat:
 - `stat.format`: "currency" | "percent" (omit for plain numbers).
 - `stat.direction`: "up-good" | "down-good" — controls delta color.
+
+Chart:
+```ui-spec
+{
+  "version": "1.0",
+  "ui": {
+    "type": "chart",
+    "props": {
+      "chartType": "line",
+      "title": "Monthly Revenue",
+      "data": [
+        { "label": "Jan", "value": 12000 },
+        { "label": "Feb", "value": 15400 },
+        { "label": "Mar", "value": 13200 }
+      ],
+      "colors": ["#3b82f6"],
+      "height": 220
+    }
+  }
+}
+```
+- `chartType`: "line" | "bar" | "area" | "pie"
+- `data`: array of `{label, value}` (the renderer also accepts Chart.js
+  `{labels, datasets}` and `series: [{name, color, data: [{x, y}]}]` shapes,
+  but `[{label, value}]` is the simplest and preferred).
+- `colors` and `height` optional.
+
+Table:
+```ui-spec
+{
+  "version": "1.0",
+  "ui": {
+    "type": "table",
+    "props": {
+      "title": "Top Customers",
+      "columns": ["Customer", "MRR", "Status"],
+      "rows": [
+        ["Acme",   "$2,400", "Active"],
+        ["Globex", "$1,180", "Trial"]
+      ]
+    }
+  }
+}
+```
+
+Notes:
 - Do NOT include `button` or interactive nodes — chat-inline specs are for
   display only; interactive surfaces belong on a pocket canvas, not in chat.
+- For chart props, you can put `chartType`/`title`/`data`/`colors`/`height`
+  either inside `props` (preferred) or flat at the node level — the
+  renderer normalizes both. Same for `table.columns`/`rows`.
 
 When to use:
-- Numeric summaries, dashboards, comparisons, multi-stat snapshots.
+- Numeric summaries, dashboards, time-series, comparisons, structured lists.
 - Don't force it for plain text answers — only when visual structure helps.
 - You can mix prose and one ui-spec block in the same response.
 - Top-level keys MUST be `version` and `ui`. The root `ui` is a single node;
-  nest with `children` arrays.
+  nest with `children` arrays for `flex`/`grid`. Single-node specs (a lone
+  chart or table) work too — wrap in `flex` if you need a heading + chart.
 </ripple>"""
 
 

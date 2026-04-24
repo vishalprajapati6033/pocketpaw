@@ -80,6 +80,15 @@ def test_build_context_block_includes_ripple_hint():
     assert "ui-spec" in block
     # Sanity-check the canonical shape and the chat-inline node allowlist.
     assert '"version": "1.0"' in block
-    assert "stat" in block and "flex" in block and "grid" in block
+    for node in ("flex", "grid", "heading", "text", "stat", "chart", "table"):
+        assert node in block, f"node type {node!r} missing from Ripple hint"
+    # Chart specifics — the agent needs at least one chartType + a data shape.
+    assert "chartType" in block
+    assert "line" in block and "bar" in block
+    # Table specifics.
+    assert "columns" in block and "rows" in block
     # Buttons / interactive nodes must NOT be advertised in chat-inline specs.
-    assert "button" not in block.lower() or "do not include `button`" in block.lower()
+    assert (
+        "button" not in block.lower()
+        or "do not include `button`" in block.lower()
+    )
