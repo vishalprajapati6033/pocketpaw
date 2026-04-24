@@ -240,6 +240,12 @@ async def _ensure_scope_session(ctx: ScopeContext) -> str | None:
         await session.insert()
         return session.sessionId
 
+    if ctx.kind is ScopeKind.SESSION:
+        from beanie import PydanticObjectId
+
+        session = await Session.get(PydanticObjectId(ctx.scope_id))
+        return session.sessionId if session else None
+
     return None
 
 
