@@ -398,9 +398,9 @@ async def suggest_mentions(
     workspace_id: str = Depends(current_workspace_id),
     user_id: str = Depends(current_user_id),
 ):
-    from ee.cloud.models.user import User
     from ee.cloud.models.agent import Agent as AgentModel
     from ee.cloud.models.group import Group
+    from ee.cloud.models.user import User
 
     kinds = {k.strip() for k in types.split(",") if k.strip()}
     q_lower = q.lower()
