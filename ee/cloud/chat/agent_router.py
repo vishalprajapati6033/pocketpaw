@@ -252,9 +252,9 @@ async def _persist_user_message(ctx: ScopeContext, body: CloudAgentChatRequest) 
     """
     from ee.cloud.models.message import Message
 
-    if ctx.kind is ScopeKind.POCKET:
+    if ctx.kind in (ScopeKind.POCKET, ScopeKind.SESSION):
         msg = Message(
-            context_type="pocket",
+            context_type=ctx.kind.value,
             session_key=_session_key_for(ctx),
             role="user",
             sender=ctx.user_id,
@@ -285,9 +285,9 @@ async def _persist_assistant_message(
     from ee.cloud.models.message import Attachment, Message
 
     att_models = [Attachment(**a) if isinstance(a, dict) else a for a in attachments]
-    if ctx.kind is ScopeKind.POCKET:
+    if ctx.kind in (ScopeKind.POCKET, ScopeKind.SESSION):
         msg = Message(
-            context_type="pocket",
+            context_type=ctx.kind.value,
             session_key=_session_key_for(ctx),
             role="assistant",
             sender=None,
