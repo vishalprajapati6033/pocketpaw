@@ -45,7 +45,7 @@ router = APIRouter(tags=["Cloud Agent Chat"], dependencies=[Depends(require_lice
 _active_runs: dict[tuple[str, str, str], asyncio.Event] = {}
 
 
-Scope = Literal["dm", "group", "pocket"]
+Scope = Literal["dm", "group", "pocket", "session"]
 
 
 # ---------------------------------------------------------------------------
