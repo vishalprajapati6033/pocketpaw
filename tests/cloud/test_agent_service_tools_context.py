@@ -62,3 +62,24 @@ def test_build_context_block_has_scope_and_members():
     block = build_context_block(ctx)
     assert "<scope>group g1</scope>" in block
     assert "u1" in block and "u2" in block
+
+
+def test_build_context_block_includes_ripple_hint():
+    """Agents need to know they can emit ui-spec blocks for inline UI."""
+    ctx = ScopeContext(
+        kind=ScopeKind.SESSION,
+        scope_id="s1",
+        workspace_id="w1",
+        user_id="u1",
+        members=["u1"],
+        target_agent_id="a1",
+        agent_ids_in_scope=["a1"],
+    )
+    block = build_context_block(ctx)
+    assert "<ripple>" in block
+    assert "ui-spec" in block
+    # Sanity-check the canonical shape and the chat-inline node allowlist.
+    assert '"version": "1.0"' in block
+    assert "stat" in block and "flex" in block and "grid" in block
+    # Buttons / interactive nodes must NOT be advertised in chat-inline specs.
+    assert "button" not in block.lower() or "do not include `button`" in block.lower()

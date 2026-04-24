@@ -278,10 +278,58 @@ def assemble_toolset(ctx: ScopeContext, *, base: list[dict[str, Any]]) -> list[d
 # ---------------------------------------------------------------------------
 
 
+_RIPPLE_HINT = """\
+<ripple>
+You can render rich, interactive UI inline in your chat responses by emitting
+a JSON spec inside a ```ui-spec``` (or ```json```) fenced code block. The
+client renders it as live components in the message bubble.
+
+Spec shape (UISpec v1.0):
+```ui-spec
+{
+  "version": "1.0",
+  "ui": {
+    "type": "flex",
+    "props": { "direction": "column", "gap": "16px" },
+    "children": [
+      { "type": "heading", "props": { "text": "Overview", "level": 2 } },
+      { "type": "text", "props": { "text": "Summary line.", "size": "sm" } },
+      {
+        "type": "grid",
+        "props": { "columns": 3, "gap": 3 },
+        "children": [
+          { "type": "stat", "props": { "label": "Revenue", "value": 12450, "format": "currency", "deltaPercent": 3.4, "direction": "up-good" } },
+          { "type": "stat", "props": { "label": "Signups", "value": 247, "deltaPercent": 18.2, "direction": "up-good" } },
+          { "type": "stat", "props": { "label": "Churn", "value": 0.034, "format": "percent", "deltaPercent": -0.8, "direction": "down-good" } }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Allowed node types in chat-inline specs: `flex`, `grid`, `heading`, `text`, `stat`.
+- `stat.format`: "currency" | "percent" (omit for plain numbers).
+- `stat.direction`: "up-good" | "down-good" — controls delta color.
+- Do NOT include `button` or interactive nodes — chat-inline specs are for
+  display only; interactive surfaces belong on a pocket canvas, not in chat.
+
+When to use:
+- Numeric summaries, dashboards, comparisons, multi-stat snapshots.
+- Don't force it for plain text answers — only when visual structure helps.
+- You can mix prose and one ui-spec block in the same response.
+- Top-level keys MUST be `version` and `ui`. The root `ui` is a single node;
+  nest with `children` arrays.
+</ripple>"""
+
+
 def build_context_block(ctx: ScopeContext) -> str:
-    """Compact string the agent prompt embeds so the model knows who is here."""
+    """Compact string the agent prompt embeds so the model knows who is here
+    and how to render rich UI back to the client.
+    """
     member_list = ", ".join(ctx.members) if ctx.members else "(none)"
     return (
         f"<scope>{ctx.kind.value} {ctx.scope_id}</scope>\n"
-        f"<participants>{member_list}</participants>"
+        f"<participants>{member_list}</participants>\n"
+        f"{_RIPPLE_HINT}"
     )
