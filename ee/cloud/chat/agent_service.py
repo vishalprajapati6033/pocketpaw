@@ -111,9 +111,7 @@ async def resolve_scope_context(
     return await _resolve_group_like(kind, scope_id, user_id, agent_id_hint)
 
 
-async def _resolve_session(
-    scope_id: str, user_id: str, agent_id_hint: str | None
-) -> ScopeContext:
+async def _resolve_session(scope_id: str, user_id: str, agent_id_hint: str | None) -> ScopeContext:
     session = await _get_session(scope_id)
     if session is None or getattr(session, "deleted_at", None) is not None:
         raise NotFound("session", scope_id)

@@ -3,6 +3,7 @@
 Uses AsyncMock-substituted Beanie finders so tests stay unit-scoped.
 The real Mongo path is exercised by the router integration tests.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -117,9 +118,7 @@ async def test_resolve_pocket_uses_first_agent_when_no_hint():
 @pytest.mark.asyncio
 async def test_resolve_unknown_scope_raises():
     with pytest.raises(InvalidScope):
-        await resolve_scope_context(
-            scope="nope", scope_id="x", user_id="u", agent_id_hint=None
-        )
+        await resolve_scope_context(scope="nope", scope_id="x", user_id="u", agent_id_hint=None)
 
 
 @pytest.mark.asyncio
@@ -188,7 +187,7 @@ async def test_resolve_pocket_dedupes_members_across_team_and_shared():
         id="p1",
         workspace="w1",
         owner="u_owner",
-        team=["u_owner", "u_alice"],       # owner duplicated intentionally
+        team=["u_owner", "u_alice"],  # owner duplicated intentionally
         shared_with=["u_alice", "u_bob"],  # alice duplicated across lists
         agents=["agent_primary"],
         tool_specs=[],
