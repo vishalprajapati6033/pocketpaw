@@ -72,6 +72,17 @@ async def _get_pocket(pocket_id: str) -> Any:
         return None
 
 
+async def _get_session(session_id: str) -> Any:
+    from beanie import PydanticObjectId
+
+    from ee.cloud.models.session import Session
+
+    try:
+        return await Session.get(PydanticObjectId(session_id))
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Scope resolution
 # ---------------------------------------------------------------------------
@@ -83,8 +94,8 @@ async def resolve_scope_context(
     """Resolve a ``ScopeContext`` for a cloud agent chat request.
 
     Raises:
-        InvalidScope: ``scope`` is not one of dm/group/pocket.
-        NotFound: the group or pocket doesn't exist.
+        InvalidScope: ``scope`` is not one of dm/group/pocket/session.
+        NotFound: the group, pocket, or session doesn't exist.
         CloudError: caller is not a member, no agent is in scope, or the
             caller must disambiguate ``agent_id`` for a multi-agent group.
     """
@@ -95,7 +106,34 @@ async def resolve_scope_context(
 
     if kind is ScopeKind.POCKET:
         return await _resolve_pocket(scope_id, user_id, agent_id_hint)
+    if kind is ScopeKind.SESSION:
+        return await _resolve_session(scope_id, user_id, agent_id_hint)
     return await _resolve_group_like(kind, scope_id, user_id, agent_id_hint)
+
+
+async def _resolve_session(
+    scope_id: str, user_id: str, agent_id_hint: str | None
+) -> ScopeContext:
+    session = await _get_session(scope_id)
+    if session is None or getattr(session, "deleted_at", None) is not None:
+        raise NotFound("session", scope_id)
+
+    if getattr(session, "owner", None) != user_id:
+        raise CloudError(403, "session.forbidden", "Caller does not own this session")
+
+    target = agent_id_hint or getattr(session, "agent", None)
+    if not target:
+        raise CloudError(400, "session.no_agent", "Session has no agent")
+
+    return ScopeContext(
+        kind=ScopeKind.SESSION,
+        scope_id=scope_id,
+        workspace_id=str(getattr(session, "workspace", "")),
+        user_id=user_id,
+        members=[user_id],
+        target_agent_id=target,
+        agent_ids_in_scope=[target],
+    )
 
 
 async def _resolve_group_like(

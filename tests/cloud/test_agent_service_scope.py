@@ -207,3 +207,120 @@ def test_session_kind_value():
 
 def test_scopekind_accepts_session_string():
     assert ScopeKind("session") is ScopeKind.SESSION
+
+
+@pytest.mark.asyncio
+async def test_session_scope_happy_path():
+    from ee.cloud.models.session import Session
+
+    fake = Session.model_construct(
+        id="s1",
+        sessionId="websocket_abc",
+        workspace="w1",
+        owner="u1",
+        agent="a1",
+        pocket=None,
+        deleted_at=None,
+    )
+    with patch("ee.cloud.chat.agent_service._get_session", AsyncMock(return_value=fake)):
+        ctx = await resolve_scope_context(
+            scope="session", scope_id="s1", user_id="u1", agent_id_hint=None
+        )
+    assert ctx.kind is ScopeKind.SESSION
+    assert ctx.scope_id == "s1"
+    assert ctx.workspace_id == "w1"
+    assert ctx.target_agent_id == "a1"
+    assert ctx.members == ["u1"]
+
+
+@pytest.mark.asyncio
+async def test_session_scope_not_found():
+    with patch("ee.cloud.chat.agent_service._get_session", AsyncMock(return_value=None)):
+        with pytest.raises(NotFound):
+            await resolve_scope_context(
+                scope="session", scope_id="missing", user_id="u1", agent_id_hint=None
+            )
+
+
+@pytest.mark.asyncio
+async def test_session_scope_deleted_treated_as_not_found():
+    from datetime import UTC, datetime
+
+    from ee.cloud.models.session import Session
+
+    fake = Session.model_construct(
+        id="s1",
+        sessionId="ws",
+        workspace="w1",
+        owner="u1",
+        agent="a1",
+        pocket=None,
+        deleted_at=datetime.now(UTC),
+    )
+    with patch("ee.cloud.chat.agent_service._get_session", AsyncMock(return_value=fake)):
+        with pytest.raises(NotFound):
+            await resolve_scope_context(
+                scope="session", scope_id="s1", user_id="u1", agent_id_hint=None
+            )
+
+
+@pytest.mark.asyncio
+async def test_session_scope_wrong_owner_forbidden():
+    from ee.cloud.models.session import Session
+
+    fake = Session.model_construct(
+        id="s1",
+        sessionId="ws",
+        workspace="w1",
+        owner="other",
+        agent="a1",
+        pocket=None,
+        deleted_at=None,
+    )
+    with patch("ee.cloud.chat.agent_service._get_session", AsyncMock(return_value=fake)):
+        with pytest.raises(CloudError) as exc:
+            await resolve_scope_context(
+                scope="session", scope_id="s1", user_id="u1", agent_id_hint=None
+            )
+    assert exc.value.code == "session.forbidden"
+
+
+@pytest.mark.asyncio
+async def test_session_scope_agent_id_hint_overrides():
+    from ee.cloud.models.session import Session
+
+    fake = Session.model_construct(
+        id="s1",
+        sessionId="ws",
+        workspace="w1",
+        owner="u1",
+        agent="a1",
+        pocket=None,
+        deleted_at=None,
+    )
+    with patch("ee.cloud.chat.agent_service._get_session", AsyncMock(return_value=fake)):
+        ctx = await resolve_scope_context(
+            scope="session", scope_id="s1", user_id="u1", agent_id_hint="a2"
+        )
+    assert ctx.target_agent_id == "a2"
+
+
+@pytest.mark.asyncio
+async def test_session_scope_no_agent_errors():
+    from ee.cloud.models.session import Session
+
+    fake = Session.model_construct(
+        id="s1",
+        sessionId="ws",
+        workspace="w1",
+        owner="u1",
+        agent=None,
+        pocket=None,
+        deleted_at=None,
+    )
+    with patch("ee.cloud.chat.agent_service._get_session", AsyncMock(return_value=fake)):
+        with pytest.raises(CloudError) as exc:
+            await resolve_scope_context(
+                scope="session", scope_id="s1", user_id="u1", agent_id_hint=None
+            )
+    assert exc.value.code == "session.no_agent"
