@@ -199,3 +199,11 @@ async def test_resolve_pocket_dedupes_members_across_team_and_shared():
             scope="pocket", scope_id="p1", user_id="u_owner", agent_id_hint=None
         )
     assert ctx.members == ["u_owner", "u_alice", "u_bob"]
+
+
+def test_session_kind_value():
+    assert ScopeKind.SESSION.value == "session"
+
+
+def test_scopekind_accepts_session_string():
+    assert ScopeKind("session") is ScopeKind.SESSION

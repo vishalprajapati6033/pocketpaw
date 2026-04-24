@@ -21,6 +21,7 @@ class ScopeKind(StrEnum):
     DM = "dm"
     GROUP = "group"
     POCKET = "pocket"
+    SESSION = "session"
 
 
 class InvalidScope(ValueError):
