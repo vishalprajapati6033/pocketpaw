@@ -37,6 +37,11 @@ class ScopeContext:
     target_agent_id: str
     agent_ids_in_scope: list[str] = field(default_factory=list)
     pocket_tool_specs: list[dict[str, Any]] = field(default_factory=list)
+    # The ``Session.sessionId`` that surfaces this scope+agent pair in the
+    # sidebar. Populated by the router before the SSE stream begins so the
+    # ``message.persisted`` / ``stream_start`` events can carry it early —
+    # which lets a mid-stream refresh still find the thread in the sidebar.
+    session_id: str | None = None
 
 
 # ---------------------------------------------------------------------------

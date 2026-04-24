@@ -104,12 +104,25 @@ async def post_agent_chat(
             _active_runs.pop(key, None)
         raise
 
+    # Resolve the sidebar Session up-front so ``message.persisted`` and
+    # ``stream_start`` carry ``session_id``. Frontend adopts it immediately,
+    # which means a mid-stream refresh still finds the thread in the sidebar
+    # instead of losing it until ``stream_end``.
+    try:
+        ctx.session_id = await _ensure_scope_session(ctx)
+    except Exception:
+        logger.exception("Failed to ensure sidebar session for scope %s", ctx.kind.value)
+        ctx.session_id = None
+
     async def gen() -> AsyncIterator[bytes]:
         try:
-            yield _sse(
-                "message.persisted",
-                {"user_message_id": user_message_id, "client_message_id": body.client_message_id},
-            )
+            persisted_payload: dict[str, Any] = {
+                "user_message_id": user_message_id,
+                "client_message_id": body.client_message_id,
+            }
+            if ctx.session_id:
+                persisted_payload["session_id"] = ctx.session_id
+            yield _sse("message.persisted", persisted_payload)
             async for name, data in _run_agent_stream(ctx, user_message_id, body, cancel_event):
                 yield _sse(name, data)
                 if name in ("stream_end", "error"):
@@ -158,6 +171,76 @@ def _session_key_for(ctx: ScopeContext) -> str:
     """Stable session key for the agent run. Used both as the agent backend's
     session key and as the pocket ``Message.session_key``."""
     return f"cloud:{ctx.kind.value}:{ctx.scope_id}:{ctx.target_agent_id}"
+
+
+async def _ensure_scope_session(ctx: ScopeContext) -> str | None:
+    """Find-or-create the :class:`Session` document that the sidebar uses to
+    surface this scope+agent pair. Returns the session's ``sessionId`` field
+    so the SSE stream can emit it early — frontend :func:`adoptSessionId`
+    then upserts the thread into the sidebar *before* the stream completes,
+    which lets a mid-stream refresh still find the chat.
+
+    Only applies to pocket and agent-DM scopes; plain group chats don't show
+    Session rows in the sidebar (the group itself is the entry).
+    """
+    from ee.cloud.models.session import Session
+
+    if ctx.kind is ScopeKind.POCKET:
+        existing = (
+            await Session.find(
+                Session.pocket == ctx.scope_id,
+                Session.agent == ctx.target_agent_id,
+                Session.owner == ctx.user_id,
+                Session.deleted_at == None,  # noqa: E711
+            )
+            .sort(-Session.lastActivity)
+            .limit(1)
+            .to_list()
+        )
+        if existing:
+            return existing[0].sessionId
+        session = Session(
+            sessionId=f"websocket_{uuid.uuid4().hex[:12]}",
+            context_type="pocket",
+            workspace=ctx.workspace_id,
+            owner=ctx.user_id,
+            title="New Chat",
+            pocket=ctx.scope_id,
+            agent=ctx.target_agent_id,
+        )
+        await session.insert()
+        return session.sessionId
+
+    if ctx.kind is ScopeKind.DM:
+        # Agent-DM: one Session per (agent, user) pair. Plain human DMs have
+        # no agent and are surfaced as rooms, not sessions — skip those.
+        if not ctx.target_agent_id:
+            return None
+        existing = (
+            await Session.find(
+                Session.agent == ctx.target_agent_id,
+                Session.owner == ctx.user_id,
+                Session.deleted_at == None,  # noqa: E711
+            )
+            .sort(-Session.lastActivity)
+            .limit(1)
+            .to_list()
+        )
+        if existing:
+            return existing[0].sessionId
+        session = Session(
+            sessionId=f"websocket_{uuid.uuid4().hex[:12]}",
+            context_type="group",
+            workspace=ctx.workspace_id,
+            owner=ctx.user_id,
+            title="New Chat",
+            group=ctx.scope_id,
+            agent=ctx.target_agent_id,
+        )
+        await session.insert()
+        return session.sessionId
+
+    return None
 
 
 async def _persist_user_message(ctx: ScopeContext, body: CloudAgentChatRequest) -> str:
@@ -310,16 +393,16 @@ async def _run_agent_stream(
 
     await _broadcast_agent_typing(ctx, active=True)
 
-    yield (
-        "stream_start",
-        {
-            "run_id": run_id,
-            "agent_id": ctx.target_agent_id,
-            "agent_name": getattr(instance, "agent_name", ""),
-            "scope": ctx.kind.value,
-            "scope_id": ctx.scope_id,
-        },
-    )
+    stream_start_payload: dict[str, Any] = {
+        "run_id": run_id,
+        "agent_id": ctx.target_agent_id,
+        "agent_name": getattr(instance, "agent_name", ""),
+        "scope": ctx.kind.value,
+        "scope_id": ctx.scope_id,
+    }
+    if ctx.session_id:
+        stream_start_payload["session_id"] = ctx.session_id
+    yield ("stream_start", stream_start_payload)
 
     full_text = ""
     cancelled = False

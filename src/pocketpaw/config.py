@@ -598,10 +598,12 @@ class Settings(BaseSettings):
 
     # Chat Title Generation (Haiku-backed, first-message naming)
     chat_title_generation_enabled: bool = Field(
-        default=False,
+        default=True,
         description=(
             "Auto-generate a short title for a chat from its first user message."
-            " Uses a Haiku model; fires a session_titled SystemEvent on completion."
+            " Uses a Haiku model when an Anthropic API key is configured, and"
+            " falls back to a trimmed excerpt of the first message otherwise."
+            " Fires a session_titled SystemEvent on completion."
         ),
     )
     chat_title_model: str = Field(

@@ -387,11 +387,13 @@ class AgentLoop:
                 api_key=self.settings.anthropic_api_key or None,
             )
             if not title:
+                logger.info("session titling skipped for %s (empty title)", session_key)
                 return
             # session_key is "channel:chat_id" — expose the safe_key form
             # ("channel_chat_id") so web clients can correlate with their
             # session_id directly.
             safe_key = session_key.replace(":", "_")
+            logger.info("session titled: %s -> %r", safe_key, title)
             await self.bus.publish_system(
                 SystemEvent(
                     event_type="session_titled",
@@ -403,7 +405,7 @@ class AgentLoop:
                 )
             )
         except Exception:
-            logger.debug("session titling failed for %s", session_key, exc_info=True)
+            logger.warning("session titling failed for %s", session_key, exc_info=True)
 
     async def process_message(self, message: InboundMessage) -> None:
         """Public entry point — run the full processing pipeline on one
