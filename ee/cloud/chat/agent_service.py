@@ -322,7 +322,7 @@ Chart:
   "ui": {
     "type": "chart",
     "props": {
-      "chartType": "line",
+      "type": "line",
       "title": "Monthly Revenue",
       "data": [
         { "label": "Jan", "value": 12000 },
@@ -335,11 +335,18 @@ Chart:
   }
 }
 ```
-- `chartType`: "line" | "bar" | "area" | "pie"
-- `data`: array of `{label, value}` (the renderer also accepts Chart.js
-  `{labels, datasets}` and `series: [{name, color, data: [{x, y}]}]` shapes,
-  but `[{label, value}]` is the simplest and preferred).
-- `colors` and `height` optional.
+- `type` (chart kind): one of
+  `bar | line | area | pie | donut | candlestick | sparkline | heatmap | gauge | radar`.
+  (You may also write `chartType` at the node level — the renderer
+  translates both, but `props.type` is the canonical Ripple shape.)
+- `data`: array of `{label, value}` for most chart types.
+  - For `candlestick`: each point is `{label, open, high, low, close}`.
+  - For `heatmap` / multi-series: each point may include `series: {a: 1, b: 2}`.
+  - The renderer also accepts Chart.js `{labels, datasets}` and
+    `series: [{name, color, data: [{x, y}]}]`, but `[{label, value}]` is
+    simplest and preferred.
+- `colors`, `height`, `tooltip` optional. `bullColor` / `bearColor` for
+  candlestick.
 
 Table:
 ```ui-spec
@@ -348,23 +355,29 @@ Table:
   "ui": {
     "type": "table",
     "props": {
-      "title": "Top Customers",
       "columns": ["Customer", "MRR", "Status"],
-      "rows": [
-        ["Acme",   "$2,400", "Active"],
-        ["Globex", "$1,180", "Trial"]
-      ]
+      "data": [
+        { "Customer": "Acme",   "MRR": "$2,400", "Status": "Active" },
+        { "Customer": "Globex", "MRR": "$1,180", "Status": "Trial"  }
+      ],
+      "variant": "default"
     }
   }
 }
 ```
+- `data`: array of objects keyed by column name (preferred). The renderer
+  also accepts `rows: [["Acme", "$2,400", "Active"], ...]` (array-of-
+  arrays) and zips it against `columns`.
+- `columns`: array of strings, OR objects with
+  `{accessorKey | key, header | label}`.
+- `variant`: `default | compact | striped | minimal`.
+- `statusKey`: optional column key whose value drives a status-dot color.
+- For a titled table, wrap in a `flex` with a `heading` above the table —
+  the Table widget does not render its own title.
 
 Notes:
 - Do NOT include `button` or interactive nodes — chat-inline specs are for
   display only; interactive surfaces belong on a pocket canvas, not in chat.
-- For chart props, you can put `chartType`/`title`/`data`/`colors`/`height`
-  either inside `props` (preferred) or flat at the node level — the
-  renderer normalizes both. Same for `table.columns`/`rows`.
 
 When to use:
 - Numeric summaries, dashboards, time-series, comparisons, structured lists.

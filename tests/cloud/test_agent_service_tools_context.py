@@ -82,11 +82,19 @@ def test_build_context_block_includes_ripple_hint():
     assert '"version": "1.0"' in block
     for node in ("flex", "grid", "heading", "text", "stat", "chart", "table"):
         assert node in block, f"node type {node!r} missing from Ripple hint"
-    # Chart specifics — the agent needs at least one chartType + a data shape.
-    assert "chartType" in block
-    assert "line" in block and "bar" in block
-    # Table specifics.
-    assert "columns" in block and "rows" in block
+    # Chart specifics — the agent needs to know all 10 chart kinds + the
+    # canonical Ripple shape (props.type), not just the legacy chartType alias.
+    for kind in ("bar", "line", "area", "pie", "donut", "candlestick",
+                 "sparkline", "heatmap", "gauge", "radar"):
+        assert kind in block, f"chart kind {kind!r} missing from Ripple hint"
+    # Candlestick data points need the OHLC shape called out.
+    assert "open" in block and "close" in block and "high" in block and "low" in block
+    # Table specifics — data-of-objects is the preferred shape; columns
+    # remain mandatory; variant should be advertised.
+    assert "columns" in block
+    assert '"variant"' in block or "`variant`" in block
+    for v in ("default", "compact", "striped", "minimal"):
+        assert v in block, f"table variant {v!r} missing from Ripple hint"
     # Buttons / interactive nodes must NOT be advertised in chat-inline specs.
     assert (
         "button" not in block.lower()
