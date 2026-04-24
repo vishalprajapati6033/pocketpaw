@@ -901,8 +901,8 @@ cd D:/paw/paw-enterprise && bun run check
 
 Filled in by Task 0.
 
-- Backend `tests/cloud/chat/` baseline: _____ passed, _____ failed.
-- Frontend `src/lib/core/chat/` vitest baseline: _____ passed, _____ failed.
+- Backend `tests/cloud/` baseline: **1277 passed, 38 failed, 39 errors, 6 skipped**. Pre-existing failures from GCP connector and critical-gaps tests (unrelated to session scope work).
+- Frontend `src/lib/core/chat/` vitest baseline: **6 test files passed, 31 tests passed**. All passing.
 
 ## Gotchas
 
