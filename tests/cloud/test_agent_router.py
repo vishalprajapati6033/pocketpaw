@@ -53,7 +53,7 @@ async def test_sse_emits_persisted_then_stream_events(cloud_app_client: AsyncCli
     async def fake_persist(ctx, body):
         return "user_msg_id_1"
 
-    async def fake_run_stream(ctx, user_msg_id, body, cancel_event):
+    async def fake_run_stream(ctx, user_msg_id, body, cancel_event, *, history=None):
         yield ("stream_start", {"run_id": "r1", "agent_id": ctx.target_agent_id,
                                  "scope": "group", "scope_id": "g1"})
         yield ("chunk", {"content": "hi ", "type": "text"})

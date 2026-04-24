@@ -6,15 +6,20 @@ handles *what the agent sees*:
 * ``resolve_scope_context`` turns (scope, scope_id, user_id) into a
   ``ScopeContext`` including the target agent id, members, and
   pocket-scoped tool specs where applicable.
+* ``load_history_for_scope`` rehydrates prior chat turns from Mongo so the
+  agent carries context across backend restarts and pool evictions.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
 from ee.cloud.shared.errors import CloudError, NotFound
+
+logger = logging.getLogger(__name__)
 
 
 class ScopeKind(StrEnum):
@@ -399,3 +404,65 @@ def build_context_block(ctx: ScopeContext) -> str:
         f"<participants>{member_list}</participants>\n"
         f"{_RIPPLE_HINT}"
     )
+
+
+# ---------------------------------------------------------------------------
+# History rehydration
+# ---------------------------------------------------------------------------
+
+
+def session_key_for(ctx: ScopeContext) -> str:
+    """Stable session key for pocket- and session-scope agent runs.
+
+    Mirrors the Mongo ``Message.session_key`` written by the router's
+    persist helpers. Keeping the formula in one place lets history
+    rehydration use the same key the persist path writes with.
+    """
+    return f"cloud:{ctx.kind.value}:{ctx.scope_id}:{ctx.target_agent_id}"
+
+
+async def load_history_for_scope(ctx: ScopeContext, *, limit: int = 50) -> list[dict[str, str]]:
+    """Return prior turns as ``[{"role", "content"}]``, oldest first.
+
+    Why: the agent backend keeps conversation state in an in-process SDK
+    subprocess keyed by ``session_key``. That state is wiped by any
+    backend restart or ``AgentPool`` eviction, at which point the agent
+    would otherwise forget every prior message in the thread. Reading
+    from the persisted ``Message`` collection restores context.
+
+    Swallows errors (empty list) so a transient Mongo hiccup degrades
+    the reply rather than killing the stream.
+    """
+    try:
+        from ee.cloud.models.message import Message
+    except Exception:
+        logger.debug("Message model unavailable; returning empty history", exc_info=True)
+        return []
+
+    try:
+        if ctx.kind in (ScopeKind.POCKET, ScopeKind.SESSION):
+            query: dict[str, Any] = {
+                "context_type": ctx.kind.value,
+                "session_key": session_key_for(ctx),
+            }
+        else:  # GROUP, DM — both land in a group row
+            query = {
+                "context_type": "group",
+                "group": ctx.scope_id,
+                "deleted": False,
+            }
+        msgs = await Message.find(query).sort("createdAt").limit(limit).to_list()
+    except Exception:
+        logger.exception("load_history_for_scope failed for %s/%s", ctx.kind.value, ctx.scope_id)
+        return []
+
+    out: list[dict[str, str]] = []
+    for m in msgs:
+        role = getattr(m, "role", None)
+        if role not in ("user", "assistant", "system"):
+            role = "assistant" if getattr(m, "sender_type", "") == "agent" else "user"
+        content = getattr(m, "content", "") or ""
+        if not content:
+            continue
+        out.append({"role": role, "content": content})
+    return out

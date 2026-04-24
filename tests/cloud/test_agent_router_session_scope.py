@@ -154,7 +154,7 @@ async def test_cancel_session_scope(cloud_app_client: AsyncClient):
 
     first_done = asyncio.Event()
 
-    async def slow_stream(ctx, user_msg_id, body, cancel_event):
+    async def slow_stream(ctx, user_msg_id, body, cancel_event, *, history=None):
         yield (
             "stream_start",
             {"run_id": "r", "agent_id": "a1", "scope": "session", "scope_id": "session-id-1"},
@@ -165,7 +165,7 @@ async def test_cancel_session_scope(cloud_app_client: AsyncClient):
             first_done.set()
         yield ("stream_end", {"assistant_message_id": None, "usage": {}, "cancelled": True})
 
-    async def fast_stream(ctx, user_msg_id, body, cancel_event):
+    async def fast_stream(ctx, user_msg_id, body, cancel_event, *, history=None):
         yield ("stream_end", {"assistant_message_id": "m", "usage": {}, "cancelled": False})
 
     with (

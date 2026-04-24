@@ -25,7 +25,9 @@ from ee.cloud.chat.agent_service import (
     InvalidScope,
     ScopeContext,
     ScopeKind,
+    load_history_for_scope,
     resolve_scope_context,
+    session_key_for,
 )
 
 if TYPE_CHECKING:
@@ -85,6 +87,12 @@ async def post_agent_chat(
     cancel_event = asyncio.Event()
     _active_runs[key] = cancel_event
 
+    # Load prior turns BEFORE persisting the new user message so ``history``
+    # contains only the conversation up to (but not including) this request.
+    # The in-process SDK subprocess can't be relied on across backend restarts
+    # or pool evictions — Mongo is the source of truth.
+    history = await load_history_for_scope(ctx)
+
     try:
         user_message_id = await _persist_user_message(ctx, body)
     except CloudError as e:
@@ -123,7 +131,9 @@ async def post_agent_chat(
             if ctx.session_id:
                 persisted_payload["session_id"] = ctx.session_id
             yield _sse("message.persisted", persisted_payload)
-            async for name, data in _run_agent_stream(ctx, user_message_id, body, cancel_event):
+            async for name, data in _run_agent_stream(
+                ctx, user_message_id, body, cancel_event, history=history
+            ):
                 yield _sse(name, data)
                 if name in ("stream_end", "error"):
                     break
@@ -165,12 +175,6 @@ async def post_agent_chat_stop(
 
 
 RIPPLE_JSON_RE = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
-
-
-def _session_key_for(ctx: ScopeContext) -> str:
-    """Stable session key for the agent run. Used both as the agent backend's
-    session key and as the pocket ``Message.session_key``."""
-    return f"cloud:{ctx.kind.value}:{ctx.scope_id}:{ctx.target_agent_id}"
 
 
 async def _ensure_scope_session(ctx: ScopeContext) -> str | None:
@@ -261,7 +265,7 @@ async def _persist_user_message(ctx: ScopeContext, body: CloudAgentChatRequest) 
     if ctx.kind in (ScopeKind.POCKET, ScopeKind.SESSION):
         msg = Message(
             context_type=ctx.kind.value,
-            session_key=_session_key_for(ctx),
+            session_key=session_key_for(ctx),
             role="user",
             sender=ctx.user_id,
             sender_type="user",
@@ -294,7 +298,7 @@ async def _persist_assistant_message(
     if ctx.kind in (ScopeKind.POCKET, ScopeKind.SESSION):
         msg = Message(
             context_type=ctx.kind.value,
-            session_key=_session_key_for(ctx),
+            session_key=session_key_for(ctx),
             role="assistant",
             sender=None,
             sender_type="agent",
@@ -377,10 +381,12 @@ async def _run_agent_stream(
     user_message_id: str,
     body: CloudAgentChatRequest,
     cancel_event: asyncio.Event,
+    *,
+    history: list[dict[str, str]] | None = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     """Drive AgentPool.run and translate events into SSE tuples."""
     run_id = _new_run_id()
-    session_key = _session_key_for(ctx)
+    session_key = session_key_for(ctx)
 
     pool = get_agent_pool()
     try:
@@ -417,7 +423,7 @@ async def _run_agent_stream(
             ctx.target_agent_id,
             body.content,
             session_key,
-            history=None,
+            history=history,
             knowledge_context=scope_block,
         ):
             if cancel_event.is_set():
