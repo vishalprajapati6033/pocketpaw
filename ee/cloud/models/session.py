@@ -10,7 +10,7 @@ from pydantic import Field, model_validator
 
 from ee.cloud.models.base import TimestampedDocument
 
-ContextType = Literal["pocket", "group"]
+ContextType = Literal["pocket", "group", "session"]
 
 
 class Session(TimestampedDocument):
@@ -56,6 +56,11 @@ class Session(TimestampedDocument):
                 raise ValueError("group session must have group set")
             if self.pocket:
                 raise ValueError("group session must not have pocket set")
+        elif self.context_type == "session":
+            if self.group:
+                raise ValueError("session-typed session must not have group set")
+            if self.pocket:
+                raise ValueError("session-typed session must not have pocket set")
         return self
 
     class Settings:

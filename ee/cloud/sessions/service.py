@@ -74,9 +74,16 @@ class SessionService:
                     )
                 return _session_response(existing)
 
+        if body.group_id:
+            ctype = "group"
+        elif body.pocket_id:
+            ctype = "pocket"
+        else:
+            ctype = "session"  # free-floating session
+
         session = Session(
             sessionId=sid,
-            context_type="group" if body.group_id else "pocket",
+            context_type=ctype,
             workspace=workspace_id,
             owner=user_id,
             title=body.title,
@@ -237,6 +244,33 @@ class SessionService:
         from ee.cloud.models.message import Message
 
         session = await SessionService._get_session(session_id, user_id)
+
+        if session.context_type == "session":
+            messages = (
+                await Message.find(
+                    {
+                        "context_type": "session",
+                        "session_key": f"cloud:session:{session.id}:{session.agent}",
+                    }
+                )
+                .sort("createdAt")
+                .limit(limit)
+                .to_list()
+            )
+            return {
+                "messages": [
+                    {
+                        "_id": str(m.id),
+                        "role": m.role or "user",
+                        "content": m.content,
+                        "sender": m.sender,
+                        "senderType": m.sender_type,
+                        "createdAt": iso_utc(m.createdAt),
+                        "attachments": [a.model_dump() for a in (m.attachments or [])],
+                    }
+                    for m in messages
+                ]
+            }
 
         if session.context_type == "group" and session.group:
             messages = (
