@@ -300,9 +300,23 @@ class SessionService:
                 ]
             }
 
-        # Pocket context — keyed by session_key, which mirrors sessionId.
+        # Pocket context — two writer paths land here with different
+        # ``session_key`` shapes:
+        #   * The cloud SSE chat writer (``ee.cloud.chat.agent_service.
+        #     session_key_for``) keys by ``cloud:pocket:{pocket_id}:{agent_id}``
+        #     — derivable from the Session doc when both fields are set.
+        #   * The legacy bus path (``mongo_store._auto_create_pocket_session``)
+        #     uses the channel-style ``sessionId`` itself (e.g. ``websocket_…``)
+        #     and auto-creates a Session row with ``pocket=None, agent=None``.
+        # Match against both so history loads regardless of which writer
+        # produced the rows.
+        candidate_keys = [session.sessionId]
+        if session.pocket and session.agent:
+            candidate_keys.append(f"cloud:pocket:{session.pocket}:{session.agent}")
         messages = (
-            await Message.find({"context_type": "pocket", "session_key": session.sessionId})
+            await Message.find(
+                {"context_type": "pocket", "session_key": {"$in": candidate_keys}}
+            )
             .sort("createdAt")
             .limit(limit)
             .to_list()
