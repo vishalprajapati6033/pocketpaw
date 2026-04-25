@@ -182,6 +182,57 @@ async def test_resolve_rejects_archived_group():
 
 
 @pytest.mark.asyncio
+async def test_resolve_pocket_falls_back_to_workspace_default_agent():
+    pocket = SimpleNamespace(
+        id="p1",
+        workspace="w1",
+        owner="u_caller",
+        team=["u_caller"],
+        agents=[],
+        tool_specs=[],
+        visibility="workspace",
+        shared_with=[],
+    )
+    with (
+        patch("ee.cloud.chat.agent_service._get_pocket", AsyncMock(return_value=pocket)),
+        patch(
+            "ee.cloud.chat.agent_service._get_default_workspace_agent_id",
+            AsyncMock(return_value="agent_default_pp"),
+        ),
+    ):
+        ctx = await resolve_scope_context(
+            scope="pocket", scope_id="p1", user_id="u_caller", agent_id_hint=None
+        )
+    assert ctx.target_agent_id == "agent_default_pp"
+    assert ctx.agent_ids_in_scope == ["agent_default_pp"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_pocket_no_agents_and_no_default_raises():
+    pocket = SimpleNamespace(
+        id="p1",
+        workspace="w1",
+        owner="u_caller",
+        team=["u_caller"],
+        agents=[],
+        tool_specs=[],
+        visibility="workspace",
+        shared_with=[],
+    )
+    with (
+        patch("ee.cloud.chat.agent_service._get_pocket", AsyncMock(return_value=pocket)),
+        patch(
+            "ee.cloud.chat.agent_service._get_default_workspace_agent_id",
+            AsyncMock(return_value=None),
+        ),
+    ):
+        with pytest.raises(CloudError):
+            await resolve_scope_context(
+                scope="pocket", scope_id="p1", user_id="u_caller", agent_id_hint=None
+            )
+
+
+@pytest.mark.asyncio
 async def test_resolve_pocket_dedupes_members_across_team_and_shared():
     pocket = SimpleNamespace(
         id="p1",
