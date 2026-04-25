@@ -25,6 +25,8 @@ from ee.cloud.chat.agent_service import (
     InvalidScope,
     ScopeContext,
     ScopeKind,
+    attach_pocket_event_sink,
+    detach_pocket_event_sink,
     load_history_for_scope,
     resolve_scope_context,
     session_key_for,
@@ -416,6 +418,23 @@ async def _run_agent_stream(
         stream_start_payload["session_id"] = ctx.session_id
     yield ("stream_start", stream_start_payload)
 
+    # Bind a per-stream queue for in-process pocket-write tools to push onto.
+    # ``MCP`` handlers (``update_pocket``, ``add_widget``, …) call
+    # ``push_pocket_mutation`` after Mongo writes, and we drain the queue
+    # between SDK events to surface ``pocket_mutation`` SSE events in real
+    # time so the frontend can swap in the new ripple spec mid-stream.
+    pocket_event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    sink_token = attach_pocket_event_sink(pocket_event_queue)
+
+    def _drain_pocket_events() -> list[tuple[str, dict[str, Any]]]:
+        events: list[tuple[str, dict[str, Any]]] = []
+        while True:
+            try:
+                events.append(("pocket_mutation", pocket_event_queue.get_nowait()))
+            except asyncio.QueueEmpty:
+                break
+        return events
+
     full_text = ""
     cancelled = False
     try:
@@ -426,6 +445,8 @@ async def _run_agent_stream(
             history=history,
             knowledge_context=scope_block,
         ):
+            for ev in _drain_pocket_events():
+                yield ev
             if cancel_event.is_set():
                 cancelled = True
                 break
@@ -455,11 +476,19 @@ async def _run_agent_stream(
                 yield ("tool_result", {"tool": name, "output": output})
             elif etype == "done":
                 break
+        # Flush anything the agent emitted right before ``done`` / break.
+        for ev in _drain_pocket_events():
+            yield ev
     except Exception as e:
         logger.exception("Cloud agent run failed for agent=%s", ctx.target_agent_id)
         yield ("error", {"code": "agent.run_failed", "message": str(e)})
         await _broadcast_agent_typing(ctx, active=False)
         return
+    finally:
+        try:
+            detach_pocket_event_sink(sink_token)
+        except Exception:
+            pass
 
     # Extract ripple block from the accumulated text (same regex as agent_bridge).
     attachments: list[dict[str, Any]] = []
