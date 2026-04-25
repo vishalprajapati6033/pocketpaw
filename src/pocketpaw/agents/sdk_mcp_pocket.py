@@ -26,6 +26,7 @@ SERVER_NAME = "pocketpaw_pocket"
 # Claude Code namespaces in-process MCP tools as ``mcp__<server>__<tool>``.
 # Allowlist entries must use this exact form.
 GET_POCKET_TOOL_ID = f"mcp__{SERVER_NAME}__get_pocket"
+CREATE_POCKET_TOOL_ID = f"mcp__{SERVER_NAME}__create_pocket"
 UPDATE_POCKET_TOOL_ID = f"mcp__{SERVER_NAME}__update_pocket"
 ADD_WIDGET_TOOL_ID = f"mcp__{SERVER_NAME}__add_widget"
 UPDATE_WIDGET_TOOL_ID = f"mcp__{SERVER_NAME}__update_widget"
@@ -33,6 +34,7 @@ REMOVE_WIDGET_TOOL_ID = f"mcp__{SERVER_NAME}__remove_widget"
 
 POCKET_TOOL_IDS = (
     GET_POCKET_TOOL_ID,
+    CREATE_POCKET_TOOL_ID,
     UPDATE_POCKET_TOOL_ID,
     ADD_WIDGET_TOOL_ID,
     UPDATE_WIDGET_TOOL_ID,
@@ -75,6 +77,21 @@ async def _update_pocket_handler(args: dict) -> dict:
             description=args.get("description"),
             icon=args.get("icon"),
             color=args.get("color"),
+            ripple_spec=args.get("ripple_spec"),
+        )
+    )
+
+
+async def _create_pocket_handler(args: dict) -> dict:
+    from ee.cloud.pockets.agent_context import create_pocket_for_agent
+
+    return _result_payload(
+        await create_pocket_for_agent(
+            name=args.get("name", ""),
+            description=args.get("description", ""),
+            type_=args.get("type", "custom"),
+            icon=args.get("icon", ""),
+            color=args.get("color", ""),
             ripple_spec=args.get("ripple_spec"),
         )
     )
@@ -127,6 +144,32 @@ def build_pocket_context_server() -> tuple[str, Any] | None:
     )
     async def get_pocket(args):  # type: ignore[no-untyped-def]
         return await _get_pocket_handler(args)
+
+    @tool(
+        "create_pocket",
+        (
+            "Materialize a brand-new pocket (themed dashboard / canvas) "
+            "for the user. Pass ``name`` (required), ``description``, "
+            "``type`` (research|business|data|mission|deep-work|custom|"
+            "hospitality), ``icon``, ``color``, and ``ripple_spec`` — a "
+            "UISpec v1.0 component tree (root with ``type``/``props``/"
+            "``children``). Persists the Pocket document and emits a "
+            "``pocket_created`` SSE event so the user's canvas mounts the "
+            "new pocket immediately. Use this — do NOT respond with an "
+            "inline ``ui-spec`` block when the user asked you to BUILD a "
+            "pocket; that only renders inside the chat bubble."
+        ),
+        {
+            "name": str,
+            "description": str,
+            "type": str,
+            "icon": str,
+            "color": str,
+            "ripple_spec": dict,
+        },
+    )
+    async def create_pocket(args):  # type: ignore[no-untyped-def]
+        return await _create_pocket_handler(args)
 
     @tool(
         "update_pocket",
@@ -189,6 +232,13 @@ def build_pocket_context_server() -> tuple[str, Any] | None:
     server = create_sdk_mcp_server(
         name=SERVER_NAME,
         version="1.0.0",
-        tools=[get_pocket, update_pocket, add_widget, update_widget, remove_widget],
+        tools=[
+            get_pocket,
+            create_pocket,
+            update_pocket,
+            add_widget,
+            update_widget,
+            remove_widget,
+        ],
     )
     return SERVER_NAME, server
