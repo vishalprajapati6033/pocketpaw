@@ -300,7 +300,7 @@ class SessionService:
                 ]
             }
 
-        # Pocket context — two writer paths land here with different
+        # Pocket context — three writer paths land here with different
         # ``session_key`` shapes:
         #   * The cloud SSE chat writer (``ee.cloud.chat.agent_service.
         #     session_key_for``) keys by ``cloud:pocket:{pocket_id}:{agent_id}``
@@ -308,15 +308,30 @@ class SessionService:
         #   * The legacy bus path (``mongo_store._auto_create_pocket_session``)
         #     uses the channel-style ``sessionId`` itself (e.g. ``websocket_…``)
         #     and auto-creates a Session row with ``pocket=None, agent=None``.
-        # Match against both so history loads regardless of which writer
-        # produced the rows.
-        candidate_keys = [session.sessionId]
+        #   * Sessions that started life as a free workspace session (rows
+        #     written under ``context_type="session"`` keyed by
+        #     ``cloud:session:{session._id}:{agent}``) and were later
+        #     re-linked to a pocket by ``create_pocket`` — their messages
+        #     keep their original session-context form.
+        # Match against all three so history loads regardless of which
+        # writer produced the rows.
+        pocket_candidate_keys = [session.sessionId]
         if session.pocket and session.agent:
-            candidate_keys.append(f"cloud:pocket:{session.pocket}:{session.agent}")
-        messages = (
-            await Message.find(
-                {"context_type": "pocket", "session_key": {"$in": candidate_keys}}
+            pocket_candidate_keys.append(
+                f"cloud:pocket:{session.pocket}:{session.agent}"
             )
+        or_clauses: list[dict[str, Any]] = [
+            {"context_type": "pocket", "session_key": {"$in": pocket_candidate_keys}}
+        ]
+        if session.agent:
+            or_clauses.append(
+                {
+                    "context_type": "session",
+                    "session_key": f"cloud:session:{session.id}:{session.agent}",
+                }
+            )
+        messages = (
+            await Message.find({"$or": or_clauses})
             .sort("createdAt")
             .limit(limit)
             .to_list()
