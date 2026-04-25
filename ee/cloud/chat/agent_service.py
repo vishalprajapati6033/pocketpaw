@@ -25,45 +25,104 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Pocket-mutation event sink
+# Per-stream SSE event sink
 #
-# When an in-process MCP write tool (``update_pocket``, ``add_widget``, …)
-# runs inside an agent SSE stream, the handler pushes the post-write pocket
-# document onto whichever queue is bound to the current async context. The
-# stream generator drains the queue and surfaces each push as a synthetic
-# ``pocket_mutation`` SSE event so connected frontends can refresh in real
-# time without waiting for the user to navigate away and back.
+# Side-channel emitters (the in-process MCP pocket-write tools, the
+# background session-titler) push named SSE event tuples onto whichever
+# queue is bound to the current async context. The stream generator drains
+# the queue between SDK events so the client receives ``pocket_mutation``
+# / ``session_titled`` / etc. frames without waiting for the chat reply
+# to finish. ``contextvars`` propagates the binding into tasks spawned
+# via ``asyncio.create_task`` so background workers can push too.
 # ---------------------------------------------------------------------------
 
 
-_pocket_event_sink: ContextVar[asyncio.Queue[dict[str, Any]] | None] = ContextVar(
-    "pocket_event_sink", default=None
+_sse_event_sink: ContextVar[asyncio.Queue[tuple[str, dict[str, Any]]] | None] = ContextVar(
+    "sse_event_sink", default=None
 )
 
 
-def push_pocket_mutation(payload: dict[str, Any]) -> None:
-    """Send a pocket-mutation event to the active stream's sink, if any.
+# Per-stream identity used by in-process MCP write tools that can't
+# reach the FastAPI request scope. ``create_pocket`` reads these to
+# stamp the ``Pocket.workspace`` / ``Pocket.owner`` fields. Set in
+# ``agent_router._run_agent_stream`` and propagated into spawned tasks
+# automatically via ``contextvars``.
+_active_workspace_id: ContextVar[str | None] = ContextVar(
+    "agent_workspace_id", default=None
+)
+_active_user_id: ContextVar[str | None] = ContextVar("agent_user_id", default=None)
+_active_session_mongo_id: ContextVar[str | None] = ContextVar(
+    "agent_session_mongo_id", default=None
+)
 
-    No-op when there's no sink in scope (e.g. the MCP tool was invoked from
-    a non-streaming context like a unit test or a CLI invocation).
+
+def attach_agent_identity(
+    *, workspace_id: str, user_id: str, session_mongo_id: str | None = None
+) -> tuple[Token, Token, Token]:
+    """Bind workspace / user / session identity for the active stream's
+    MCP tools. ``session_mongo_id`` is the ``Session._id`` the chat is
+    streaming through — used by ``create_pocket`` to link the active
+    session to the freshly-created pocket."""
+    return (
+        _active_workspace_id.set(workspace_id),
+        _active_user_id.set(user_id),
+        _active_session_mongo_id.set(session_mongo_id),
+    )
+
+
+def detach_agent_identity(tokens: tuple[Token, Token, Token]) -> None:
+    ws_token, user_token, session_token = tokens
+    _active_workspace_id.reset(ws_token)
+    _active_user_id.reset(user_token)
+    _active_session_mongo_id.reset(session_token)
+
+
+def current_workspace_id() -> str | None:
+    return _active_workspace_id.get()
+
+
+def current_user_id() -> str | None:
+    return _active_user_id.get()
+
+
+def current_session_mongo_id() -> str | None:
+    return _active_session_mongo_id.get()
+
+
+def push_sse_event(name: str, data: dict[str, Any]) -> None:
+    """Send a named SSE event to the active stream's sink, if any.
+
+    No-op when there's no sink in scope (e.g. invoked from a unit test or
+    a CLI handler that isn't part of an SSE stream).
     """
-    sink = _pocket_event_sink.get()
+    sink = _sse_event_sink.get()
     if sink is None:
         return
     try:
-        sink.put_nowait(payload)
+        sink.put_nowait((name, data))
     except Exception:
-        logger.debug("pocket-mutation sink rejected payload", exc_info=True)
+        logger.debug("sse sink rejected %s payload", name, exc_info=True)
 
 
-def attach_pocket_event_sink(queue: asyncio.Queue[dict[str, Any]]) -> Token:
+def push_pocket_mutation(payload: dict[str, Any]) -> None:
+    """Compatibility wrapper — historic call site for pocket-mutation pushes."""
+    push_sse_event("pocket_mutation", payload)
+
+
+def attach_sse_event_sink(queue: asyncio.Queue[tuple[str, dict[str, Any]]]) -> Token:
     """Bind ``queue`` as the sink for the current async context."""
-    return _pocket_event_sink.set(queue)
+    return _sse_event_sink.set(queue)
 
 
-def detach_pocket_event_sink(token: Token) -> None:
+def detach_sse_event_sink(token: Token) -> None:
     """Restore the previous sink binding."""
-    _pocket_event_sink.reset(token)
+    _sse_event_sink.reset(token)
+
+
+# Legacy aliases retained for callers that were written against the
+# pocket-specific names. Both pairs operate on the same underlying sink.
+attach_pocket_event_sink = attach_sse_event_sink
+detach_pocket_event_sink = detach_sse_event_sink
 
 
 class ScopeKind(StrEnum):
@@ -97,6 +156,11 @@ class ScopeContext:
     # when the underlying ``Session.pocket`` is set. The system prompt uses
     # it to tell the agent which pocket it can edit via the write MCP tools.
     pocket_id: str | None = None
+    # Optional client-supplied intent hint that swaps which system-prompt
+    # block ``build_context_block`` emits. ``pocket_create`` makes the
+    # agent reach for the ``create_pocket`` MCP tool instead of rendering
+    # an inline ``ui-spec`` chat reply.
+    intent: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -501,51 +565,94 @@ When to use:
 </ripple>"""
 
 
+_CLOUD_POCKET_TOOL_PREAMBLE = """\
+<cloud-pocket-tools>
+This conversation runs in cloud mode. Pocket operations go through these
+in-process MCP tools — NOT the Bash ``python -m pocketpaw.tools.cli``
+bridge mentioned below. The CLI bridge does not persist in cloud mode;
+the MCP tools do. Same operations, typed JSON arguments, no shell
+escaping headaches:
+
+- ``mcp__pocketpaw_pocket__get_pocket(pocket_id)`` — replaces
+  ``cli get_pocket``. Returns the full pocket document.
+- ``mcp__pocketpaw_pocket__create_pocket(name, description, type, icon,
+  color, ripple_spec)`` — replaces ``cli create_pocket``. ``ripple_spec``
+  takes either a UISpec node tree (``{{type, props, children}}``) or a
+  ``{{ui: <node>, ...}}`` envelope; the server normalizes either form.
+- ``mcp__pocketpaw_pocket__update_pocket(pocket_id, name?, description?,
+  icon?, color?, ripple_spec?)`` — replaces ``cli create_pocket``-as-
+  rebuild for an existing pocket. Patch only the fields you pass.
+- ``mcp__pocketpaw_pocket__add_widget(pocket_id, widget)`` — replaces
+  ``cli add_widget``.
+- ``mcp__pocketpaw_pocket__update_widget(pocket_id, widget_id, fields)``
+  — patch one widget.
+- ``mcp__pocketpaw_pocket__remove_widget(pocket_id, widget_id)`` —
+  replaces ``cli remove_widget``.
+
+The ``<current-pocket>`` id for this conversation (when one is attached)
+is in the ``<scope>`` tag at the top of this prompt: ``pocket {pocket_id}``.
+Pass that id verbatim as ``pocket_id``. Wherever the guidance below says
+"echo '...' | python -m pocketpaw.tools.cli X", call the matching MCP
+tool with the same JSON fields instead.
+</cloud-pocket-tools>
+
+"""
+
+
 _POCKET_TOOLS_HINT_TEMPLATE = """\
-<pocket-tools>
-This conversation lives inside a pocket (id: ``{pocket_id}``). You can
-read and write that pocket directly via these in-process MCP tools:
+{preamble}{interaction_context}"""
 
-- ``mcp__pocketpaw_pocket__get_pocket`` — fetch the full pocket document
-  (rippleSpec, widgets, metadata). Call before any READ or WRITE so you
-  know the current shape and ids.
-- ``mcp__pocketpaw_pocket__update_pocket`` — patch top-level fields. Pass
-  ``ripple_spec`` to replace the rendered UI tree (UISpec v1.0 /
-  UniversalSpec v2.0). Other patchable fields: ``name``, ``description``,
-  ``icon``, ``color``. Omit a field to leave it unchanged.
-- ``mcp__pocketpaw_pocket__add_widget`` — append to the pocket's embedded
-  widget list. ``widget`` shape: ``{{name, type, icon?, color?, span?,
-  dataSourceType?, config?, props?, data?, assignedAgent?}}``. Prefer
-  ``update_pocket`` with a fresh ``ripple_spec`` for ripple-rendered
-  pockets — the embedded widget list is the legacy widgets-grid format.
-- ``mcp__pocketpaw_pocket__update_widget`` — patch fields on a single
-  embedded widget by ``widget_id``. ``fields`` is partial.
-- ``mcp__pocketpaw_pocket__remove_widget`` — remove an embedded widget
-  by ``widget_id``.
 
-Rules:
-- Always call ``get_pocket`` before mutating so you preserve fields you
-  aren't editing.
-- Pass ``pocket_id`` = ``{pocket_id}`` (the id in the ``<scope>`` tag).
-- Do NOT use Bash/curl/HTTP to hit ``/api/v1/pockets`` — the MCP tools
-  are the supported path for this conversation.
-- Do NOT use a ``ui-spec`` chat block to "deliver" pocket edits — that
-  only renders inline in your chat reply, it doesn't persist. Use
-  ``update_pocket`` with ``ripple_spec`` to actually save changes.
-</pocket-tools>"""
+def _load_oss_pocket_contexts() -> tuple[str, str]:
+    """Lazy-import the OSS pocket system prompts so this module stays
+    independent of ``pocketpaw.api.v1.pockets`` import order. Falls back
+    to empty strings if the OSS path isn't reachable (build_context_block
+    will simply render without the rich guidance)."""
+    try:
+        from pocketpaw.api.v1.pockets import (
+            _POCKET_CREATION_CONTEXT,
+            _POCKET_INTERACTION_CONTEXT,
+        )
+
+        return _POCKET_INTERACTION_CONTEXT, _POCKET_CREATION_CONTEXT
+    except Exception:  # noqa: BLE001
+        logger.debug("OSS pocket prompts unavailable", exc_info=True)
+        return "", ""
 
 
 def build_context_block(ctx: ScopeContext) -> str:
     """Compact string the agent prompt embeds so the model knows who is here
     and how to render rich UI back to the client.
+
+    Three pocket modes drive different prompt blocks:
+    - ``pocket_create`` intent → emit the OSS pocket-creation prompt
+      (intent classification, formats, hard rules) prefixed with a
+      cloud-mode preamble that maps the CLI bridge invocations to the
+      MCP tools.
+    - Active pocket attached → emit the OSS pocket-interaction prompt
+      with the same cloud-mode preamble + the ripple-inline hint.
+    - Plain chat (DM, group, free session) → ripple-inline hint only.
     """
+    interaction_ctx, creation_ctx = _load_oss_pocket_contexts()
+
     member_list = ", ".join(ctx.members) if ctx.members else "(none)"
     parts = [
         f"<scope>{ctx.kind.value} {ctx.scope_id}</scope>",
         f"<participants>{member_list}</participants>",
     ]
+    if ctx.intent == "pocket_create":
+        preamble = _CLOUD_POCKET_TOOL_PREAMBLE.format(pocket_id="<new-pocket>")
+        parts.append(preamble + (creation_ctx or ""))
+        return "\n".join(parts)
     if ctx.pocket_id:
-        parts.append(_POCKET_TOOLS_HINT_TEMPLATE.format(pocket_id=ctx.pocket_id))
+        if interaction_ctx:
+            parts.append(
+                _POCKET_TOOLS_HINT_TEMPLATE.format(
+                    preamble=_CLOUD_POCKET_TOOL_PREAMBLE.format(pocket_id=ctx.pocket_id),
+                    interaction_context=interaction_ctx,
+                )
+            )
+            parts.append(f"<current-pocket id=\"{ctx.pocket_id}\" />")
     parts.append(_RIPPLE_HINT)
     return "\n".join(parts)
 

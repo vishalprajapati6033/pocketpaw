@@ -9,7 +9,7 @@ for the full protocol.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -28,6 +28,13 @@ class CloudAgentChatRequest(BaseModel):
     # Idempotency key echoed back in ``message.persisted`` so the client can
     # reconcile its optimistic bubble before any agent output arrives.
     client_message_id: str | None = None
+    # Optional intent hint that swaps the system-prompt block built by
+    # ``build_context_block``. The desktop client sets ``pocket_create``
+    # when the user is in the pocket sidebar with no pocket selected
+    # ("describe a pocket to create…"), so the agent uses the
+    # ``create_pocket`` tool instead of rendering an inline ``ui-spec``
+    # block as a chat reply.
+    intent: Literal["pocket_create"] | None = None
 
 
 class SseEventName(StrEnum):
