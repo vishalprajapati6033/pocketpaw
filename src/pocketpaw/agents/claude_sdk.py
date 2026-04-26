@@ -756,12 +756,14 @@ class ClaudeSDKBackend:
             except Exception:
                 pass  # Don't break agent if connector registry fails
 
-            # The persistent ClaudeSDKClient maintains conversation history
-            # natively across query() calls, so we do NOT inject history into
-            # the system prompt for that path. History is only appended for
-            # the stateless fallback path (which starts fresh each call).
+            # Inject prior turns into the system prompt at connect time. The
+            # persistent ClaudeSDKClient accumulates new turns natively after
+            # connect, but a fresh subprocess (after eviction, restart, or
+            # session switch) has empty native history — without this, those
+            # cold-start runs lose all conversation context. Reused clients
+            # keep the prompt set at first connect and ignore later option
+            # changes, so there's no duplication on the warm path.
             final_prompt = identity
-            final_prompt_with_history = identity
             if history:
                 lines = ["# Recent Conversation"]
                 for msg in history:
@@ -770,7 +772,7 @@ class ClaudeSDKBackend:
                     if len(content) > 2000:
                         content = content[:2000] + "..."
                     lines.append(f"**{role}**: {content}")
-                final_prompt_with_history += "\n\n" + "\n".join(lines)
+                final_prompt += "\n\n" + "\n".join(lines)
 
             # Build allowed tools list, filtered by tool policy
             all_sdk_tools = [
@@ -793,12 +795,15 @@ class ClaudeSDKBackend:
                 blocked = set(all_sdk_tools) - set(allowed_tools)
                 logger.info("Tool policy blocked SDK tools: %s", blocked)
 
-            # In-process pocket-context tool — always allowed. The tool itself
-            # is a no-op for chats without a pocket_id, so it costs nothing to
-            # leave enabled for non-pocket sessions.
-            from pocketpaw.agents.sdk_mcp_pocket import GET_POCKET_TOOL_ID
+            # In-process pocket-context tools — always allowed. Each tool
+            # short-circuits without a valid ``pocket_id``, so the cost of
+            # leaving them enabled for non-pocket sessions is negligible.
+            # Read (``get_pocket``) plus four writes (``update_pocket``,
+            # ``add_widget``, ``update_widget``, ``remove_widget``) — see
+            # ``agents/sdk_mcp_pocket.py``.
+            from pocketpaw.agents.sdk_mcp_pocket import POCKET_TOOL_IDS
 
-            allowed_tools.append(GET_POCKET_TOOL_ID)
+            allowed_tools.extend(POCKET_TOOL_IDS)
 
             # Build hooks for security
             hooks = {
@@ -950,15 +955,10 @@ class ClaudeSDKBackend:
 
             if event_stream is None:
                 logger.info("Starting stateless query (fallback — _client_in_use was True)")
-                # Stateless query starts fresh with no conversation memory,
-                # so inject compacted history into the system prompt.
-                if final_prompt_with_history != final_prompt:
-                    stateless_kwargs = dict(options_kwargs)
-                    stateless_kwargs["system_prompt"] = final_prompt_with_history
-                    stateless_options = self._ClaudeAgentOptions(**stateless_kwargs)
-                else:
-                    stateless_options = options
-                event_stream = self._resilient_query(prompt=message, options=stateless_options)
+                # final_prompt already carries Mongo history (injected above),
+                # so the stateless path uses the same options as the persistent
+                # path — no separate system prompt swap is needed.
+                event_stream = self._resilient_query(prompt=message, options=options)
 
             # State tracking for StreamEvent deduplication
             _streamed_via_events = False

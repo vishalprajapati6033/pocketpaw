@@ -41,7 +41,7 @@ async def test_second_request_cancels_first(cloud_app_client: AsyncClient):
 
     first_done = asyncio.Event()
 
-    async def slow_stream(ctx, user_msg_id, body, cancel_event):
+    async def slow_stream(ctx, user_msg_id, body, cancel_event, *, history=None):
         yield ("stream_start", {"run_id": "r", "agent_id": "a1",
                                  "scope": "group", "scope_id": "g1"})
         try:
@@ -50,7 +50,7 @@ async def test_second_request_cancels_first(cloud_app_client: AsyncClient):
             first_done.set()
         yield ("stream_end", {"assistant_message_id": None, "usage": {}, "cancelled": True})
 
-    async def fast_stream(ctx, user_msg_id, body, cancel_event):
+    async def fast_stream(ctx, user_msg_id, body, cancel_event, *, history=None):
         yield ("stream_end", {"assistant_message_id": "m", "usage": {}, "cancelled": False})
 
     with patch.object(mod, "resolve_scope_context", fake_resolver), \

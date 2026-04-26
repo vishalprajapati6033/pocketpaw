@@ -46,6 +46,22 @@ def normalize_ripple_spec(spec: dict[str, Any] | None) -> dict[str, Any] | None:
     if isinstance(ui, dict) and ui.get("type"):
         return {**spec, **envelope, "version": spec.get("version", "1.0")}
 
+    # UISpec passed as a raw root node — i.e. ``{type: "flex", props,
+    # children, ...}`` instead of ``{ui: {type: "flex", ...}}``. The
+    # ``create_pocket`` MCP tool description tells the agent to send a
+    # "UISpec v1.0 component tree", which it often interprets as the
+    # node itself (no ``ui`` wrapper). Detect that shape and lift the
+    # node under ``ui`` so the frontend's UISpec renderer picks it up
+    # — without this, the persisted spec has no ``ui`` and no
+    # ``widgets``, and the dashboard renderer falls back to the
+    # "No widgets yet" empty state.
+    spec_type = spec.get("type")
+    if isinstance(spec_type, str) and spec_type and (
+        "props" in spec or "children" in spec
+    ):
+        node = {k: v for k, v in spec.items() if k in ("type", "props", "children", "style", "show", "id")}
+        return {**envelope, "version": spec.get("version", "1.0"), "ui": node}
+
     # Flat widgets: ensure IDs
     raw_widgets = spec.get("widgets")
     if isinstance(raw_widgets, list) and raw_widgets:

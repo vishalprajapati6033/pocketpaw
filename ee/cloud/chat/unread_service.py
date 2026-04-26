@@ -7,7 +7,7 @@ counter on the ReadState row.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from ee.cloud.models.group import Group
 from ee.cloud.models.message import Message
@@ -87,7 +87,7 @@ class UnreadService:
         two concurrent callers racing on the same (user, group) pair can
         never both decide to insert — MongoDB serializes the upsert.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         await ReadState.get_pymongo_collection().find_one_and_update(
             {"user": user_id, "group": group_id},
             {
@@ -111,7 +111,7 @@ class UnreadService:
         DuplicateKeyError (the unique index on ``(user, group)`` would
         otherwise reject the second insert).
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         await ReadState.get_pymongo_collection().find_one_and_update(
             {"user": user_id, "group": group_id},
             {
