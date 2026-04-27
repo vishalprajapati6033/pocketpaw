@@ -344,7 +344,16 @@ async def startup_event(
     scheduler = get_scheduler()
     scheduler.start(callback=broadcast_reminder)
 
-    # Start proactive daemon
+    # Start proactive daemon. Prune orphan ``[auto] *`` intentions first so
+    # bridged-from-EE entries whose Rule no longer exists don't keep
+    # firing crons forever (test fixtures, deleted rules, manual edits).
+    try:
+        from pocketpaw.ee.automations.bridge import prune_orphan_auto_intentions
+
+        prune_orphan_auto_intentions()
+    except Exception:
+        logger.exception("Failed to prune orphan [auto] intentions; continuing")
+
     daemon = get_daemon()
     daemon.start(stream_callback=broadcast_intention)
 

@@ -1,6 +1,11 @@
 # bridge.py — Syncs enterprise automation rules to core daemon intentions.
 # Created: 2026-03-30 — Schedule/threshold/data_change rules mapped to daemon
 #   intentions with cron triggers. Supports create, update, and delete sync.
+# Updated: 2026-04-27 — Added ``prune_orphan_auto_intentions()`` so the
+#   startup path can drop bridged ``[auto] *`` intentions whose source
+#   Rule no longer exists. Tests that don't isolate ``~/.pocketpaw/`` left
+#   stale entries that re-saved on every cron fire and registered phantom
+#   jobs with the trigger engine on every restart.
 
 """
 bridge.py — Syncs enterprise automation rules to core daemon intentions.
@@ -105,3 +110,50 @@ def unsync_rule_from_daemon(rule: Rule) -> bool:
     except Exception as e:
         logger.warning("Failed to unsync rule %s: %s", rule.id, e)
         return False
+
+
+_AUTO_PREFIX = "[auto] "
+
+
+def prune_orphan_auto_intentions() -> int:
+    """Drop ``[auto] *`` daemon intentions whose source Rule no longer exists.
+
+    The bridge writes ``[auto] <name>`` intentions when an EE automation rule
+    is created. If the rule is deleted out-of-band — test fixtures that don't
+    isolate ``~/.pocketpaw/``, manual edits to ``automations/rules.json``,
+    a corrupted rules file — the linked intention stays in
+    ``intentions.json`` and keeps firing its cron forever. Run this on
+    startup so a clean slate stays clean.
+
+    A bridged intention is "orphan" when no Rule has
+    ``linked_intention_id`` pointing at it.
+
+    Returns the number of intentions pruned.
+    """
+    from pocketpaw.daemon.intentions import get_intention_store
+    from pocketpaw.ee.automations.store import get_automation_store
+
+    intention_store = get_intention_store()
+    automation_store = get_automation_store()
+
+    valid_ids: set[str] = {
+        rule.linked_intention_id
+        for rule in automation_store.list_rules()
+        if rule.linked_intention_id
+    }
+
+    pruned = 0
+    # ``get_all`` returns a copy, so deleting during iteration is safe, but
+    # snapshot anyway to be explicit about intent.
+    for intention in list(intention_store.get_all()):
+        name = intention.get("name", "")
+        if not name.startswith(_AUTO_PREFIX):
+            continue
+        if intention["id"] in valid_ids:
+            continue
+        intention_store.delete(intention["id"])
+        pruned += 1
+
+    if pruned:
+        logger.info("Pruned %d orphan [auto] intentions on startup", pruned)
+    return pruned
