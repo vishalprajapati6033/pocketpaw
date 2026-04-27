@@ -63,6 +63,21 @@ class IPocketRepository(Protocol):
     async def get(self, pocket_id: str) -> Pocket | None: ...
     async def find_by_share_link_token(self, token: str) -> Pocket | None: ...
     async def list_visible_in_workspace(self, workspace_id: str, user_id: str) -> list[Pocket]: ...
+    async def create(
+        self,
+        *,
+        workspace_id: str,
+        name: str,
+        owner: str,
+        description: str = "",
+        type: str = "custom",
+        icon: str = "",
+        color: str = "",
+        visibility: str = "workspace",
+        agents: list[str] | None = None,
+        widgets: list[dict] | None = None,
+        ripple_spec: dict | None = None,
+    ) -> Pocket: ...
     async def update_fields(
         self,
         pocket_id: str,
@@ -127,6 +142,54 @@ class MongoPocketRepository:
             }
         ).to_list()
         return [_pocket_to_domain(d) for d in docs]
+
+    async def create(
+        self,
+        *,
+        workspace_id: str,
+        name: str,
+        owner: str,
+        description: str = "",
+        type: str = "custom",
+        icon: str = "",
+        color: str = "",
+        visibility: str = "workspace",
+        agents: list[str] | None = None,
+        widgets: list[dict] | None = None,
+        ripple_spec: dict | None = None,
+    ) -> Pocket:
+        """Insert a new pocket and return its domain projection."""
+        widget_docs: list[_WidgetDoc] = []
+        for w in widgets or []:
+            widget_docs.append(
+                _WidgetDoc(
+                    name=w.get("name", "Widget"),
+                    type=w.get("type", "custom"),
+                    icon=w.get("icon", ""),
+                    color=w.get("color", ""),
+                    span=w.get("span", "col-span-1"),
+                    dataSourceType=w.get("dataSourceType", w.get("data_source_type", "static")),
+                    config=w.get("config", {}),
+                    props=w.get("props", {}),
+                    data=w.get("data"),
+                    assignedAgent=w.get("assignedAgent", w.get("assigned_agent")),
+                )
+            )
+        doc = _PocketDoc(
+            workspace=workspace_id,
+            name=name,
+            description=description,
+            type=type,
+            icon=icon,
+            color=color,
+            owner=owner,
+            visibility=visibility,
+            agents=list(agents or []),
+            widgets=widget_docs,
+            rippleSpec=ripple_spec,
+        )
+        await doc.insert()
+        return _pocket_to_domain(doc)
 
     async def update_fields(
         self,

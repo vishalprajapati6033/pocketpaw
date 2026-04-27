@@ -11,8 +11,7 @@ import secrets
 
 from beanie import PydanticObjectId
 
-from ee.cloud.models.pocket import Pocket, Widget
-from ee.cloud.models.session import Session
+from ee.cloud.models.pocket import Pocket
 from ee.cloud.pockets.dto import (
     AddCollaboratorRequest,
     AddWidgetRequest,
@@ -139,51 +138,39 @@ class PocketService:
 
     @staticmethod
     async def create(workspace_id: str, user_id: str, body: CreatePocketRequest) -> dict:
-        """Create a pocket with optional agents, widgets, and rippleSpec."""
-        # Build initial widgets from request body
-        initial_widgets: list[Widget] = []
-        for w in body.widgets:
-            initial_widgets.append(
-                Widget(
-                    name=w.get("name", "Widget"),
-                    type=w.get("type", "custom"),
-                    icon=w.get("icon", ""),
-                    color=w.get("color", ""),
-                    span=w.get("span", "col-span-1"),
-                    dataSourceType=w.get("dataSourceType", w.get("data_source_type", "static")),
-                    config=w.get("config", {}),
-                    props=w.get("props", {}),
-                    data=w.get("data"),
-                    assignedAgent=w.get("assignedAgent", w.get("assigned_agent")),
-                )
-            )
+        """Create a pocket with optional agents, widgets, and rippleSpec.
 
-        pocket = Pocket(
-            workspace=workspace_id,
+        Phase 8: routes through ``IPocketRepository.create``. Session
+        linking still uses the session repository directly.
+        """
+        from ee.cloud.pockets.dto import pocket_to_wire_dict
+        from ee.cloud.pockets.repositories import get_default_repository
+        from ee.cloud.sessions.repositories import (
+            get_default_repository as get_session_repo,
+        )
+
+        normalized_spec = normalize_ripple_spec(body.ripple_spec) if body.ripple_spec else None
+        pocket = await get_default_repository().create(
+            workspace_id=workspace_id,
             name=body.name,
+            owner=user_id,
             description=body.description,
             type=body.type,
             icon=body.icon,
             color=body.color,
-            owner=user_id,
             visibility=body.visibility,
             agents=body.agents,
-            widgets=initial_widgets,
-            rippleSpec=normalize_ripple_spec(body.ripple_spec) if body.ripple_spec else None,
+            widgets=body.widgets,
+            ripple_spec=normalized_spec,
         )
-        await pocket.insert()
 
-        # If session_id provided, link the session to this pocket
         if body.session_id:
-            session = await Session.find_one(
-                Session.sessionId == body.session_id,
-                Session.workspace == workspace_id,
-            )
-            if session:
-                session.pocket = str(pocket.id)
-                await session.save()
+            session_repo = get_session_repo()
+            session = await session_repo.get_by_session_id(body.session_id)
+            if session and session.workspace == workspace_id:
+                await session_repo.update(session.id, pocket=pocket.id)
 
-        return _pocket_response(pocket)
+        return pocket_to_wire_dict(pocket)
 
     @staticmethod
     async def list_pockets(workspace_id: str, user_id: str) -> list[dict]:
@@ -315,7 +302,11 @@ class PocketService:
         """Auto-create a pocket from an agent-generated ripple spec.
 
         Returns the pocket ID on success, None on failure.
+
+        Phase 8: routes through ``IPocketRepository.create``.
         """
+        from ee.cloud.pockets.repositories import get_default_repository
+
         try:
             normalized = normalize_ripple_spec(ripple_spec)
             if not normalized:
@@ -328,18 +319,17 @@ class PocketService:
                 or "Agent-generated Pocket"
             )
 
-            pocket = Pocket(
-                workspace=workspace_id,
+            pocket = await get_default_repository().create(
+                workspace_id=workspace_id,
                 name=name,
+                owner=owner_id,
                 description=description,
                 type="ai-generated",
-                owner=owner_id,
-                rippleSpec=normalized,
                 visibility="workspace",
+                ripple_spec=normalized,
             )
-            await pocket.insert()
             logger.info("Auto-created pocket %s from ripple spec", pocket.id)
-            return str(pocket.id)
+            return pocket.id
         except Exception:
             logger.warning("Failed to auto-create pocket from ripple spec", exc_info=True)
             return None
