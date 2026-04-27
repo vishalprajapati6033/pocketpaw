@@ -320,7 +320,12 @@ class GroupService:
         """Create a group and add the creator as a member.
 
         For DMs: validates exactly 2 member_ids, auto-names as "DM".
+
+        Phase 10: routes through ``IGroupRepository.create``.
         """
+        from ee.cloud.chat.dto import group_to_wire_dict
+        from ee.cloud.chat.repositories import get_group_repository
+
         if body.type == "dm":
             if len(body.member_ids) != 1:
                 raise ValidationError(
@@ -333,21 +338,19 @@ class GroupService:
             members = list({user_id, *body.member_ids})
             name = body.name
 
-        slug = _generate_slug(name)
-
-        group = Group(
-            workspace=workspace_id,
+        group = await get_group_repository().create(
+            workspace_id=workspace_id,
             name=name,
-            slug=slug,
-            description=body.description,
+            slug=_generate_slug(name),
+            owner=user_id,
             type=body.type,
+            members=members,
+            description=body.description,
             icon=body.icon,
             color=body.color,
-            members=members,
-            owner=user_id,
         )
-        await group.insert()
-        resp = await _group_response(group)
+        users_by_id, agents_by_id = await _populate_lookups_for_domain_groups([group])
+        resp = group_to_wire_dict(group, users_by_id=users_by_id, agents_by_id=agents_by_id)
         await emit(GroupCreated(data={**resp, "member_ids": list(group.members)}))
         return resp
 
@@ -513,27 +516,22 @@ class GroupService:
 
         Returns the list of user IDs that were newly added (skipping duplicates).
         Role "edit" is the default (no role entry is written to keep the dict
-        small); "view" writes an explicit entry per added member.
-        """
-        group = await _get_group_or_404(group_id)
-        _require_group_admin(group, user_id)
+        small); "view" / "admin" writes an explicit entry per added member.
 
+        Phase 10: routes through ``IGroupRepository.add_members``.
+        """
+        from ee.cloud.chat.dto import group_to_wire_dict
+        from ee.cloud.chat.repositories import get_group_repository
+
+        repo = get_group_repository()
+        group = await repo.get(group_id)
+        if group is None:
+            raise NotFound("group", group_id)
+        _require_domain_group_admin(group, user_id)
         if group.archived:
             raise Forbidden("group.archived", "Cannot modify an archived group")
 
-        newly_added: list[str] = []
-        for mid in member_ids:
-            if mid not in group.members:
-                group.members.append(mid)
-                newly_added.append(mid)
-            if role in ("admin", "view"):
-                group.member_roles[mid] = role
-            elif mid in group.member_roles and role == "edit":
-                # Explicit edit removes any lingering admin/view entry
-                group.member_roles.pop(mid, None)
-
-        if newly_added or role in ("admin", "view"):
-            await group.save()
+        updated, newly_added = await repo.add_members(group_id, member_ids, role=role)
 
         for added_user_id in newly_added:
             await emit(
@@ -545,7 +543,8 @@ class GroupService:
             # Newly-added members have no local record of this group yet — a
             # ``group.joined`` (audience = just the new ids) hydrates the room
             # in their sidebars so they don't have to refresh to see it.
-            resp = await _group_response(group)
+            users_by_id, agents_by_id = await _populate_lookups_for_domain_groups([updated])
+            resp = group_to_wire_dict(updated, users_by_id=users_by_id, agents_by_id=agents_by_id)
             await emit(GroupJoined(data={**resp, "member_ids": newly_added}))
             get_resolver().invalidate_group(group_id)
 

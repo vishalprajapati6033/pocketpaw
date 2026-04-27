@@ -290,9 +290,26 @@ class IGroupRepository(Protocol):
         color: str | None = None,
         archived: bool | None = None,
     ) -> Group: ...
+    async def create(
+        self,
+        *,
+        workspace_id: str,
+        name: str,
+        slug: str,
+        owner: str,
+        type: str,
+        members: list[str],
+        description: str = "",
+        icon: str = "",
+        color: str = "",
+        agents: list[tuple[str, str, str]] | None = None,
+    ) -> Group: ...
     async def add_member(
         self, group_id: str, user_id: str, *, role: str | None = None
     ) -> Group: ...
+    async def add_members(
+        self, group_id: str, member_ids: list[str], *, role: str = "edit"
+    ) -> tuple[Group, list[str]]: ...
     async def remove_member(self, group_id: str, user_id: str) -> Group: ...
     async def set_member_role(self, group_id: str, user_id: str, role: str) -> Group: ...
     async def add_group_agent(
@@ -385,6 +402,48 @@ class MongoGroupRepository:
         await doc.save()
         return _group_to_domain(doc)
 
+    async def create(
+        self,
+        *,
+        workspace_id: str,
+        name: str,
+        slug: str,
+        owner: str,
+        type: str,
+        members: list[str],
+        description: str = "",
+        icon: str = "",
+        color: str = "",
+        agents: list[tuple[str, str, str]] | None = None,
+    ) -> Group:
+        """Insert a new group and return its domain projection.
+
+        ``agents`` is an optional list of ``(agent_id, role, respond_mode)``
+        triples to attach at creation time (used by DM-with-agent).
+        """
+        agent_docs = (
+            [
+                _GroupAgentDoc(agent=aid, role=arole, respond_mode=amode)
+                for (aid, arole, amode) in agents or []
+            ]
+            if agents
+            else []
+        )
+        doc = _GroupDoc(
+            workspace=workspace_id,
+            name=name,
+            slug=slug,
+            description=description,
+            type=type,
+            icon=icon,
+            color=color,
+            members=members,
+            owner=owner,
+            agents=agent_docs,
+        )
+        await doc.insert()
+        return _group_to_domain(doc)
+
     async def add_member(self, group_id: str, user_id: str, *, role: str | None = None) -> Group:
         """Add user_id to the group's members list (idempotent).
         ``role`` optionally records the user's role in member_roles."""
@@ -403,6 +462,35 @@ class MongoGroupRepository:
         if changed:
             await doc.save()
         return _group_to_domain(doc)
+
+    async def add_members(
+        self, group_id: str, member_ids: list[str], *, role: str = "edit"
+    ) -> tuple[Group, list[str]]:
+        """Batched member-add. Returns ``(group, newly_added_ids)`` so
+        the caller can emit per-member events without a second fetch.
+
+        ``role == "edit"`` clears any explicit role entry; "admin" /
+        "view" writes one. A single ``save()`` covers all changes.
+        """
+        from ee.cloud._core.errors import NotFound
+
+        doc = await _GroupDoc.get(PydanticObjectId(group_id))
+        if doc is None:
+            raise NotFound("group", group_id)
+
+        newly_added: list[str] = []
+        for mid in member_ids:
+            if mid not in doc.members:
+                doc.members.append(mid)
+                newly_added.append(mid)
+            if role in ("admin", "view"):
+                doc.member_roles[mid] = role  # type: ignore[assignment]
+            elif role == "edit" and mid in doc.member_roles:
+                doc.member_roles.pop(mid, None)
+
+        if newly_added or role in ("admin", "view"):
+            await doc.save()
+        return _group_to_domain(doc), newly_added
 
     async def remove_member(self, group_id: str, user_id: str) -> Group:
         """Remove user_id from the group's members list (idempotent).
