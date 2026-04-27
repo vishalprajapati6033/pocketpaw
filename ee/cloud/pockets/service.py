@@ -190,35 +190,79 @@ class PocketService:
 
     @staticmethod
     async def update(pocket_id: str, user_id: str, body: UpdatePocketRequest) -> dict:
-        """Update pocket fields. Owner or edit-access users."""
-        pocket = await _get_pocket_or_404(pocket_id)
-        _check_edit_access(pocket, user_id)
+        """Update pocket fields. Owner or edit-access users.
 
-        if body.name is not None:
-            pocket.name = body.name
-        if body.description is not None:
-            pocket.description = body.description
-        if body.type is not None:
-            pocket.type = body.type
-        if body.icon is not None:
-            pocket.icon = body.icon
-        if body.color is not None:
-            pocket.color = body.color
-        if body.visibility is not None:
-            _check_owner(pocket, user_id)  # Only owner can change visibility
-            pocket.visibility = body.visibility
-        if body.ripple_spec is not None:
-            pocket.rippleSpec = normalize_ripple_spec(body.ripple_spec)
+        Phase 8: routes through ``IPocketRepository``.
+        """
+        from ee.cloud.pockets.dto import pocket_to_wire_dict
+        from ee.cloud.pockets.repositories import get_default_repository
 
-        await pocket.save()
-        return _pocket_response(pocket)
+        repo = get_default_repository()
+        pocket = await repo.get(pocket_id)
+        if pocket is None:
+            raise NotFound("pocket", pocket_id)
+
+        # Auth: edit access for non-visibility fields, owner-only for visibility
+        if pocket.owner != user_id and user_id not in pocket.shared_with:
+            if pocket.visibility != "workspace":
+                from pocketpaw.ee.guards.audit import log_denial
+
+                log_denial(
+                    actor=user_id,
+                    action="pocket.edit",
+                    code="pocket.access_denied",
+                    resource_id=pocket.id,
+                )
+                raise Forbidden(
+                    "pocket.access_denied", "You do not have edit access to this pocket"
+                )
+        if body.visibility is not None and pocket.owner != user_id:
+            from pocketpaw.ee.guards.audit import log_denial
+
+            log_denial(
+                actor=user_id,
+                action="pocket.share",
+                code="pocket.not_owner",
+                resource_id=pocket.id,
+            )
+            raise Forbidden("pocket.not_owner", "Only the pocket owner can perform this action")
+
+        normalized_spec = normalize_ripple_spec(body.ripple_spec) if body.ripple_spec else None
+        updated = await repo.update_fields(
+            pocket_id,
+            name=body.name,
+            description=body.description,
+            type=body.type,
+            icon=body.icon,
+            color=body.color,
+            visibility=body.visibility,
+            ripple_spec=normalized_spec,
+        )
+        return pocket_to_wire_dict(updated)
 
     @staticmethod
     async def delete(pocket_id: str, user_id: str) -> None:
-        """Hard-delete a pocket. Owner only."""
-        pocket = await _get_pocket_or_404(pocket_id)
-        _check_owner(pocket, user_id)
-        await pocket.delete()
+        """Hard-delete a pocket. Owner only.
+
+        Phase 8: routes through ``IPocketRepository``.
+        """
+        from ee.cloud.pockets.repositories import get_default_repository
+
+        repo = get_default_repository()
+        pocket = await repo.get(pocket_id)
+        if pocket is None:
+            raise NotFound("pocket", pocket_id)
+        if pocket.owner != user_id:
+            from pocketpaw.ee.guards.audit import log_denial
+
+            log_denial(
+                actor=user_id,
+                action="pocket.share",
+                code="pocket.not_owner",
+                resource_id=pocket.id,
+            )
+            raise Forbidden("pocket.not_owner", "Only the pocket owner can perform this action")
+        await repo.delete(pocket_id)
 
     # -----------------------------------------------------------------
     # Agent-generated pockets

@@ -62,6 +62,21 @@ def _pocket_to_domain(doc: _PocketDoc) -> Pocket:
 class IPocketRepository(Protocol):
     async def get(self, pocket_id: str) -> Pocket | None: ...
     async def list_visible_in_workspace(self, workspace_id: str, user_id: str) -> list[Pocket]: ...
+    async def update_fields(
+        self,
+        pocket_id: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        type: str | None = None,
+        icon: str | None = None,
+        color: str | None = None,
+        visibility: str | None = None,
+        ripple_spec: dict | None = None,
+        share_link_token: str | None = None,
+        share_link_access: str | None = None,
+    ) -> Pocket: ...
+    async def delete(self, pocket_id: str) -> None: ...
 
 
 class MongoPocketRepository:
@@ -88,6 +103,54 @@ class MongoPocketRepository:
             }
         ).to_list()
         return [_pocket_to_domain(d) for d in docs]
+
+    async def update_fields(
+        self,
+        pocket_id: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        type: str | None = None,
+        icon: str | None = None,
+        color: str | None = None,
+        visibility: str | None = None,
+        ripple_spec: dict | None = None,
+        share_link_token: str | None = None,
+        share_link_access: str | None = None,
+    ) -> Pocket:
+        from ee.cloud._core.errors import NotFound
+
+        doc = await _PocketDoc.get(PydanticObjectId(pocket_id))
+        if doc is None:
+            raise NotFound("pocket", pocket_id)
+        if name is not None:
+            doc.name = name
+        if description is not None:
+            doc.description = description
+        if type is not None:
+            doc.type = type
+        if icon is not None:
+            doc.icon = icon
+        if color is not None:
+            doc.color = color
+        if visibility is not None:
+            doc.visibility = visibility
+        if ripple_spec is not None:
+            doc.rippleSpec = ripple_spec
+        if share_link_token is not None:
+            doc.share_link_token = share_link_token
+        if share_link_access is not None:
+            doc.share_link_access = share_link_access
+        await doc.save()
+        return _pocket_to_domain(doc)
+
+    async def delete(self, pocket_id: str) -> None:
+        from ee.cloud._core.errors import NotFound
+
+        doc = await _PocketDoc.get(PydanticObjectId(pocket_id))
+        if doc is None:
+            raise NotFound("pocket", pocket_id)
+        await doc.delete()
 
 
 _default: IPocketRepository | None = None
