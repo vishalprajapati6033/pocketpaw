@@ -1,45 +1,53 @@
-"""Auth domain — business logic service."""
+"""Auth service — profile, active-workspace, avatar.
+
+Refactored in Phase 3 of the cloud-restructure. Instance class taking
+``IAuthRepository``. Methods accept ``RequestContext`` and return domain
+``AuthUser``.
+
+The router converts the result to ``ProfileOut`` (DTO) at the boundary.
+"""
 
 from __future__ import annotations
 
-from fastapi import HTTPException
-
-from ee.cloud.auth.schemas import ProfileUpdateRequest
-from ee.cloud.models.user import User
+from ee.cloud._core.context import RequestContext
+from ee.cloud._core.errors import NotFound, ValidationError
+from ee.cloud.auth.domain import AuthUser
+from ee.cloud.auth.repositories import IAuthRepository
 
 
 class AuthService:
-    """Stateless service encapsulating auth-related business logic."""
+    def __init__(self, repository: IAuthRepository) -> None:
+        self._repo = repository
 
-    @staticmethod
-    async def get_profile(user: User) -> dict:
-        """Return the current user's profile as a UserResponse."""
-        return {
-            "id": str(user.id),
-            "email": user.email,
-            "name": user.full_name,
-            "image": user.avatar,
-            "emailVerified": user.is_verified,
-            "activeWorkspace": user.active_workspace,
-            "workspaces": [{"workspace": w.workspace, "role": w.role} for w in user.workspaces],
-        }
+    async def get_profile(self, ctx: RequestContext) -> AuthUser:
+        user = await self._repo.get_by_id(ctx.user_id)
+        if user is None:
+            raise NotFound("user", ctx.user_id)
+        return user
 
-    @staticmethod
-    async def update_profile(user: User, body: ProfileUpdateRequest) -> dict:
-        """Update mutable profile fields and return the updated profile."""
-        if body.full_name is not None:
-            user.full_name = body.full_name
-        if body.avatar is not None:
-            user.avatar = body.avatar
-        if body.status is not None:
-            user.status = body.status
-        await user.save()
-        return await AuthService.get_profile(user)
+    async def update_profile(
+        self,
+        ctx: RequestContext,
+        *,
+        full_name: str | None = None,
+        avatar: str | None = None,
+        status: str | None = None,
+    ) -> AuthUser:
+        return await self._repo.update_profile(
+            ctx.user_id,
+            full_name=full_name,
+            avatar=avatar,
+            status=status,
+        )
 
-    @staticmethod
-    async def set_active_workspace(user: User, workspace_id: str) -> None:
-        """Set the user's active workspace."""
+    async def set_active_workspace(self, ctx: RequestContext, workspace_id: str) -> AuthUser:
         if not workspace_id:
-            raise HTTPException(400, "workspace_id required")
-        user.active_workspace = workspace_id
-        await user.save()
+            raise ValidationError("workspace_id.required", "workspace_id required")
+        return await self._repo.set_active_workspace(ctx.user_id, workspace_id)
+
+    async def set_avatar_path(self, ctx: RequestContext, avatar_path: str) -> AuthUser:
+        """Persist the avatar URL after the router has written the file
+        to disk. Kept separate from ``update_profile`` because the
+        avatar upload endpoint owns the file I/O and only needs the
+        repo to record the path."""
+        return await self._repo.update_profile(ctx.user_id, avatar=avatar_path)
