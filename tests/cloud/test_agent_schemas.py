@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
-from ee.cloud.agents.schemas import (
+from ee.cloud.agents.dto import (
     AgentResponse,
     CreateAgentRequest,
     DiscoverRequest,
