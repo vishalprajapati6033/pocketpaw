@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
-from ee.cloud.chat.schemas import (
+from ee.cloud.chat.dto import (
     AddGroupAgentRequest,
     AddGroupMembersRequest,
     CreateGroupRequest,

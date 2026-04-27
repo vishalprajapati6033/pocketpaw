@@ -80,7 +80,7 @@ def _capture_emits() -> tuple[list, object]:
 @pytest.mark.asyncio
 async def test_send_message_emits_new_and_sent():
     """MessageService.send_message must fire both message.new and message.sent."""
-    from ee.cloud.chat.schemas import SendMessageRequest
+    from ee.cloud.chat.dto import SendMessageRequest
     from ee.cloud.realtime.events import MessageNew, MessageSent
 
     recorded: list = []
@@ -129,7 +129,7 @@ async def test_send_message_emits_new_and_sent():
 
 @pytest.mark.asyncio
 async def test_edit_message_emits_edited():
-    from ee.cloud.chat.schemas import EditMessageRequest
+    from ee.cloud.chat.dto import EditMessageRequest
     from ee.cloud.realtime.events import MessageEdited
 
     recorded: list = []
@@ -254,7 +254,7 @@ async def test_send_message_fans_out_everyone_mention_to_all_members():
     from types import SimpleNamespace
 
     from ee.cloud.chat.message_service import MessageService
-    from ee.cloud.chat.schemas import SendMessageRequest
+    from ee.cloud.chat.dto import SendMessageRequest
 
     recorded, fake_emit = _capture_emits()
     group = _fake_group(owner="sender", members=["sender", "u2", "u3"])
@@ -324,7 +324,7 @@ async def test_send_message_user_and_broadcast_mention_dedupes():
     from types import SimpleNamespace
 
     from ee.cloud.chat.message_service import MessageService
-    from ee.cloud.chat.schemas import SendMessageRequest
+    from ee.cloud.chat.dto import SendMessageRequest
 
     recorded, fake_emit = _capture_emits()
     group = _fake_group(owner="sender", members=["sender", "u2", "u3"])
@@ -367,7 +367,7 @@ async def test_send_message_emits_unread_update_for_non_senders():
     from types import SimpleNamespace
 
     from ee.cloud.chat.message_service import MessageService
-    from ee.cloud.chat.schemas import SendMessageRequest
+    from ee.cloud.chat.dto import SendMessageRequest
     from ee.cloud.realtime.events import UnreadUpdate
 
     recorded, fake_emit = _capture_emits()
@@ -400,7 +400,7 @@ async def test_send_reply_does_not_bump_thread_count():
     from types import SimpleNamespace
 
     from ee.cloud.chat.message_service import MessageService
-    from ee.cloud.chat.schemas import SendMessageRequest
+    from ee.cloud.chat.dto import SendMessageRequest
 
     _recorded, fake_emit = _capture_emits()
     group = _fake_group(owner="sender", members=["sender", "u2"])
@@ -442,7 +442,7 @@ async def test_send_reply_emits_message_new_not_thread_reply():
     from types import SimpleNamespace
 
     from ee.cloud.chat.message_service import MessageService
-    from ee.cloud.chat.schemas import SendMessageRequest
+    from ee.cloud.chat.dto import SendMessageRequest
     from ee.cloud.realtime.events import MessageNew, ThreadReply
 
     recorded, fake_emit = _capture_emits()

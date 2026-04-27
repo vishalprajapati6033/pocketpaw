@@ -77,7 +77,7 @@ def _fake_message(
 
 @pytest.mark.asyncio
 async def test_send_message_with_mention_creates_notification_for_target():
-    from ee.cloud.chat.schemas import SendMessageRequest
+    from ee.cloud.chat.dto import SendMessageRequest
 
     group = _fake_group()
     fake_msg = _fake_message(sender="u1", content="hello @alice")
@@ -125,7 +125,7 @@ async def test_send_message_with_mention_creates_notification_for_target():
 
 @pytest.mark.asyncio
 async def test_send_message_self_mention_does_not_notify():
-    from ee.cloud.chat.schemas import SendMessageRequest
+    from ee.cloud.chat.dto import SendMessageRequest
 
     group = _fake_group()
     fake_msg = _fake_message(sender="u1", content="me me me")

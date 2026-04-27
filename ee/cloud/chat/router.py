@@ -28,7 +28,7 @@ import os
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 
-from ee.cloud.chat.schemas import (
+from ee.cloud.chat.dto import (
     AddGroupAgentRequest,
     AddGroupMembersRequest,
     CreateGroupRequest,

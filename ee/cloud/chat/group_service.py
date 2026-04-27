@@ -12,7 +12,7 @@ from typing import Literal
 
 from beanie import PydanticObjectId
 
-from ee.cloud.chat.schemas import (
+from ee.cloud.chat.dto import (
     AddGroupAgentRequest,
     CreateGroupRequest,
     UpdateGroupAgentRequest,

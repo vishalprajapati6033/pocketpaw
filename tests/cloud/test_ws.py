@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from ee.cloud.chat.schemas import WsOutbound
+from ee.cloud.chat.dto import WsOutbound
 from ee.cloud.chat.ws import ConnectionManager
 
 

@@ -85,7 +85,7 @@ async def _fake_group_response(grp) -> dict:
 @pytest.mark.asyncio
 async def test_create_group_emits_group_created():
     from ee.cloud.chat.group_service import GroupService
-    from ee.cloud.chat.schemas import CreateGroupRequest
+    from ee.cloud.chat.dto import CreateGroupRequest
 
     recorded, fake_emit = _capture_emits()
 
@@ -125,7 +125,7 @@ async def test_create_group_emits_group_created():
 @pytest.mark.asyncio
 async def test_update_group_emits_group_updated():
     from ee.cloud.chat.group_service import GroupService
-    from ee.cloud.chat.schemas import UpdateGroupRequest
+    from ee.cloud.chat.dto import UpdateGroupRequest
 
     recorded, fake_emit = _capture_emits()
     group = _fake_group()
@@ -388,7 +388,7 @@ async def test_set_member_role_emits_member_role_no_invalidation():
 @pytest.mark.asyncio
 async def test_add_agent_emits_agent_added():
     from ee.cloud.chat.group_service import GroupService
-    from ee.cloud.chat.schemas import AddGroupAgentRequest
+    from ee.cloud.chat.dto import AddGroupAgentRequest
 
     recorded, fake_emit = _capture_emits()
     group = _fake_group(owner="u1", agents=[])
@@ -418,7 +418,7 @@ async def test_add_agent_emits_agent_added():
 @pytest.mark.asyncio
 async def test_update_agent_emits_agent_updated():
     from ee.cloud.chat.group_service import GroupService
-    from ee.cloud.chat.schemas import UpdateGroupAgentRequest
+    from ee.cloud.chat.dto import UpdateGroupAgentRequest
 
     recorded, fake_emit = _capture_emits()
     existing_agent = SimpleNamespace(agent="a1", role="assistant", respond_mode="auto")
