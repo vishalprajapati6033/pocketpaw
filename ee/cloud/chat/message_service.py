@@ -117,6 +117,18 @@ async def _get_group_message_or_404(message_id: str) -> Message:
     return msg
 
 
+async def _get_group_message_domain_or_404(message_id: str):
+    """Same as ``_get_group_message_or_404`` but returns the domain
+    ``Message`` value object via the repository. Use this for new code
+    paths that just need to read fields (not mutate)."""
+    from ee.cloud.chat.repositories import get_message_repository
+
+    msg = await get_message_repository().get(message_id)
+    if not msg or msg.deleted or msg.context_type != "group" or not msg.group:
+        raise NotFound("message", message_id)
+    return msg
+
+
 # ---------------------------------------------------------------------------
 # MessageService
 # ---------------------------------------------------------------------------
@@ -318,7 +330,7 @@ class MessageService:
         from ee.cloud.chat.dto import message_to_wire_dict
         from ee.cloud.chat.repositories import get_message_repository
 
-        msg = await _get_group_message_or_404(message_id)
+        msg = await _get_group_message_domain_or_404(message_id)
 
         if msg.sender != user_id:
             raise Forbidden("message.not_author", "Only the message author can edit it")
@@ -353,7 +365,7 @@ class MessageService:
         """
         from ee.cloud.chat.repositories import get_message_repository
 
-        msg = await _get_group_message_or_404(message_id)
+        msg = await _get_group_message_domain_or_404(message_id)
 
         if msg.sender != user_id:
             group = await _get_group_or_404(cast(str, msg.group))
@@ -368,7 +380,7 @@ class MessageService:
         await emit(
             MessageDeleted(
                 data={
-                    "message_id": str(msg.id),
+                    "message_id": msg.id,
                     "group_id": cast(str, msg.group),
                 }
             )
@@ -387,7 +399,7 @@ class MessageService:
         from ee.cloud.chat.dto import message_to_wire_dict
         from ee.cloud.chat.repositories import get_message_repository
 
-        msg = await _get_group_message_or_404(message_id)
+        msg = await _get_group_message_domain_or_404(message_id)
 
         # View-only members cannot react
         group = await _get_group_or_404(cast(str, msg.group))
@@ -499,12 +511,12 @@ class MessageService:
         from ee.cloud.chat.dto import message_to_wire_dict
         from ee.cloud.chat.repositories import get_message_repository
 
-        msg = await _get_group_message_or_404(message_id)
+        msg = await _get_group_message_domain_or_404(message_id)
         group = await _get_group_or_404(cast(str, msg.group))
         if group.type in ("private", "dm"):
             _require_group_member(group, user_id)
 
-        replies = await get_message_repository().list_replies(str(msg.id))
+        replies = await get_message_repository().list_replies(msg.id)
         return [message_to_wire_dict(r) for r in replies]
 
     @staticmethod
