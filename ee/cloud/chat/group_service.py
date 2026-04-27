@@ -215,6 +215,80 @@ async def _get_group_or_404(group_id: str) -> Group:
 
 
 # ---------------------------------------------------------------------------
+# Domain-Group helpers (used by methods routing through IGroupRepository)
+# ---------------------------------------------------------------------------
+
+
+def _require_domain_group_member(group, user_id: str) -> None:
+    """Raise Forbidden if user is not a member of the (domain) group."""
+    if user_id not in group.members:
+        log_denial(
+            actor=user_id,
+            action="group.view",
+            code="group.not_member",
+            resource_id=group.id,
+        )
+        raise Forbidden("group.not_member", "You are not a member of this group")
+
+
+async def _populate_lookups_for_domain_groups(
+    groups: list,
+) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]]]:
+    """Batch-load user + agent details for the given domain groups.
+
+    Returns ``(users_by_id, agents_by_id)`` ready for
+    ``group_to_wire_dict``. Two Mongo queries regardless of group count.
+    """
+    from ee.cloud.models.agent import Agent as AgentModel
+    from ee.cloud.models.user import User
+
+    all_user_ids: set[str] = set()
+    all_agent_ids: set[str] = set()
+    for g in groups:
+        all_user_ids.update(g.members)
+        for ga in g.agents:
+            all_agent_ids.add(ga.agent_id)
+
+    users_by_id: dict[str, dict[str, str]] = {}
+    if all_user_ids:
+        user_oids = []
+        for uid in all_user_ids:
+            try:
+                user_oids.append(PydanticObjectId(uid))
+            except Exception:
+                pass
+        user_docs = await User.find({"_id": {"$in": user_oids}}).to_list() if user_oids else []
+        for u in user_docs:
+            users_by_id[str(u.id)] = {
+                "_id": str(u.id),
+                "name": u.full_name or u.email,
+                "email": u.email,
+                "avatar": u.avatar,
+            }
+
+    agents_by_id: dict[str, dict[str, str]] = {}
+    if all_agent_ids:
+        agent_oids = []
+        for aid in all_agent_ids:
+            try:
+                agent_oids.append(PydanticObjectId(aid))
+            except Exception:
+                pass
+        agent_docs = (
+            await AgentModel.find({"_id": {"$in": agent_oids}}).to_list() if agent_oids else []
+        )
+        for a in agent_docs:
+            agents_by_id[str(a.id)] = {
+                "_id": str(a.id),
+                "name": a.name,
+                "uname": a.slug,
+                "avatar": a.avatar,
+            }
+
+    return users_by_id, agents_by_id
+
+
+# ---------------------------------------------------------------------------
 # GroupService
 # ---------------------------------------------------------------------------
 
@@ -273,58 +347,12 @@ class GroupService:
         """
         from ee.cloud.chat.dto import group_to_wire_dict
         from ee.cloud.chat.repositories import get_group_repository
-        from ee.cloud.models.agent import Agent as AgentModel
-        from ee.cloud.models.user import User
 
         groups = await get_group_repository().list_visible_in_workspace(workspace_id, user_id)
         if not groups:
             return []
 
-        # Collect ALL member + agent ids across the entire result set
-        all_user_ids: set[str] = set()
-        all_agent_ids: set[str] = set()
-        for g in groups:
-            all_user_ids.update(g.members)
-            for ga in g.agents:
-                all_agent_ids.add(ga.agent_id)
-
-        # Two batched queries instead of one-per-group
-        users_by_id: dict[str, dict[str, str]] = {}
-        if all_user_ids:
-            user_oids = []
-            for uid in all_user_ids:
-                try:
-                    user_oids.append(PydanticObjectId(uid))
-                except Exception:
-                    pass
-            user_docs = await User.find({"_id": {"$in": user_oids}}).to_list() if user_oids else []
-            for u in user_docs:
-                users_by_id[str(u.id)] = {
-                    "_id": str(u.id),
-                    "name": u.full_name or u.email,
-                    "email": u.email,
-                    "avatar": u.avatar,
-                }
-
-        agents_by_id: dict[str, dict[str, str]] = {}
-        if all_agent_ids:
-            agent_oids = []
-            for aid in all_agent_ids:
-                try:
-                    agent_oids.append(PydanticObjectId(aid))
-                except Exception:
-                    pass
-            agent_docs = (
-                await AgentModel.find({"_id": {"$in": agent_oids}}).to_list() if agent_oids else []
-            )
-            for a in agent_docs:
-                agents_by_id[str(a.id)] = {
-                    "_id": str(a.id),
-                    "name": a.name,
-                    "uname": a.slug,
-                    "avatar": a.avatar,
-                }
-
+        users_by_id, agents_by_id = await _populate_lookups_for_domain_groups(groups)
         return [
             group_to_wire_dict(g, users_by_id=users_by_id, agents_by_id=agents_by_id)
             for g in groups
@@ -332,13 +360,21 @@ class GroupService:
 
     @staticmethod
     async def get_group(group_id: str, user_id: str) -> dict:
-        """Get a single group. Private/DM groups require membership."""
-        group = await _get_group_or_404(group_id)
+        """Get a single group. Private/DM groups require membership.
 
+        Phase 10: routes through ``IGroupRepository.get`` and the
+        domain → wire mapper.
+        """
+        from ee.cloud.chat.dto import group_to_wire_dict
+        from ee.cloud.chat.repositories import get_group_repository
+
+        group = await get_group_repository().get(group_id)
+        if group is None:
+            raise NotFound("group", group_id)
         if group.type in ("private", "dm"):
-            _require_group_member(group, user_id)
-
-        return await _group_response(group)
+            _require_domain_group_member(group, user_id)
+        users_by_id, agents_by_id = await _populate_lookups_for_domain_groups([group])
+        return group_to_wire_dict(group, users_by_id=users_by_id, agents_by_id=agents_by_id)
 
     @staticmethod
     async def update_group(group_id: str, user_id: str, body: UpdateGroupRequest) -> dict:
