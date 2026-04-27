@@ -203,6 +203,37 @@ def mount_cloud(app: FastAPI) -> None:
     from ee.cloud.models.user import User as UserModel
     from ee.cloud.shared.deps import current_user, current_workspace_id
 
+    # Admin perf endpoint — dumps the in-memory request-timing buffer
+    # populated by ``_core.timing.TimingMiddleware`` (Phase 0). The Phase 11
+    # perf pass uses this to identify hot endpoints from production load
+    # before optimizing. No auth check beyond `current_active_user`; tighten
+    # via `require_action_any_workspace("admin.perf")` once the role exists.
+    @app.get("/api/v1/_admin/perf", tags=["Admin"])
+    async def perf_report(
+        user: UserModel = Depends(current_user),
+    ) -> dict[str, Any]:
+        from ee.cloud._core.timing import percentiles, snapshot
+
+        snap = snapshot()
+        return {
+            "endpoints": [
+                {
+                    "method": method,
+                    "path": path,
+                    "count": len(samples),
+                    "p50_ms": round(percentiles(samples)[0.5], 2),
+                    "p95_ms": round(percentiles(samples)[0.95], 2),
+                    "p99_ms": round(percentiles(samples)[0.99], 2),
+                }
+                for (method, path), samples in sorted(
+                    snap.items(),
+                    key=lambda kv: percentiles(kv[1])[0.95],
+                    reverse=True,
+                )
+            ],
+            "total_endpoints": len(snap),
+        }
+
     @app.get("/api/v1/users", tags=["Users"])
     async def search_users(
         search: str = "",
