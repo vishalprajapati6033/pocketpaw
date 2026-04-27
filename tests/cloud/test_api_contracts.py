@@ -47,6 +47,8 @@ MESSAGE_RESPONSE_KEYS = frozenset(
         "content",
         "mentions",
         "replyTo",
+        "replyPreview",
+        "threadCount",
         "attachments",
         "reactions",
         "edited",
