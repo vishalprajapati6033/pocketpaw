@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from datetime import UTC, datetime
 from typing import cast
 
@@ -587,47 +586,23 @@ class MessageService:
         Agent DMs are private groups with one member, so this also catches
         the user's own agent conversations.
 
-        The query is escaped with ``re.escape`` before being fed to Mongo
-        ``$regex`` so operators like ``.``, ``$``, and ``(`` become literal
-        characters — no injection, no ReDoS via pathological expressions.
-        Capped at 100 results to stop a wide query from paging the whole
-        journal into memory.
+        Phase 10: routes through ``IGroupRepository.list_visible_in_workspace``
+        + ``IMessageRepository.search_in_groups``. The query is escaped
+        inside the repo, not here. Capped at 100 results.
         """
-        from ee.cloud.models.group import Group
+        from ee.cloud.chat.dto import message_to_wire_dict
+        from ee.cloud.chat.repositories import get_group_repository, get_message_repository
 
         capped = max(1, min(limit, 100))
         if not query or not query.strip():
             return []
 
-        # 1. Resolve the set of group ids the caller is allowed to read in
-        #    this workspace. One small index-friendly query, not N per hit.
-        groups = await Group.find(
-            {
-                "workspace": workspace_id,
-                "archived": False,
-                "$or": [
-                    {"type": {"$in": ["public", "channel"]}},
-                    {"members": user_id},
-                ],
-            }
-        ).to_list()
-        group_ids = [str(g.id) for g in groups]
+        groups = await get_group_repository().list_visible_in_workspace(workspace_id, user_id)
+        group_ids = [g.id for g in groups]
         if not group_ids:
             return []
 
-        # 2. Escape the query + run the scoped regex search.
-        escaped = re.escape(query.strip())
-        messages = (
-            await Message.find(
-                {
-                    "context_type": "group",
-                    "group": {"$in": group_ids},
-                    "deleted": False,
-                    "content": {"$regex": escaped, "$options": "i"},
-                }
-            )
-            .sort([("createdAt", -1)])
-            .limit(capped)
-            .to_list()
+        messages = await get_message_repository().search_in_groups(
+            group_ids, query.strip(), limit=capped
         )
-        return [_message_response(m) for m in messages]
+        return [message_to_wire_dict(m) for m in messages]

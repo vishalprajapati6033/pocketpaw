@@ -137,6 +137,9 @@ class IMessageRepository(Protocol):
     async def search_in_group(
         self, group_id: str, query: str, *, limit: int = 100
     ) -> list[Message]: ...
+    async def search_in_groups(
+        self, group_ids: list[str], query: str, *, limit: int = 100
+    ) -> list[Message]: ...
     async def edit_content(
         self, message_id: str, content: str, *, edited_at: datetime
     ) -> Message: ...
@@ -265,6 +268,31 @@ class MongoMessageRepository:
                     "content": {"$regex": pattern, "$options": "i"},
                 }
             )
+            .limit(limit)
+            .to_list()
+        )
+        return [_message_to_domain(d) for d in docs]
+
+    async def search_in_groups(
+        self, group_ids: list[str], query: str, *, limit: int = 100
+    ) -> list[Message]:
+        """Workspace-scoped search: same as ``search_in_group`` but
+        across many groups in one query, sorted newest-first."""
+        import re
+
+        if not group_ids:
+            return []
+        pattern = re.escape(query)
+        docs = (
+            await _MessageDoc.find(
+                {
+                    "context_type": "group",
+                    "group": {"$in": group_ids},
+                    "deleted": False,
+                    "content": {"$regex": pattern, "$options": "i"},
+                }
+            )
+            .sort([("createdAt", -1)])  # type: ignore[list-item]
             .limit(limit)
             .to_list()
         )
