@@ -14,7 +14,10 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _install_noop_bus():
-    from ee.cloud.realtime import bus as bus_mod
+    # Phase 5 (2026-04-27) moved the bus singleton into _core.realtime.bus.
+    # The old `ee.cloud.realtime.bus` is now a shim, but the singleton
+    # still lives at the canonical path.
+    from ee.cloud._core.realtime import bus as bus_mod
 
     prev = bus_mod._bus  # type: ignore[attr-defined]
     bus_mod._bus = AsyncMock()  # type: ignore[attr-defined]

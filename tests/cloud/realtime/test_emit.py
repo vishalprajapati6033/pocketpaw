@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from ee.cloud.realtime import bus as bus_mod
-from ee.cloud.realtime.bus import set_bus
-from ee.cloud.realtime.emit import emit
-from ee.cloud.realtime.events import GroupCreated
+from ee.cloud._core.realtime import bus as bus_mod
+from ee.cloud._core.realtime.bus import set_bus
+from ee.cloud._core.realtime.emit import emit
+from ee.cloud._core.realtime.events import GroupCreated
 
 
 @pytest.mark.asyncio

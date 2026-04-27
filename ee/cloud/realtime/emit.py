@@ -1,25 +1,6 @@
-"""Thin facade services call after successful mutations.
+"""Re-export shim. Canonical home moved to ``ee.cloud._core.realtime.emit``
+in Phase 5 of the cloud-restructure (2026-04-27)."""
 
-``emit`` never raises back to the caller. The underlying bus publishes
-best-effort; a failure here must not abort the DB write that preceded it.
-The one exception is if the bus has never been initialized — that's a
-programmer error (probably forgot to call ``init_realtime`` in startup) and
-surfaces as ``AssertionError`` so it's caught immediately in tests.
-"""
+from ee.cloud._core.realtime.emit import emit  # noqa: F401
 
-from __future__ import annotations
-
-import logging
-
-from ee.cloud.realtime.bus import get_bus
-from ee.cloud.realtime.events import Event
-
-logger = logging.getLogger(__name__)
-
-
-async def emit(event: Event) -> None:
-    bus = get_bus()  # raises AssertionError if not initialized (programmer error)
-    try:
-        await bus.publish(event)
-    except Exception:
-        logger.exception("emit failed for event %s", event.type)
+__all__ = ["emit"]

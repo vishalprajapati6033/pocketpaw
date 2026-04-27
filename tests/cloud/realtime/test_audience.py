@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from ee.cloud.realtime.audience import AudienceResolver
-from ee.cloud.realtime.events import (
+from ee.cloud._core.realtime.audience import AudienceResolver
+from ee.cloud._core.realtime.events import (
     GroupCreated,
     GroupMemberRemoved,
     MessageSent,
@@ -94,7 +94,7 @@ async def test_cache_hits_within_ttl_then_refetches():
 
     r = AudienceResolver(group_members=members, cache_ttl_seconds=60)
     # group.created doesn't hit the cache (uses payload), so use GroupUpdated-like path:
-    from ee.cloud.realtime.events import GroupUpdated
+    from ee.cloud._core.realtime.events import GroupUpdated
 
     u = GroupUpdated(data={"group_id": "g1"})
     await r.audience(u)
@@ -109,7 +109,7 @@ async def test_cache_hits_within_ttl_then_refetches():
 
 @pytest.mark.asyncio
 async def test_unknown_event_type_returns_empty_list():
-    from ee.cloud.realtime.events import Event
+    from ee.cloud._core.realtime.events import Event
 
     r = AudienceResolver()
     assert await r.audience(Event(type="something.made.up", data={})) == []
@@ -124,7 +124,7 @@ async def test_invalidate_user_peers_clears_peer_cache():
         return ["p1"]
 
     r = AudienceResolver(workspace_peers=peers, cache_ttl_seconds=60)
-    from ee.cloud.realtime.events import PresenceOnline
+    from ee.cloud._core.realtime.events import PresenceOnline
 
     ev = PresenceOnline(data={"user_id": "u1"})
     await r.audience(ev)
@@ -138,7 +138,7 @@ async def test_invalidate_user_peers_clears_peer_cache():
 @pytest.mark.asyncio
 async def test_session_audience_dedupes_self_participants():
     r = AudienceResolver()
-    from ee.cloud.realtime.events import SessionUpdated
+    from ee.cloud._core.realtime.events import SessionUpdated
 
     ev = SessionUpdated(data={"session_id": "s1", "user_id": "u1", "peer_id": "u1"})
     assert await r.audience(ev) == ["u1"]
@@ -147,7 +147,7 @@ async def test_session_audience_dedupes_self_participants():
 @pytest.mark.asyncio
 async def test_session_audience_single_user_when_no_peer():
     r = AudienceResolver()
-    from ee.cloud.realtime.events import SessionCreated
+    from ee.cloud._core.realtime.events import SessionCreated
 
     ev = SessionCreated(data={"session_id": "s1", "user_id": "u1"})
     assert await r.audience(ev) == ["u1"]

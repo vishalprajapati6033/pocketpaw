@@ -108,8 +108,19 @@ def set_id_generator(gen: IdGenerator) -> None:
     _id_gen = gen
 
 
+# ---------------------------------------------------------------------------
+# EventBus port — canonical home is `_core.realtime.bus`. Re-exported here
+# so consumers can import the port from `_core.ports` alongside Clock and
+# IdGenerator. Phase 5 (realtime relocation) put the EventBus Protocol
+# alongside its in-process implementation.
+# ---------------------------------------------------------------------------
+
+
+from ee.cloud._core.realtime.bus import EventBus  # noqa: E402
+
 __all__ = [
     "Clock",
+    "EventBus",
     "FixedClock",
     "FixedIdGenerator",
     "IdGenerator",
