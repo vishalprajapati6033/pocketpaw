@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from ee.cloud.realtime.events import SessionCreated, SessionDeleted, SessionUpdated
-from ee.cloud.sessions.schemas import CreateSessionRequest, UpdateSessionRequest
+from ee.cloud.sessions.dto import CreateSessionRequest, UpdateSessionRequest
 
 
 def _capture_emits():

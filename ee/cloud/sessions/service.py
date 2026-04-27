@@ -11,7 +11,7 @@ from beanie import PydanticObjectId
 from ee.cloud.models.session import Session
 from ee.cloud.realtime.emit import emit
 from ee.cloud.realtime.events import SessionCreated, SessionDeleted, SessionUpdated
-from ee.cloud.sessions.schemas import (
+from ee.cloud.sessions.dto import (
     CreateSessionRequest,
     UpdateSessionRequest,
 )

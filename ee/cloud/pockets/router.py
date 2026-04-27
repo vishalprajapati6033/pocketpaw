@@ -38,7 +38,7 @@ from ee.cloud.pockets.dto import (
     UpdateWidgetRequest,
 )
 from ee.cloud.pockets.service import PocketService
-from ee.cloud.sessions.schemas import CreateSessionRequest
+from ee.cloud.sessions.dto import CreateSessionRequest
 from ee.cloud.shared.deps import (
     current_user_id,
     current_workspace_id,

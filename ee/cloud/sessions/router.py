@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 from starlette.responses import Response
 
 from ee.cloud.license import require_license
-from ee.cloud.sessions.schemas import (
+from ee.cloud.sessions.dto import (
     CreateSessionRequest,
     UpdateSessionRequest,
 )
