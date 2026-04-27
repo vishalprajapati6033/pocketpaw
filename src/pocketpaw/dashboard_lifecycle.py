@@ -192,6 +192,16 @@ async def startup_event(
         await seed_workspace(admin)
         # Back-fill the pocketpaw agent for workspaces that predate agent seeding.
         await ensure_default_agent_all_workspaces()
+
+        # Persist Haiku-generated chat titles into MongoDB. The pocketpaw bus
+        # emits ``session_titled`` after the first user message; this listener
+        # writes the title onto the Session document so it survives a refresh.
+        try:
+            from ee.cloud.sessions.title_listener import register as register_title_listener
+
+            register_title_listener()
+        except Exception as exc:
+            logger.warning("Cloud chat-title listener registration failed: %s", exc)
     except ImportError:
         logger.debug("Enterprise cloud module not available — skipping MongoDB init")
     except Exception as exc:
@@ -334,7 +344,16 @@ async def startup_event(
     scheduler = get_scheduler()
     scheduler.start(callback=broadcast_reminder)
 
-    # Start proactive daemon
+    # Start proactive daemon. Prune orphan ``[auto] *`` intentions first so
+    # bridged-from-EE entries whose Rule no longer exists don't keep
+    # firing crons forever (test fixtures, deleted rules, manual edits).
+    try:
+        from pocketpaw.ee.automations.bridge import prune_orphan_auto_intentions
+
+        prune_orphan_auto_intentions()
+    except Exception:
+        logger.exception("Failed to prune orphan [auto] intentions; continuing")
+
     daemon = get_daemon()
     daemon.start(stream_callback=broadcast_intention)
 

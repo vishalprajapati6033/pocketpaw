@@ -387,11 +387,13 @@ class AgentLoop:
                 api_key=self.settings.anthropic_api_key or None,
             )
             if not title:
+                logger.info("session titling skipped for %s (empty title)", session_key)
                 return
             # session_key is "channel:chat_id" — expose the safe_key form
             # ("channel_chat_id") so web clients can correlate with their
             # session_id directly.
             safe_key = session_key.replace(":", "_")
+            logger.info("session titled: %s -> %r", safe_key, title)
             await self.bus.publish_system(
                 SystemEvent(
                     event_type="session_titled",
@@ -403,7 +405,7 @@ class AgentLoop:
                 )
             )
         except Exception:
-            logger.debug("session titling failed for %s", session_key, exc_info=True)
+            logger.warning("session titling failed for %s", session_key, exc_info=True)
 
     async def process_message(self, message: InboundMessage) -> None:
         """Public entry point — run the full processing pipeline on one
@@ -1228,13 +1230,13 @@ class AgentLoop:
                     self._background_tasks.add(t)
                     t.add_done_callback(self._background_tasks.discard)
 
-                # Soul observation: feed turn for personality/memory evolution
-                if self._soul_manager is not None and not cancelled:
-                    t = asyncio.create_task(
-                        self._soul_observe_and_emit(message.content, full_response, session_key)
-                    )
-                    self._background_tasks.add(t)
-                    t.add_done_callback(self._background_tasks.discard)
+                # Soul observation: feed turn for personality/memory evolution.
+                # Cloud runs pass ``suppress_global_soul_observe`` in metadata so
+                # the default PocketPaw soul does not evolve from interactions
+                # that were actually directed at a specific workspace agent.
+                await self._maybe_observe_soul(
+                    message, full_response, session_key, cancelled=cancelled
+                )
 
             # Signal agent processing complete
             if agent_started:
@@ -1324,6 +1326,26 @@ class AgentLoop:
                 logger.debug("Auto-learned %d facts from %s", extracted, session_key)
         except Exception:
             logger.debug("Auto-learn background task failed", exc_info=True)
+
+    async def _maybe_observe_soul(
+        self, message: Any, full_response: str, session_key: str, *, cancelled: bool
+    ) -> None:
+        """Spawn global-soul observation unless the turn explicitly suppresses it.
+
+        The suppression flag lives on ``InboundMessage.metadata`` so cloud
+        runs -- which route observation to a per-agent soul via
+        ``AgentPool.observe`` -- don't double-feed the default PocketPaw soul.
+        """
+        if self._soul_manager is None or cancelled:
+            return
+        meta = getattr(message, "metadata", None) or {}
+        if meta.get("suppress_global_soul_observe"):
+            return
+        task = asyncio.create_task(
+            self._soul_observe_and_emit(message.content, full_response, session_key)
+        )
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     async def _soul_observe_and_emit(
         self, user_input: str, agent_output: str, session_key: str

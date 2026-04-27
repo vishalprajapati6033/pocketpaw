@@ -31,12 +31,12 @@ class InProcessBus:
         self._conn = conn_manager
 
     async def publish(self, event: Event) -> None:
-        # WsOutbound is imported lazily: ee.cloud.chat.dto is the lowest
+        # WsOutbound is imported lazily: ee.cloud.chat.schemas is the lowest
         # reachable node that also sits on the message-send import chain, so
         # pytest collection orderings that load services before realtime can
         # see a partially-initialised bus if we import at module top. Tested:
         # reverts to ImportError under pytest collection of test_bus.py.
-        from ee.cloud.chat.dto import WsOutbound
+        from ee.cloud.chat.schemas import WsOutbound
 
         try:
             audience = await self._resolver.audience(event)

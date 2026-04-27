@@ -1,0 +1,719 @@
+"""Cloud agent chat service — scope resolution, toolset assembly, context.
+
+Keeps the router thin: the router handles HTTP + SSE plumbing; this module
+handles *what the agent sees*:
+
+* ``resolve_scope_context`` turns (scope, scope_id, user_id) into a
+  ``ScopeContext`` including the target agent id, members, and
+  pocket-scoped tool specs where applicable.
+* ``load_history_for_scope`` rehydrates prior chat turns from Mongo so the
+  agent carries context across backend restarts and pool evictions.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from contextvars import ContextVar, Token
+from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import Any
+
+from ee.cloud.shared.errors import CloudError, NotFound
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Per-stream SSE event sink
+#
+# Side-channel emitters (the in-process MCP pocket-write tools, the
+# background session-titler) push named SSE event tuples onto whichever
+# queue is bound to the current async context. The stream generator drains
+# the queue between SDK events so the client receives ``pocket_mutation``
+# / ``session_titled`` / etc. frames without waiting for the chat reply
+# to finish. ``contextvars`` propagates the binding into tasks spawned
+# via ``asyncio.create_task`` so background workers can push too.
+# ---------------------------------------------------------------------------
+
+
+_sse_event_sink: ContextVar[asyncio.Queue[tuple[str, dict[str, Any]]] | None] = ContextVar(
+    "sse_event_sink", default=None
+)
+
+
+# Per-stream identity used by in-process MCP write tools that can't
+# reach the FastAPI request scope. ``create_pocket`` reads these to
+# stamp the ``Pocket.workspace`` / ``Pocket.owner`` fields. Set in
+# ``agent_router._run_agent_stream`` and propagated into spawned tasks
+# automatically via ``contextvars``.
+_active_workspace_id: ContextVar[str | None] = ContextVar(
+    "agent_workspace_id", default=None
+)
+_active_user_id: ContextVar[str | None] = ContextVar("agent_user_id", default=None)
+_active_session_mongo_id: ContextVar[str | None] = ContextVar(
+    "agent_session_mongo_id", default=None
+)
+
+
+def attach_agent_identity(
+    *, workspace_id: str, user_id: str, session_mongo_id: str | None = None
+) -> tuple[Token, Token, Token]:
+    """Bind workspace / user / session identity for the active stream's
+    MCP tools. ``session_mongo_id`` is the ``Session._id`` the chat is
+    streaming through — used by ``create_pocket`` to link the active
+    session to the freshly-created pocket."""
+    return (
+        _active_workspace_id.set(workspace_id),
+        _active_user_id.set(user_id),
+        _active_session_mongo_id.set(session_mongo_id),
+    )
+
+
+def detach_agent_identity(tokens: tuple[Token, Token, Token]) -> None:
+    ws_token, user_token, session_token = tokens
+    _active_workspace_id.reset(ws_token)
+    _active_user_id.reset(user_token)
+    _active_session_mongo_id.reset(session_token)
+
+
+def current_workspace_id() -> str | None:
+    return _active_workspace_id.get()
+
+
+def current_user_id() -> str | None:
+    return _active_user_id.get()
+
+
+def current_session_mongo_id() -> str | None:
+    return _active_session_mongo_id.get()
+
+
+def push_sse_event(name: str, data: dict[str, Any]) -> None:
+    """Send a named SSE event to the active stream's sink, if any.
+
+    No-op when there's no sink in scope (e.g. invoked from a unit test or
+    a CLI handler that isn't part of an SSE stream).
+    """
+    sink = _sse_event_sink.get()
+    if sink is None:
+        return
+    try:
+        sink.put_nowait((name, data))
+    except Exception:
+        logger.debug("sse sink rejected %s payload", name, exc_info=True)
+
+
+def push_pocket_mutation(payload: dict[str, Any]) -> None:
+    """Compatibility wrapper — historic call site for pocket-mutation pushes."""
+    push_sse_event("pocket_mutation", payload)
+
+
+def attach_sse_event_sink(queue: asyncio.Queue[tuple[str, dict[str, Any]]]) -> Token:
+    """Bind ``queue`` as the sink for the current async context."""
+    return _sse_event_sink.set(queue)
+
+
+def detach_sse_event_sink(token: Token) -> None:
+    """Restore the previous sink binding."""
+    _sse_event_sink.reset(token)
+
+
+# Legacy aliases retained for callers that were written against the
+# pocket-specific names. Both pairs operate on the same underlying sink.
+attach_pocket_event_sink = attach_sse_event_sink
+detach_pocket_event_sink = detach_sse_event_sink
+
+
+class ScopeKind(StrEnum):
+    DM = "dm"
+    GROUP = "group"
+    POCKET = "pocket"
+    SESSION = "session"
+
+
+class InvalidScope(ValueError):
+    """Raised when the URL's ``scope`` path param is not one of the known kinds."""
+
+
+@dataclass
+class ScopeContext:
+    kind: ScopeKind
+    scope_id: str
+    workspace_id: str
+    user_id: str
+    members: list[str]
+    target_agent_id: str
+    agent_ids_in_scope: list[str] = field(default_factory=list)
+    pocket_tool_specs: list[dict[str, Any]] = field(default_factory=list)
+    # The ``Session.sessionId`` that surfaces this scope+agent pair in the
+    # sidebar. Populated by the router before the SSE stream begins so the
+    # ``message.persisted`` / ``stream_start`` events can carry it early —
+    # which lets a mid-stream refresh still find the thread in the sidebar.
+    session_id: str | None = None
+    # The Mongo ``Pocket._id`` this conversation is anchored to, if any.
+    # Populated for ``pocket`` scope (= scope_id) and for ``session`` scope
+    # when the underlying ``Session.pocket`` is set. The system prompt uses
+    # it to tell the agent which pocket it can edit via the write MCP tools.
+    pocket_id: str | None = None
+    # Optional client-supplied intent hint that swaps which system-prompt
+    # block ``build_context_block`` emits. ``pocket_create`` makes the
+    # agent reach for the ``create_pocket`` MCP tool instead of rendering
+    # an inline ``ui-spec`` chat reply.
+    intent: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Beanie accessors (thin wrappers so tests can patch them)
+# ---------------------------------------------------------------------------
+
+
+async def _get_group(group_id: str) -> Any:
+    from beanie import PydanticObjectId
+
+    from ee.cloud.models.group import Group
+
+    try:
+        return await Group.get(PydanticObjectId(group_id))
+    except Exception:
+        return None
+
+
+async def _get_pocket(pocket_id: str) -> Any:
+    from beanie import PydanticObjectId
+
+    from ee.cloud.models.pocket import Pocket
+
+    try:
+        return await Pocket.get(PydanticObjectId(pocket_id))
+    except Exception:
+        return None
+
+
+async def _get_session(session_id: str) -> Any:
+    from beanie import PydanticObjectId
+
+    from ee.cloud.models.session import Session
+
+    try:
+        return await Session.get(PydanticObjectId(session_id))
+    except Exception:
+        return None
+
+
+async def _get_default_workspace_agent_id(workspace_id: str) -> str | None:
+    """Resolve the workspace's default ``pocketpaw`` agent id, or ``None``.
+
+    Mirrors the slug used by ``seed_default_agent`` in ``auth/core.py``. Pockets
+    that haven't had an agent explicitly attached still chat against this
+    workspace-default agent.
+    """
+    if not workspace_id:
+        return None
+    try:
+        from ee.cloud.models.agent import Agent
+
+        agent = await Agent.find_one(Agent.workspace == workspace_id, Agent.slug == "pocketpaw")
+        return str(agent.id) if agent is not None else None
+    except Exception:
+        logger.exception("default workspace agent lookup failed for ws=%s", workspace_id)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Scope resolution
+# ---------------------------------------------------------------------------
+
+
+async def resolve_scope_context(
+    *, scope: str, scope_id: str, user_id: str, agent_id_hint: str | None
+) -> ScopeContext:
+    """Resolve a ``ScopeContext`` for a cloud agent chat request.
+
+    Raises:
+        InvalidScope: ``scope`` is not one of dm/group/pocket/session.
+        NotFound: the group, pocket, or session doesn't exist.
+        CloudError: caller is not a member, no agent is in scope, or the
+            caller must disambiguate ``agent_id`` for a multi-agent group.
+    """
+    try:
+        kind = ScopeKind(scope)
+    except ValueError as e:
+        raise InvalidScope(scope) from e
+
+    if kind is ScopeKind.POCKET:
+        return await _resolve_pocket(scope_id, user_id, agent_id_hint)
+    if kind is ScopeKind.SESSION:
+        return await _resolve_session(scope_id, user_id, agent_id_hint)
+    return await _resolve_group_like(kind, scope_id, user_id, agent_id_hint)
+
+
+async def _resolve_session(scope_id: str, user_id: str, agent_id_hint: str | None) -> ScopeContext:
+    session = await _get_session(scope_id)
+    if session is None or getattr(session, "deleted_at", None) is not None:
+        raise NotFound("session", scope_id)
+
+    if getattr(session, "owner", None) != user_id:
+        raise CloudError(403, "session.forbidden", "Caller does not own this session")
+
+    # When the session lives inside a pocket, hydrate the pocket's tool specs
+    # so a chat routed through ``session`` scope still gets the pocket-scoped
+    # tools the agent would see under ``pocket`` scope. The frontend prefers
+    # session scope for pocket chats so the active session id is honored
+    # (pocket scope keys all sessions under one stream); without this lookup
+    # those chats would silently lose pocket tools.
+    pocket_tool_specs: list[dict[str, Any]] = []
+    pocket_id = getattr(session, "pocket", None)
+    if pocket_id:
+        pocket = await _get_pocket(str(pocket_id))
+        if pocket is not None:
+            pocket_tool_specs = list(getattr(pocket, "tool_specs", []) or [])
+
+    target = agent_id_hint or getattr(session, "agent", None)
+    if not target:
+        # Sessions created via ``createPocketSession`` don't yet pin an agent
+        # — fall back to the workspace's default ``pocketpaw`` agent (same
+        # rule ``_resolve_pocket`` applies). Keeps cold-start chats in a
+        # newly-created pocket session working without the caller having to
+        # explicitly pass ``agent_id``.
+        workspace_id = str(getattr(session, "workspace", ""))
+        target = await _get_default_workspace_agent_id(workspace_id)
+        if not target:
+            raise CloudError(400, "session.no_agent", "Session has no agent")
+
+    return ScopeContext(
+        kind=ScopeKind.SESSION,
+        scope_id=scope_id,
+        workspace_id=str(getattr(session, "workspace", "")),
+        user_id=user_id,
+        members=[user_id],
+        target_agent_id=target,
+        agent_ids_in_scope=[target],
+        pocket_tool_specs=pocket_tool_specs,
+        pocket_id=str(pocket_id) if pocket_id else None,
+    )
+
+
+async def _resolve_group_like(
+    kind: ScopeKind, scope_id: str, user_id: str, agent_id_hint: str | None
+) -> ScopeContext:
+    group = await _get_group(scope_id)
+    if group is None:
+        raise NotFound("group", scope_id)
+    if getattr(group, "archived", False):
+        raise CloudError(409, "group.archived", "Group is archived")
+    members = list(getattr(group, "members", []) or [])
+    if user_id not in members:
+        raise CloudError(403, "group.not_member", "Caller is not a group member")
+
+    # DM kind must actually be a dm on the document, and vice versa — prevents
+    # a caller from driving a normal group through the /dm/ route to bypass
+    # multi-agent disambiguation.
+    if kind is ScopeKind.DM and getattr(group, "type", "") != "dm":
+        raise CloudError(400, "scope.mismatch", "Group is not a DM")
+    if kind is ScopeKind.GROUP and getattr(group, "type", "") == "dm":
+        raise CloudError(400, "scope.mismatch", "DM must use /dm/ scope")
+
+    agents = list(getattr(group, "agents", []) or [])
+    agent_ids = [getattr(a, "agent", None) for a in agents if getattr(a, "agent", None)]
+    if not agent_ids:
+        raise CloudError(400, "group.no_agent", "No agent in scope")
+
+    target = _pick_target_agent(agent_ids, agent_id_hint)
+
+    return ScopeContext(
+        kind=kind,
+        scope_id=scope_id,
+        workspace_id=str(getattr(group, "workspace", "")),
+        user_id=user_id,
+        members=members,
+        target_agent_id=target,
+        agent_ids_in_scope=agent_ids,
+    )
+
+
+async def _resolve_pocket(scope_id: str, user_id: str, agent_id_hint: str | None) -> ScopeContext:
+    pocket = await _get_pocket(scope_id)
+    if pocket is None:
+        raise NotFound("pocket", scope_id)
+
+    team = list(getattr(pocket, "team", []) or [])
+    shared = list(getattr(pocket, "shared_with", []) or [])
+    owner = getattr(pocket, "owner", None)
+    visibility = getattr(pocket, "visibility", "workspace")
+    is_member = user_id == owner or user_id in team or user_id in shared
+    if visibility == "private" and not is_member:
+        raise CloudError(403, "pocket.forbidden", "No access to pocket")
+    # For workspace/public we still require the caller be a workspace member;
+    # the route-level dependency ``current_workspace_id`` already enforced that.
+
+    workspace_id = str(getattr(pocket, "workspace", ""))
+
+    agents = list(getattr(pocket, "agents", []) or [])
+    agent_ids = [a if isinstance(a, str) else getattr(a, "id", None) for a in agents]
+    agent_ids = [a for a in agent_ids if a]
+    if not agent_ids:
+        # Pockets don't have to declare their own agents — fall back to the
+        # workspace's default ``pocketpaw`` agent (seeded per workspace at
+        # provision time) so chats work before any explicit agent is attached.
+        default_id = await _get_default_workspace_agent_id(workspace_id)
+        if not default_id:
+            raise CloudError(400, "pocket.no_agent", "Pocket has no agent")
+        agent_ids = [default_id]
+
+    # Pockets default to the first listed agent when no hint is given (unlike
+    # groups, which require explicit disambiguation for multi-agent scopes).
+    if agent_id_hint is not None:
+        if agent_id_hint not in agent_ids:
+            raise CloudError(400, "agent.not_in_scope", "agent_id not in scope")
+        target = agent_id_hint
+    else:
+        target = agent_ids[0]
+
+    # Build the participant list: owner first, then team, then shared-with,
+    # deduped. Pocket.owner is a required field on the model, so the falsy
+    # branch is defensive only. Note: Pocket has no ``archived`` field today,
+    # so there's no archived check here (intentional, not a parity gap with
+    # the group path).
+    seen: set[str] = set()
+    members: list[str] = []
+    for m in [owner, *team, *shared]:
+        if m is None or m in seen:
+            continue
+        seen.add(m)
+        members.append(m)
+
+    return ScopeContext(
+        kind=ScopeKind.POCKET,
+        scope_id=scope_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        members=members,
+        target_agent_id=target,
+        agent_ids_in_scope=agent_ids,
+        pocket_tool_specs=list(getattr(pocket, "tool_specs", []) or []),
+        pocket_id=scope_id,
+    )
+
+
+def _pick_target_agent(agent_ids: list[str], hint: str | None) -> str:
+    if hint is not None:
+        if hint not in agent_ids:
+            raise CloudError(400, "agent.not_in_scope", "agent_id not in scope")
+        return hint
+    if len(agent_ids) == 1:
+        return agent_ids[0]
+    raise CloudError(
+        400,
+        "agent.ambiguous",
+        "Multiple agents in scope — pass agent_id",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Toolset assembly
+# ---------------------------------------------------------------------------
+
+
+def _tool_identity(spec: dict[str, Any]) -> tuple:
+    """Stable tuple for deduping tool specs of different kinds."""
+    kind = spec.get("kind", "")
+    if kind == "builtin":
+        return ("builtin", spec.get("id", ""))
+    if kind == "mcp":
+        return ("mcp", spec.get("server", ""), spec.get("name", ""))
+    if kind == "inline":
+        return ("inline", spec.get("name", ""))
+    return (kind, repr(sorted(spec.items())))
+
+
+def assemble_toolset(ctx: ScopeContext, *, base: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge base + pocket-scoped tools. Dedupes by identity, base wins.
+
+    Pocket tools come along whenever ``ctx.pocket_tool_specs`` is populated,
+    not just under ``pocket`` scope — sessions that live inside a pocket
+    (resolved via ``_resolve_session``) carry the same specs so the agent
+    sees the same toolset whether the chat was routed through pocket or
+    session scope.
+    """
+    if not ctx.pocket_tool_specs:
+        return list(base)
+    seen: set[tuple] = {_tool_identity(t) for t in base}
+    merged = list(base)
+    for spec in ctx.pocket_tool_specs:
+        ident = _tool_identity(spec)
+        if ident in seen:
+            continue
+        seen.add(ident)
+        merged.append(spec)
+    return merged
+
+
+# ---------------------------------------------------------------------------
+# Context block for system prompt
+# ---------------------------------------------------------------------------
+
+
+_RIPPLE_HINT = """\
+<ripple>
+You can render rich, interactive UI inline in your chat responses by emitting
+a JSON spec inside a ```ui-spec``` (or ```json```) fenced code block. The
+client renders it as live components in the message bubble.
+
+Spec shape (UISpec v1.0):
+```ui-spec
+{
+  "version": "1.0",
+  "ui": {
+    "type": "flex",
+    "props": { "direction": "column", "gap": "16px" },
+    "children": [
+      { "type": "heading", "props": { "text": "Overview", "level": 2 } },
+      { "type": "text", "props": { "text": "Summary line.", "size": "sm" } },
+      {
+        "type": "grid",
+        "props": { "columns": 3, "gap": 3 },
+        "children": [
+          { "type": "stat", "props": { "label": "Revenue", "value": 12450, "format": "currency", "deltaPercent": 3.4, "direction": "up-good" } },
+          { "type": "stat", "props": { "label": "Signups", "value": 247, "deltaPercent": 18.2, "direction": "up-good" } },
+          { "type": "stat", "props": { "label": "Churn", "value": 0.034, "format": "percent", "deltaPercent": -0.8, "direction": "down-good" } }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Allowed node types in chat-inline specs: `flex`, `grid`, `heading`, `text`,
+`stat`, `chart`, `table`.
+
+Stat:
+- `stat.format`: "currency" | "percent" (omit for plain numbers).
+- `stat.direction`: "up-good" | "down-good" — controls delta color.
+
+Chart:
+```ui-spec
+{
+  "version": "1.0",
+  "ui": {
+    "type": "chart",
+    "props": {
+      "type": "line",
+      "title": "Monthly Revenue",
+      "data": [
+        { "label": "Jan", "value": 12000 },
+        { "label": "Feb", "value": 15400 },
+        { "label": "Mar", "value": 13200 }
+      ],
+      "colors": ["#3b82f6"],
+      "height": 220
+    }
+  }
+}
+```
+- `type` (chart kind): one of
+  `bar | line | area | pie | donut | candlestick | sparkline | heatmap | gauge | radar`.
+  (You may also write `chartType` at the node level — the renderer
+  translates both, but `props.type` is the canonical Ripple shape.)
+- `data`: array of `{label, value}` for most chart types.
+  - For `candlestick`: each point is `{label, open, high, low, close}`.
+  - For `heatmap` / multi-series: each point may include `series: {a: 1, b: 2}`.
+  - The renderer also accepts Chart.js `{labels, datasets}` and
+    `series: [{name, color, data: [{x, y}]}]`, but `[{label, value}]` is
+    simplest and preferred.
+- `colors`, `height`, `tooltip` optional. `bullColor` / `bearColor` for
+  candlestick.
+
+Table:
+```ui-spec
+{
+  "version": "1.0",
+  "ui": {
+    "type": "table",
+    "props": {
+      "columns": ["Customer", "MRR", "Status"],
+      "data": [
+        { "Customer": "Acme",   "MRR": "$2,400", "Status": "Active" },
+        { "Customer": "Globex", "MRR": "$1,180", "Status": "Trial"  }
+      ],
+      "variant": "default"
+    }
+  }
+}
+```
+- `data`: array of objects keyed by column name (preferred). The renderer
+  also accepts `rows: [["Acme", "$2,400", "Active"], ...]` (array-of-
+  arrays) and zips it against `columns`.
+- `columns`: array of strings, OR objects with
+  `{accessorKey | key, header | label}`.
+- `variant`: `default | compact | striped | minimal`.
+- `statusKey`: optional column key whose value drives a status-dot color.
+- For a titled table, wrap in a `flex` with a `heading` above the table —
+  the Table widget does not render its own title.
+
+Notes:
+- Do NOT include `button` or interactive nodes — chat-inline specs are for
+  display only; interactive surfaces belong on a pocket canvas, not in chat.
+
+When to use:
+- Numeric summaries, dashboards, time-series, comparisons, structured lists.
+- Don't force it for plain text answers — only when visual structure helps.
+- You can mix prose and one ui-spec block in the same response.
+- Top-level keys MUST be `version` and `ui`. The root `ui` is a single node;
+  nest with `children` arrays for `flex`/`grid`. Single-node specs (a lone
+  chart or table) work too — wrap in `flex` if you need a heading + chart.
+</ripple>"""
+
+
+_CLOUD_POCKET_TOOL_PREAMBLE = """\
+<cloud-pocket-tools>
+This conversation runs in cloud mode. Pocket operations go through these
+in-process MCP tools — NOT the Bash ``python -m pocketpaw.tools.cli``
+bridge mentioned below. The CLI bridge does not persist in cloud mode;
+the MCP tools do. Same operations, typed JSON arguments, no shell
+escaping headaches:
+
+- ``mcp__pocketpaw_pocket__get_pocket(pocket_id)`` — replaces
+  ``cli get_pocket``. Returns the full pocket document.
+- ``mcp__pocketpaw_pocket__create_pocket(name, description, type, icon,
+  color, ripple_spec)`` — replaces ``cli create_pocket``. ``ripple_spec``
+  takes either a UISpec node tree (``{{type, props, children}}``) or a
+  ``{{ui: <node>, ...}}`` envelope; the server normalizes either form.
+- ``mcp__pocketpaw_pocket__update_pocket(pocket_id, name?, description?,
+  icon?, color?, ripple_spec?)`` — replaces ``cli create_pocket``-as-
+  rebuild for an existing pocket. Patch only the fields you pass.
+- ``mcp__pocketpaw_pocket__add_widget(pocket_id, widget)`` — replaces
+  ``cli add_widget``.
+- ``mcp__pocketpaw_pocket__update_widget(pocket_id, widget_id, fields)``
+  — patch one widget.
+- ``mcp__pocketpaw_pocket__remove_widget(pocket_id, widget_id)`` —
+  replaces ``cli remove_widget``.
+
+The ``<current-pocket>`` id for this conversation (when one is attached)
+is in the ``<scope>`` tag at the top of this prompt: ``pocket {pocket_id}``.
+Pass that id verbatim as ``pocket_id``. Wherever the guidance below says
+"echo '...' | python -m pocketpaw.tools.cli X", call the matching MCP
+tool with the same JSON fields instead.
+</cloud-pocket-tools>
+
+"""
+
+
+_POCKET_TOOLS_HINT_TEMPLATE = """\
+{preamble}{interaction_context}"""
+
+
+def _load_oss_pocket_contexts() -> tuple[str, str]:
+    """Lazy-import the OSS pocket system prompts so this module stays
+    independent of ``pocketpaw.api.v1.pockets`` import order. Falls back
+    to empty strings if the OSS path isn't reachable (build_context_block
+    will simply render without the rich guidance)."""
+    try:
+        from pocketpaw.api.v1.pockets import (
+            _POCKET_CREATION_CONTEXT,
+            _POCKET_INTERACTION_CONTEXT,
+        )
+
+        return _POCKET_INTERACTION_CONTEXT, _POCKET_CREATION_CONTEXT
+    except Exception:  # noqa: BLE001
+        logger.debug("OSS pocket prompts unavailable", exc_info=True)
+        return "", ""
+
+
+def build_context_block(ctx: ScopeContext) -> str:
+    """Compact string the agent prompt embeds so the model knows who is here
+    and how to render rich UI back to the client.
+
+    Three pocket modes drive different prompt blocks:
+    - ``pocket_create`` intent → emit the OSS pocket-creation prompt
+      (intent classification, formats, hard rules) prefixed with a
+      cloud-mode preamble that maps the CLI bridge invocations to the
+      MCP tools.
+    - Active pocket attached → emit the OSS pocket-interaction prompt
+      with the same cloud-mode preamble + the ripple-inline hint.
+    - Plain chat (DM, group, free session) → ripple-inline hint only.
+    """
+    interaction_ctx, creation_ctx = _load_oss_pocket_contexts()
+
+    member_list = ", ".join(ctx.members) if ctx.members else "(none)"
+    parts = [
+        f"<scope>{ctx.kind.value} {ctx.scope_id}</scope>",
+        f"<participants>{member_list}</participants>",
+    ]
+    if ctx.intent == "pocket_create":
+        preamble = _CLOUD_POCKET_TOOL_PREAMBLE.format(pocket_id="<new-pocket>")
+        parts.append(preamble + (creation_ctx or ""))
+        return "\n".join(parts)
+    if ctx.pocket_id:
+        if interaction_ctx:
+            parts.append(
+                _POCKET_TOOLS_HINT_TEMPLATE.format(
+                    preamble=_CLOUD_POCKET_TOOL_PREAMBLE.format(pocket_id=ctx.pocket_id),
+                    interaction_context=interaction_ctx,
+                )
+            )
+            parts.append(f"<current-pocket id=\"{ctx.pocket_id}\" />")
+    parts.append(_RIPPLE_HINT)
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# History rehydration
+# ---------------------------------------------------------------------------
+
+
+def session_key_for(ctx: ScopeContext) -> str:
+    """Stable session key for pocket- and session-scope agent runs.
+
+    Mirrors the Mongo ``Message.session_key`` written by the router's
+    persist helpers. Keeping the formula in one place lets history
+    rehydration use the same key the persist path writes with.
+    """
+    return f"cloud:{ctx.kind.value}:{ctx.scope_id}:{ctx.target_agent_id}"
+
+
+async def load_history_for_scope(ctx: ScopeContext, *, limit: int = 50) -> list[dict[str, str]]:
+    """Return prior turns as ``[{"role", "content"}]``, oldest first.
+
+    Why: the agent backend keeps conversation state in an in-process SDK
+    subprocess keyed by ``session_key``. That state is wiped by any
+    backend restart or ``AgentPool`` eviction, at which point the agent
+    would otherwise forget every prior message in the thread. Reading
+    from the persisted ``Message`` collection restores context.
+
+    Swallows errors (empty list) so a transient Mongo hiccup degrades
+    the reply rather than killing the stream.
+    """
+    try:
+        from ee.cloud.models.message import Message
+    except Exception:
+        logger.debug("Message model unavailable; returning empty history", exc_info=True)
+        return []
+
+    try:
+        if ctx.kind in (ScopeKind.POCKET, ScopeKind.SESSION):
+            query: dict[str, Any] = {
+                "context_type": ctx.kind.value,
+                "session_key": session_key_for(ctx),
+            }
+        else:  # GROUP, DM — both land in a group row
+            query = {
+                "context_type": "group",
+                "group": ctx.scope_id,
+                "deleted": False,
+            }
+        msgs = await Message.find(query).sort("createdAt").limit(limit).to_list()
+    except Exception:
+        logger.exception("load_history_for_scope failed for %s/%s", ctx.kind.value, ctx.scope_id)
+        return []
+
+    out: list[dict[str, str]] = []
+    for m in msgs:
+        role = getattr(m, "role", None)
+        if role not in ("user", "assistant", "system"):
+            role = "assistant" if getattr(m, "sender_type", "") == "agent" else "user"
+        content = getattr(m, "content", "") or ""
+        if not content:
+            continue
+        out.append({"role": role, "content": content})
+    return out

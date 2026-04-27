@@ -26,7 +26,7 @@ from ee.cloud.chat.group_service import (
     _require_group_admin,
     _require_group_member,
 )
-from ee.cloud.chat.dto import (
+from ee.cloud.chat.schemas import (
     EditMessageRequest,
     SendMessageRequest,
 )

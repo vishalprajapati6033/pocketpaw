@@ -42,7 +42,7 @@ async def test_leave_room_clears_current_room():
 
 @pytest.mark.asyncio
 async def test_send_to_room_only_delivers_to_joined_sockets():
-    from ee.cloud.chat.dto import WsOutbound
+    from ee.cloud.chat.schemas import WsOutbound
     from ee.cloud.chat.ws import ConnectionManager
 
     mgr = ConnectionManager()
@@ -71,7 +71,7 @@ async def test_send_to_room_only_delivers_to_joined_sockets():
 
 @pytest.mark.asyncio
 async def test_send_to_room_excludes_user():
-    from ee.cloud.chat.dto import WsOutbound
+    from ee.cloud.chat.schemas import WsOutbound
     from ee.cloud.chat.ws import ConnectionManager
 
     mgr = ConnectionManager()
@@ -113,7 +113,7 @@ async def test_room_join_rejects_non_member(monkeypatch):
     import importlib
     from unittest.mock import AsyncMock as _AsyncMock
 
-    from ee.cloud.chat.dto import WsInbound
+    from ee.cloud.chat.schemas import WsInbound
 
     router_mod = importlib.import_module("ee.cloud.chat.router")
 
@@ -137,7 +137,7 @@ async def test_room_join_allows_member(monkeypatch):
     import importlib
     from unittest.mock import MagicMock
 
-    from ee.cloud.chat.dto import WsInbound
+    from ee.cloud.chat.schemas import WsInbound
 
     router_mod = importlib.import_module("ee.cloud.chat.router")
 
@@ -168,7 +168,7 @@ async def test_typing_rejects_non_member(monkeypatch):
     from unittest.mock import AsyncMock as _AsyncMock
     from unittest.mock import MagicMock
 
-    from ee.cloud.chat.dto import WsInbound
+    from ee.cloud.chat.schemas import WsInbound
 
     router_mod = importlib.import_module("ee.cloud.chat.router")
 
@@ -198,7 +198,7 @@ async def test_typing_allows_member(monkeypatch):
     from unittest.mock import AsyncMock as _AsyncMock
     from unittest.mock import MagicMock
 
-    from ee.cloud.chat.dto import WsInbound
+    from ee.cloud.chat.schemas import WsInbound
 
     router_mod = importlib.import_module("ee.cloud.chat.router")
 
@@ -227,7 +227,7 @@ async def test_read_ack_rejects_non_member(monkeypatch):
     import importlib
     from unittest.mock import AsyncMock as _AsyncMock
 
-    from ee.cloud.chat.dto import WsInbound
+    from ee.cloud.chat.schemas import WsInbound
 
     router_mod = importlib.import_module("ee.cloud.chat.router")
 
@@ -252,7 +252,7 @@ async def test_read_ack_allows_member(monkeypatch):
     import importlib
     from unittest.mock import AsyncMock as _AsyncMock
 
-    from ee.cloud.chat.dto import WsInbound
+    from ee.cloud.chat.schemas import WsInbound
 
     router_mod = importlib.import_module("ee.cloud.chat.router")
 

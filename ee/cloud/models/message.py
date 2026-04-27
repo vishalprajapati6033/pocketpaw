@@ -42,7 +42,11 @@ class Message(TimestampedDocument):
     ``session_key`` and ``role`` are required; group-chat extras must stay
     empty.
 
-    Both shapes live in one Mongo collection to give callers a single
+    ``context_type="session"`` — session-scope agent conversation row
+    (single-user cloud session). Same shape as "pocket": ``session_key``
+    and ``role`` are required, group-chat extras must stay empty.
+
+    All three shapes live in one Mongo collection to give callers a single
     abstraction for messages regardless of where they were sent.
     """
 
@@ -93,7 +97,7 @@ class Message(TimestampedDocument):
                 raise ValueError("group message must not set session_key")
             if self.role is not None:
                 raise ValueError("group message must not set role")
-        elif self.context_type == "pocket":
+        elif self.context_type in ("pocket", "session"):
             if not self.session_key:
                 raise ValueError("pocket message must have session_key set")
             if self.role not in ("user", "assistant", "system"):

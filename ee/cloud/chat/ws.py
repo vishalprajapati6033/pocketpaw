@@ -17,7 +17,7 @@ import logging
 
 from fastapi import WebSocket
 
-from ee.cloud.chat.dto import WsOutbound
+from ee.cloud.chat.schemas import WsOutbound
 
 logger = logging.getLogger(__name__)
 

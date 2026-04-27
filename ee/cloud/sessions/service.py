@@ -74,9 +74,16 @@ class SessionService:
                     )
                 return _session_response(existing)
 
+        if body.group_id:
+            ctype = "group"
+        elif body.pocket_id:
+            ctype = "pocket"
+        else:
+            ctype = "session"  # free-floating session
+
         session = Session(
             sessionId=sid,
-            context_type="group" if body.group_id else "pocket",
+            context_type=ctype,
             workspace=workspace_id,
             owner=user_id,
             title=body.title,
@@ -238,6 +245,33 @@ class SessionService:
 
         session = await SessionService._get_session(session_id, user_id)
 
+        if session.context_type == "session":
+            messages = (
+                await Message.find(
+                    {
+                        "context_type": "session",
+                        "session_key": f"cloud:session:{session.id}:{session.agent}",
+                    }
+                )
+                .sort("createdAt")
+                .limit(limit)
+                .to_list()
+            )
+            return {
+                "messages": [
+                    {
+                        "_id": str(m.id),
+                        "role": m.role or "user",
+                        "content": m.content,
+                        "sender": m.sender,
+                        "senderType": m.sender_type,
+                        "createdAt": iso_utc(m.createdAt),
+                        "attachments": [a.model_dump() for a in (m.attachments or [])],
+                    }
+                    for m in messages
+                ]
+            }
+
         if session.context_type == "group" and session.group:
             messages = (
                 await Message.find(
@@ -266,9 +300,38 @@ class SessionService:
                 ]
             }
 
-        # Pocket context — keyed by session_key, which mirrors sessionId.
+        # Pocket context — three writer paths land here with different
+        # ``session_key`` shapes:
+        #   * The cloud SSE chat writer (``ee.cloud.chat.agent_service.
+        #     session_key_for``) keys by ``cloud:pocket:{pocket_id}:{agent_id}``
+        #     — derivable from the Session doc when both fields are set.
+        #   * The legacy bus path (``mongo_store._auto_create_pocket_session``)
+        #     uses the channel-style ``sessionId`` itself (e.g. ``websocket_…``)
+        #     and auto-creates a Session row with ``pocket=None, agent=None``.
+        #   * Sessions that started life as a free workspace session (rows
+        #     written under ``context_type="session"`` keyed by
+        #     ``cloud:session:{session._id}:{agent}``) and were later
+        #     re-linked to a pocket by ``create_pocket`` — their messages
+        #     keep their original session-context form.
+        # Match against all three so history loads regardless of which
+        # writer produced the rows.
+        pocket_candidate_keys = [session.sessionId]
+        if session.pocket and session.agent:
+            pocket_candidate_keys.append(
+                f"cloud:pocket:{session.pocket}:{session.agent}"
+            )
+        or_clauses: list[dict[str, Any]] = [
+            {"context_type": "pocket", "session_key": {"$in": pocket_candidate_keys}}
+        ]
+        if session.agent:
+            or_clauses.append(
+                {
+                    "context_type": "session",
+                    "session_key": f"cloud:session:{session.id}:{session.agent}",
+                }
+            )
         messages = (
-            await Message.find({"context_type": "pocket", "session_key": session.sessionId})
+            await Message.find({"$or": or_clauses})
             .sort("createdAt")
             .limit(limit)
             .to_list()

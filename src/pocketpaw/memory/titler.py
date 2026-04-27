@@ -21,13 +21,29 @@ _MAX_INPUT_CHARS = 2000
 _MAX_TOKENS = 24
 
 
+def fallback_title(first_message: str) -> str | None:
+    """Derive a title from the first user message when Haiku is unavailable.
+
+    Collapses whitespace and truncates to ~60 chars. Returns None when the
+    message is empty so callers can skip the event altogether.
+    """
+    text = (first_message or "").strip()
+    if not text:
+        return None
+    one_line = " ".join(text.split())
+    if len(one_line) > 60:
+        return one_line[:60].rstrip() + "…"
+    return one_line
+
+
 async def generate_title(
     first_message: str, *, model: str, api_key: str | None = None
 ) -> str | None:
-    """Return a short title for ``first_message`` or ``None`` on failure.
+    """Return a short title for ``first_message``.
 
-    Failures (missing SDK, missing key, API error) are logged at debug and
-    swallowed — titling is best-effort and must never break the chat flow.
+    Prefers a Haiku-generated title; falls back to a trimmed first-message
+    excerpt when the SDK / API key / network fails, so chats always get a
+    non-default title. Returns None only for an empty first message.
     """
     text = (first_message or "").strip()
     if not text:
@@ -38,28 +54,32 @@ async def generate_title(
     try:
         from anthropic import AsyncAnthropic
     except ImportError:
-        logger.debug("anthropic SDK not installed; skipping title generation")
-        return None
+        logger.info("anthropic SDK not installed; using fallback title")
+        return fallback_title(first_message)
+
+    if not api_key:
+        logger.info("no Anthropic API key configured; using fallback title")
+        return fallback_title(first_message)
 
     try:
-        client = AsyncAnthropic(api_key=api_key) if api_key else AsyncAnthropic()
+        client = AsyncAnthropic(api_key=api_key)
         response = await client.messages.create(
             model=model,
             max_tokens=_MAX_TOKENS,
             messages=[{"role": "user", "content": _PROMPT.format(message=text)}],
         )
     except Exception:
-        logger.debug("title generation call failed", exc_info=True)
-        return None
+        logger.warning("Haiku title generation call failed; using fallback", exc_info=True)
+        return fallback_title(first_message)
 
     try:
         raw = response.content[0].text
     except (AttributeError, IndexError):
-        return None
+        return fallback_title(first_message)
 
     title = raw.strip().strip('"').strip("'").rstrip(".").strip()
     if not title:
-        return None
+        return fallback_title(first_message)
     # Cap at a hard character budget in case the model ignores word-count.
     if len(title) > 80:
         title = title[:80].rstrip()
