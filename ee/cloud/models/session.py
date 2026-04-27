@@ -10,7 +10,11 @@ from pydantic import Field, model_validator
 
 from ee.cloud.models.base import TimestampedDocument
 
-ContextType = Literal["pocket", "group"]
+# Extended to include "session" to match data created on feat/chat-unify
+# (single-user agent conversation, no pocket/group binding required). The
+# validator below treats "session" like "pocket" — it's a one-on-one chat
+# that just doesn't anchor to a Pocket document.
+ContextType = Literal["pocket", "group", "session"]
 
 
 class Session(TimestampedDocument):
@@ -56,6 +60,10 @@ class Session(TimestampedDocument):
                 raise ValueError("group session must have group set")
             if self.pocket:
                 raise ValueError("group session must not have pocket set")
+        elif self.context_type == "session":
+            # Session-scope: single-user agent chat, no group/pocket anchor.
+            if self.group:
+                raise ValueError("session-scope must not have group set")
         return self
 
     class Settings:

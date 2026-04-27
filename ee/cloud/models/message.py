@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from ee.cloud.models.base import TimestampedDocument
 
-ContextType = Literal["pocket", "group"]
+ContextType = Literal["pocket", "group", "session"]
 # Roles used for pocket agent-memory messages (LLM context rows).
 PocketRole = Literal["user", "assistant", "system"]
 
