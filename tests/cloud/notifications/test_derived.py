@@ -58,6 +58,7 @@ def _fake_message(
         content=content,
         mentions=[],
         reply_to=None,
+        thread_count=0,
         attachments=[],
         reactions=reactions if reactions is not None else [],
         edited=False,
