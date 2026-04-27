@@ -13,10 +13,7 @@ Each has router.py (thin), service.py (logic), schemas.py (validation).
 
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse
-
-from ee.cloud.shared.errors import CloudError
+from fastapi import Depends, FastAPI
 
 
 def init_realtime() -> None:
@@ -52,12 +49,16 @@ def init_realtime() -> None:
 
 
 def mount_cloud(app: FastAPI) -> None:
-    """Mount all cloud domain routers and the error handler."""
+    """Mount all cloud domain routers, the error handler, and the
+    request-timing middleware."""
+    from ee.cloud._core.http import add_error_handler
+    from ee.cloud._core.timing import TimingMiddleware
 
-    # Global error handler
-    @app.exception_handler(CloudError)
-    async def cloud_error_handler(request: Request, exc: CloudError):
-        return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
+    # Request-timing middleware first so it wraps every subsequent route
+    app.add_middleware(TimingMiddleware)
+
+    # Global error handler — extracted to ee.cloud._core.http
+    add_error_handler(app)
 
     # Import and mount domain routers
     from ee.cloud.agents.router import router as agents_router
@@ -135,16 +136,12 @@ def mount_cloud(app: FastAPI) -> None:
     _files_registry.register(_UploadsProvider(store=_UploadsStore()))
     _files_registry.register(_KbProvider(service=_NoopKbService()))
     _files_rules = _load_abac_rules()
-    _files_tree_builder = _CachedTreeBuilder(
-        registry=_files_registry, rules=_files_rules
-    )
+    _files_tree_builder = _CachedTreeBuilder(registry=_files_registry, rules=_files_rules)
 
     def _files_ctx_from_user(user: _User) -> _RequestContext:
         role = ""
         for ws in getattr(user, "workspaces", []) or []:
-            ws_id = getattr(ws, "workspace", None) or getattr(
-                ws, "workspace_id", None
-            )
+            ws_id = getattr(ws, "workspace", None) or getattr(ws, "workspace_id", None)
             if ws_id == user.active_workspace:
                 role = getattr(ws, "role", "") or ""
                 break
@@ -163,12 +160,8 @@ def mount_cloud(app: FastAPI) -> None:
     ) -> dict[str, Any]:
         ctx = _files_ctx_from_user(user)
         if workspace_id is not None and workspace_id != ctx.workspace_id:
-            raise _HTTPException(
-                status_code=403, detail="files.workspace_mismatch"
-            )
-        tree, warnings = await _files_tree_builder.build(
-            ctx=ctx, collect_warnings=True
-        )
+            raise _HTTPException(status_code=403, detail="files.workspace_mismatch")
+        tree, warnings = await _files_tree_builder.build(ctx=ctx, collect_warnings=True)
         return {**tree.model_dump(), "warnings": warnings}
 
     @_files_v2.get("/browse")
@@ -181,9 +174,7 @@ def mount_cloud(app: FastAPI) -> None:
     ) -> dict[str, Any]:
         ctx = _files_ctx_from_user(user)
         if workspace_id is not None and workspace_id != ctx.workspace_id:
-            raise _HTTPException(
-                status_code=403, detail="files.workspace_mismatch"
-            )
+            raise _HTTPException(status_code=403, detail="files.workspace_mismatch")
         variables = {"workspace_id": ctx.workspace_id or ""}
         try:
             page = await _browse_mount(
@@ -197,9 +188,7 @@ def mount_cloud(app: FastAPI) -> None:
                 filters={},
             )
         except _MountNotFound:
-            raise _HTTPException(
-                status_code=404, detail="files.mount_not_found"
-            ) from None
+            raise _HTTPException(status_code=404, detail="files.mount_not_found") from None
         except _FilesError as e:
             raise _HTTPException(status_code=e.http_status, detail=e.code) from e
         return page.model_dump()
