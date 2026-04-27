@@ -124,12 +124,8 @@ def test_route_list_objects_filter_by_type(client: TestClient) -> None:
 
 def test_route_list_links_returns_envelope(client: TestClient) -> None:
     t = client.post("/api/v1/fabric/types", json={"name": "X", "properties": []}).json()
-    o1 = client.post(
-        "/api/v1/fabric/objects", json={"type_id": t["id"], "properties": {}}
-    ).json()
-    o2 = client.post(
-        "/api/v1/fabric/objects", json={"type_id": t["id"], "properties": {}}
-    ).json()
+    o1 = client.post("/api/v1/fabric/objects", json={"type_id": t["id"], "properties": {}}).json()
+    o2 = client.post("/api/v1/fabric/objects", json={"type_id": t["id"], "properties": {}}).json()
     client.post(
         "/api/v1/fabric/links",
         json={"from_id": o1["id"], "to_id": o2["id"], "link_type": "related"},

@@ -253,9 +253,7 @@ def _format_bytes(n: int | None) -> str:
     return ""
 
 
-def _augment_message_with_attachments(
-    content: str, attachments: list[dict] | None
-) -> str:
+def _augment_message_with_attachments(content: str, attachments: list[dict] | None) -> str:
     """Append an ``Attached files`` block to ``content`` so agents see context.
 
     Attachment dicts come off the ``message.sent`` event payload. Each entry

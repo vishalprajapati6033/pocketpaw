@@ -170,6 +170,7 @@ async def list_user_templates(
 
     return [UserTemplateResponse(**row.to_dict()) for row in store.list_for_workspace(workspace_id)]
 
+
 # ---------------------------------------------------------------------------
 # CRUD
 # ---------------------------------------------------------------------------

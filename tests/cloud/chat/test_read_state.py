@@ -37,9 +37,7 @@ async def test_mark_read_updates_existing_row_and_zeros_mention_unread(beanie_me
     from ee.cloud.models.read_state import ReadState
 
     # Seed a pre-existing state with mention_unread > 0.
-    await ReadState(
-        user="u1", group="g1", last_read_message_id="m1", mention_unread=3
-    ).insert()
+    await ReadState(user="u1", group="g1", last_read_message_id="m1", mention_unread=3).insert()
 
     await UnreadService.mark_read("u1", "g1", "m9")
 

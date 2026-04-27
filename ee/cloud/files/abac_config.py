@@ -3,6 +3,7 @@
 Rules restrict access only. An entry passes the ruleset IFF every rule whose
 `tag` is in entry.tags has its `require` dict satisfied by ctx.user.attributes.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

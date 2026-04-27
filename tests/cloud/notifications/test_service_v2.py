@@ -124,9 +124,7 @@ async def test_create_persists_and_emits_new(service, repo, captured_events) -> 
 
 
 async def test_list_for_user_filters_unread(service) -> None:
-    n1 = await service.create(
-        workspace_id="w1", recipient="u1", kind="m", title="t1"
-    )
+    n1 = await service.create(workspace_id="w1", recipient="u1", kind="m", title="t1")
     await service.create(workspace_id="w1", recipient="u1", kind="m", title="t2")
     # Mark n1 specifically read; remaining unread should be the other one
     await service.mark_read(n1.id, "u1")
@@ -137,9 +135,7 @@ async def test_list_for_user_filters_unread(service) -> None:
 
 
 async def test_mark_read_emits_event_and_returns_true(service, captured_events) -> None:
-    n = await service.create(
-        workspace_id="w1", recipient="u1", kind="m", title="t"
-    )
+    n = await service.create(workspace_id="w1", recipient="u1", kind="m", title="t")
     captured_events.clear()  # discard the NotificationNew
 
     changed = await service.mark_read(n.id, "u1")
@@ -150,9 +146,7 @@ async def test_mark_read_emits_event_and_returns_true(service, captured_events) 
 
 
 async def test_mark_read_noop_for_wrong_user(service, captured_events) -> None:
-    n = await service.create(
-        workspace_id="w1", recipient="u1", kind="m", title="t"
-    )
+    n = await service.create(workspace_id="w1", recipient="u1", kind="m", title="t")
     captured_events.clear()
     changed = await service.mark_read(n.id, "u_other")
     assert changed is False
@@ -160,9 +154,7 @@ async def test_mark_read_noop_for_wrong_user(service, captured_events) -> None:
 
 
 async def test_mark_read_noop_for_already_read(service, captured_events) -> None:
-    n = await service.create(
-        workspace_id="w1", recipient="u1", kind="m", title="t"
-    )
+    n = await service.create(workspace_id="w1", recipient="u1", kind="m", title="t")
     await service.mark_read(n.id, "u1")
     captured_events.clear()
     changed = await service.mark_read(n.id, "u1")
@@ -219,9 +211,7 @@ async def test_classmethod_list_for_user_default_returns_dicts(
     fake = _InMemoryRepo()
     set_default_repository(fake)
 
-    await NotificationService.create_default(
-        workspace_id="w1", recipient="u1", kind="m", title="t"
-    )
+    await NotificationService.create_default(workspace_id="w1", recipient="u1", kind="m", title="t")
     out = await NotificationService.list_for_user_default("u1")
     assert isinstance(out, list) and len(out) == 1
     item = out[0]

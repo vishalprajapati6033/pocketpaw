@@ -3,6 +3,7 @@
 Concrete providers subclass `ProviderContract` and override `build_provider`
 to yield a ready-to-use provider populated with the supplied test entries.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

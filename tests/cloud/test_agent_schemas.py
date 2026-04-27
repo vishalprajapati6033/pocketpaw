@@ -178,9 +178,7 @@ def test_create_agent_with_scopes_normalises():
 
 def test_create_agent_with_invalid_scope_rejected():
     with pytest.raises(PydanticValidationError):
-        CreateAgentRequest(
-            name="Bad", slug="bad", scopes=["org:*:leads"]
-        )  # mid-segment wildcard
+        CreateAgentRequest(name="Bad", slug="bad", scopes=["org:*:leads"])  # mid-segment wildcard
 
 
 def test_create_agent_universal_wildcard_rejected():

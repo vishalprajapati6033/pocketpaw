@@ -11,9 +11,7 @@ from tests.cloud.files.conftest import FakeProvider
 async def test_build_tree_merges_mounts_sorted_by_order(ctx, make_mount):
     reg = ProviderRegistry(
         configs=[
-            MountConfig(
-                provider_id="uploads", mount_template="/My Files", writable=True, order=10
-            ),
+            MountConfig(provider_id="uploads", mount_template="/My Files", writable=True, order=10),
             MountConfig(
                 provider_id="kb",
                 mount_template="/Workspaces/ws_1/KB",

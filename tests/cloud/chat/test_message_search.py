@@ -59,9 +59,7 @@ async def test_search_workspace_returns_public_channel_hits(beanie_memory_db):
     await _mk_msg(str(ch.id), "u-owner", "launch day report is ready")
     await _mk_msg(str(ch.id), "u-owner", "quick standup reminder")
 
-    hits = await MessageService.search_workspace_messages(
-        "w1", user_id="u-other", query="launch"
-    )
+    hits = await MessageService.search_workspace_messages("w1", user_id="u-other", query="launch")
 
     assert [h["content"] for h in hits] == ["launch day report is ready"]
 
@@ -73,9 +71,7 @@ async def test_search_workspace_skips_private_non_members(beanie_memory_db):
     secret = await _mk_private("w1", "secret-room", members=["u-owner"])
     await _mk_msg(str(secret.id), "u-owner", "top-secret launch plan")
 
-    hits = await MessageService.search_workspace_messages(
-        "w1", user_id="u-other", query="launch"
-    )
+    hits = await MessageService.search_workspace_messages("w1", user_id="u-other", query="launch")
 
     assert hits == []
 
@@ -104,16 +100,12 @@ async def test_search_workspace_escapes_regex_metachars(beanie_memory_db):
     await _mk_msg(str(ch.id), "u", "discount: free .* upgrade")
 
     # If we forgot to escape, `$9.99` would blow up or match the wrong row.
-    hits_literal_dollar = await MessageService.search_workspace_messages(
-        "w1", "u", "$9.99"
-    )
+    hits_literal_dollar = await MessageService.search_workspace_messages("w1", "u", "$9.99")
     assert len(hits_literal_dollar) == 1
     assert "$9.99" in hits_literal_dollar[0]["content"]
 
     # `.*` must be treated as text, not as "any character zero-or-more".
-    hits_literal_star = await MessageService.search_workspace_messages(
-        "w1", "u", ".*"
-    )
+    hits_literal_star = await MessageService.search_workspace_messages("w1", "u", ".*")
     assert len(hits_literal_star) == 1
     assert ".* upgrade" in hits_literal_star[0]["content"]
 
@@ -126,9 +118,7 @@ async def test_search_workspace_caps_limit(beanie_memory_db):
     for i in range(5):
         await _mk_msg(str(ch.id), "u", f"message {i} keyword")
 
-    hits = await MessageService.search_workspace_messages(
-        "w1", "u", "keyword", limit=200
-    )
+    hits = await MessageService.search_workspace_messages("w1", "u", "keyword", limit=200)
 
     # We have 5 rows. The cap is 100; all 5 still come back.
     assert len(hits) == 5

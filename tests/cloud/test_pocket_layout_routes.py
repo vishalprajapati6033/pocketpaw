@@ -187,9 +187,11 @@ class TestWorkspaceScoping:
         confirm the GET under Alpha returns nothing.
         """
 
-        store: UserTemplateStore = app.dependency_overrides[get_user_template_store]() \
-            if get_user_template_store in app.dependency_overrides \
+        store: UserTemplateStore = (
+            app.dependency_overrides[get_user_template_store]()
+            if get_user_template_store in app.dependency_overrides
             else get_user_template_store()
+        )
 
         from ee.cloud.pockets.layouts import UserPocketTemplate
 

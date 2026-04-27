@@ -197,6 +197,7 @@ async def rename_folder(
     from datetime import datetime as _dt
 
     from ee.cloud.uploads.paths import basename as _basename
+
     doc.path = new_path
     doc.name = _basename(new_path)
     doc.updated_at = _dt.now(UTC)
@@ -260,15 +261,11 @@ async def upload(
     # Auto-create missing folder chain (only when not root).
     if folder_path != "/":
         try:
-            await _FOLDERS.ensure_chain(
-                workspace=workspace, owner=user_id, path=folder_path
-            )
+            await _FOLDERS.ensure_chain(workspace=workspace, owner=user_id, path=folder_path)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
     try:
-        result = await _SVC.upload_many(
-            files, user_id, chat_id, workspace, folder_path=folder_path
-        )
+        result = await _SVC.upload_many(files, user_id, chat_id, workspace, folder_path=folder_path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {
@@ -345,9 +342,7 @@ async def download_url(
     from pocketpaw.uploads.signing import DEFAULT_TTL_SECONDS
 
     try:
-        rec, presigned = await _SVC.presigned_get(
-            file_id, user_id, workspace, DEFAULT_TTL_SECONDS
-        )
+        rec, presigned = await _SVC.presigned_get(file_id, user_id, workspace, DEFAULT_TTL_SECONDS)
     except NotFound as e:
         raise HTTPException(status_code=404, detail="not found") from e
 
@@ -385,9 +380,7 @@ async def grant(
     from pocketpaw.uploads.signing import DEFAULT_TTL_SECONDS
 
     try:
-        _rec, presigned = await _SVC.presigned_get(
-            file_id, user_id, workspace, DEFAULT_TTL_SECONDS
-        )
+        _rec, presigned = await _SVC.presigned_get(file_id, user_id, workspace, DEFAULT_TTL_SECONDS)
     except NotFound as e:
         raise HTTPException(status_code=404, detail="not found") from e
 

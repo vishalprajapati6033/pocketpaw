@@ -309,9 +309,7 @@ class MongoMemoryStore:
         ``{sessionId: {title, channel, last_activity, message_count}}`` for all
         non-deleted pocket sessions.
         """
-        docs = await Session.find(
-            {"context_type": "pocket", "deleted_at": None}
-        ).to_list()
+        docs = await Session.find({"context_type": "pocket", "deleted_at": None}).to_list()
 
         index: dict[str, dict] = {}
         for doc in docs:

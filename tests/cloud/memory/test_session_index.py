@@ -68,12 +68,8 @@ class TestLoadSessionIndexAsync:
         }
 
     async def test_excludes_group_sessions(self, store):
-        await _make_session(
-            session_id="pocket-session", context_type="pocket", pocket="pocket-1"
-        )
-        await _make_session(
-            session_id="group-session", context_type="group", group="group-1"
-        )
+        await _make_session(session_id="pocket-session", context_type="pocket", pocket="pocket-1")
+        await _make_session(session_id="group-session", context_type="group", group="group-1")
         index = await store._load_session_index_async()
         assert "pocket-session" in index
         assert "group-session" not in index

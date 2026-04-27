@@ -62,9 +62,7 @@ async def list_files(
             },
         )
 
-    files, warnings = await _SVC.list_unified(
-        current_workspace, source=source, limit=limit
-    )
+    files, warnings = await _SVC.list_unified(current_workspace, source=source, limit=limit)
 
     return JSONResponse(
         content={

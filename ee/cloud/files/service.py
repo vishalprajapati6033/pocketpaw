@@ -62,9 +62,7 @@ class UnifiedFilesService:
     def __init__(self, uploads: MongoFileStore | None = None) -> None:
         self._uploads = uploads or MongoFileStore()
 
-    async def list_chat_uploads(
-        self, workspace_id: str, *, limit: int
-    ) -> list[UnifiedFile]:
+    async def list_chat_uploads(self, workspace_id: str, *, limit: int) -> list[UnifiedFile]:
         records = await self._uploads.list_by_workspace(workspace_id, limit=limit)
         return [
             UnifiedFile(
@@ -80,9 +78,7 @@ class UnifiedFilesService:
             for rec in records
         ]
 
-    async def list_drive(
-        self, workspace_id: str, *, limit: int
-    ) -> list[UnifiedFile]:
+    async def list_drive(self, workspace_id: str, *, limit: int) -> list[UnifiedFile]:
         """Drive source — stubbed until Cluster C lands connector status.
 
         Returns an empty list and logs at debug level. The FE handles an

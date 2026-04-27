@@ -16,9 +16,7 @@ from ee.cloud.uploads.paths import basename, normalize_path, parent_of
 class FolderStore:
     """Workspace-scoped folder store for uploads."""
 
-    async def get_by_path(
-        self, workspace: str, path: str
-    ) -> FileFolder | None:
+    async def get_by_path(self, workspace: str, path: str) -> FileFolder | None:
         p = normalize_path(path)
         if p == "/":
             # Root is implicit — no row represents it.
@@ -29,9 +27,7 @@ class FolderStore:
             FileFolder.deleted_at == None,  # noqa: E711
         )
 
-    async def get_by_id(
-        self, workspace: str, folder_id: str
-    ) -> FileFolder | None:
+    async def get_by_id(self, workspace: str, folder_id: str) -> FileFolder | None:
         return await FileFolder.find_one(
             FileFolder.workspace == workspace,
             FileFolder.folder_id == folder_id,
@@ -128,7 +124,7 @@ class FolderStore:
         )
         async for d in cursor:
             if d.path.startswith(desc_prefix):
-                new_path = new + d.path[len(old):]
+                new_path = new + d.path[len(old) :]
                 d.path = new_path
                 d.name = basename(new_path)
                 d.updated_at = datetime.now(UTC)
@@ -136,9 +132,7 @@ class FolderStore:
                 count += 1
         return count
 
-    async def count_subfolders(
-        self, workspace: str, parent_path: str
-    ) -> int:
+    async def count_subfolders(self, workspace: str, parent_path: str) -> int:
         base = normalize_path(parent_path)
         if base == "/":
             # Any live folder counts as a descendant of root.
@@ -157,9 +151,7 @@ class FolderStore:
                 count += 1
         return count
 
-    async def soft_delete_under_prefix(
-        self, workspace: str, prefix: str
-    ) -> int:
+    async def soft_delete_under_prefix(self, workspace: str, prefix: str) -> int:
         """Soft-delete the folder AT ``prefix`` and all descendants."""
         base = normalize_path(prefix)
         if base == "/":

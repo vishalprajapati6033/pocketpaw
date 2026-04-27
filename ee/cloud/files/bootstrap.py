@@ -1,4 +1,5 @@
 """Compose registry + providers + rules from config into a ready-to-mount router."""
+
 from __future__ import annotations
 
 from collections.abc import Callable

@@ -1,4 +1,5 @@
 """YAML loader for mounts.yaml — sorted + validated."""
+
 from __future__ import annotations
 
 from pathlib import Path

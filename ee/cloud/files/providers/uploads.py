@@ -8,6 +8,7 @@ else is read-only.
 surfaces folders; other providers stay flat. Folder entries render with
 ``mime = "application/x-directory"`` and no ``download`` capability.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -33,7 +34,7 @@ def _mount_suffix(mount_path: str | None) -> str:
     if mp == _MOUNT or mp == "":
         return "/"
     if mp.startswith(_MOUNT + "/"):
-        return mp[len(_MOUNT):] or "/"
+        return mp[len(_MOUNT) :] or "/"
     # Not under our mount — treat as root.
     return "/"
 
@@ -80,9 +81,7 @@ class UploadsProvider(BaseFolderProvider):
 
         # Immediate child folders first.
         try:
-            folders = await self._folders.list_children_folders(
-                ctx.workspace_id, suffix
-            )
+            folders = await self._folders.list_children_folders(ctx.workspace_id, suffix)
         except Exception:
             folders = []
         for f in folders:

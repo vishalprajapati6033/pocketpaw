@@ -293,4 +293,3 @@ def _make_user(user_id: str = "u1", email: str = "u1@example.com") -> SimpleName
     u.workspaces = []
     u.save = AsyncMock()
     return u
-

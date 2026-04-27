@@ -72,10 +72,10 @@ def _make_checkers(*, chat_members: set[str], admins: set[str]):
 @pytest.mark.parametrize(
     ("requester", "chat_members", "admins", "expect_ok"),
     [
-        ("owner", set(), set(), True),             # 1. owner always allowed
-        ("peer", {"peer"}, set(), True),           # 2. chat member
-        ("boss", set(), {"boss"}, True),           # 3. workspace admin
-        ("stranger", set(), set(), False),         # 4. none -> NotFound
+        ("owner", set(), set(), True),  # 1. owner always allowed
+        ("peer", {"peer"}, set(), True),  # 2. chat member
+        ("boss", set(), {"boss"}, True),  # 3. workspace admin
+        ("stranger", set(), set(), False),  # 4. none -> NotFound
     ],
     ids=["owner", "chat_member", "workspace_admin", "stranger_denied"],
 )
@@ -89,9 +89,7 @@ async def test_read_gate_allows_owner_member_admin_denies_others(
 ):
     from ee.cloud.uploads.service import EEUploadService
 
-    is_chat_member, is_workspace_admin = _make_checkers(
-        chat_members=chat_members, admins=admins
-    )
+    is_chat_member, is_workspace_admin = _make_checkers(chat_members=chat_members, admins=admins)
     svc = EEUploadService(
         adapter=_MemAdapter(),
         meta=store,
@@ -119,9 +117,7 @@ async def test_read_gate_allows_owner_member_admin_denies_others(
         with pytest.raises(NotFound):
             await svc.stream(rec.id, requester_id=requester, workspace="w1")
         with pytest.raises(NotFound):
-            await svc.presigned_get(
-                rec.id, requester_id=requester, workspace="w1", ttl_seconds=60
-            )
+            await svc.presigned_get(rec.id, requester_id=requester, workspace="w1", ttl_seconds=60)
 
 
 async def test_read_gate_without_checkers_is_owner_only(store, tmp_path: Path):
@@ -144,9 +140,7 @@ async def test_read_gate_without_checkers_is_owner_only(store, tmp_path: Path):
     with pytest.raises(NotFound):
         await svc.stream(rec.id, requester_id="peer", workspace="w1")
     with pytest.raises(NotFound):
-        await svc.presigned_get(
-            rec.id, requester_id="peer", workspace="w1", ttl_seconds=60
-        )
+        await svc.presigned_get(rec.id, requester_id="peer", workspace="w1", ttl_seconds=60)
 
 
 async def test_chat_member_branch_skipped_when_no_chat_id(store, tmp_path: Path):

@@ -125,9 +125,15 @@ async def test_unified_list_local_source_warns_client_only(beanie_files_db):
 def test_dedupe_keeps_first_occurrence():
     now = datetime.now()
     rows = [
-        UnifiedFile(id="a", source="chat", filename="a.pdf", mime="x", size=100, url="u", created=now),
-        UnifiedFile(id="b", source="drive", filename="a.pdf", mime="x", size=100, url="u2", created=now),
-        UnifiedFile(id="c", source="chat", filename="b.pdf", mime="x", size=200, url="u", created=now),
+        UnifiedFile(
+            id="a", source="chat", filename="a.pdf", mime="x", size=100, url="u", created=now
+        ),
+        UnifiedFile(
+            id="b", source="drive", filename="a.pdf", mime="x", size=100, url="u2", created=now
+        ),
+        UnifiedFile(
+            id="c", source="chat", filename="b.pdf", mime="x", size=200, url="u", created=now
+        ),
     ]
 
     out = _dedupe(rows)

@@ -20,9 +20,7 @@ def _validate_name(name: str) -> str:
     if "/" in name or "\\" in name:
         raise ValueError(f"path segment must not contain slashes: {name!r}")
     if len(name) > _MAX_SEGMENT_LEN:
-        raise ValueError(
-            f"segment too long ({len(name)} > {_MAX_SEGMENT_LEN})"
-        )
+        raise ValueError(f"segment too long ({len(name)} > {_MAX_SEGMENT_LEN})")
     for ch in name:
         # Reject control chars (0x00-0x1F, 0x7F) and null explicitly.
         if ord(ch) < 0x20 or ord(ch) == 0x7F:

@@ -13,6 +13,7 @@ at registry construction time (see Task 14/bootstrap) that satisfies the
 and mapping the returned dicts to the expected keys (id, title, mime, size,
 owner_id, workspace_id, created_at, updated_at, tags).
 """
+
 from __future__ import annotations
 
 from typing import Any, Protocol

@@ -342,7 +342,10 @@ async def test_send_message_user_and_broadcast_mention_dedupes():
         patch("ee.cloud.chat.message_service._get_group_or_404", new=AsyncMock(return_value=group)),
         patch("ee.cloud.chat.message_service._require_can_post", new=MagicMock()),
         patch("ee.cloud.chat.message_service.Message", new=MagicMock(return_value=fake_msg_ns)),
-        patch("ee.cloud.chat.message_service._message_response", new=MagicMock(return_value={"_id": "m1"})),
+        patch(
+            "ee.cloud.chat.message_service._message_response",
+            new=MagicMock(return_value={"_id": "m1"}),
+        ),
         patch("ee.cloud.chat.message_service.event_bus.emit", new=AsyncMock()),
         patch("ee.cloud.chat.message_service.NotificationService.create_default", new=fake_notif),
         patch("ee.cloud.chat.message_service.UnreadService.bump_mention", new=AsyncMock()),
@@ -380,7 +383,10 @@ async def test_send_message_emits_unread_update_for_non_senders():
         patch("ee.cloud.chat.message_service._get_group_or_404", new=AsyncMock(return_value=group)),
         patch("ee.cloud.chat.message_service._require_can_post", new=MagicMock()),
         patch("ee.cloud.chat.message_service.Message", new=MagicMock(return_value=fake_msg_ns)),
-        patch("ee.cloud.chat.message_service._message_response", new=MagicMock(return_value={"_id": "m1"})),
+        patch(
+            "ee.cloud.chat.message_service._message_response",
+            new=MagicMock(return_value={"_id": "m1"}),
+        ),
         patch("ee.cloud.chat.message_service.event_bus.emit", new=AsyncMock()),
     ):
         await MessageService.send_message("g1", "sender", SendMessageRequest(content="hi"))
@@ -422,7 +428,10 @@ async def test_send_reply_does_not_bump_thread_count():
         patch("ee.cloud.chat.message_service._get_group_or_404", new=AsyncMock(return_value=group)),
         patch("ee.cloud.chat.message_service._require_can_post", new=MagicMock()),
         patch("ee.cloud.chat.message_service.Message", new=fake_message_class),
-        patch("ee.cloud.chat.message_service._message_response", new=MagicMock(return_value={"_id": "reply1"})),
+        patch(
+            "ee.cloud.chat.message_service._message_response",
+            new=MagicMock(return_value={"_id": "reply1"}),
+        ),
         patch("ee.cloud.chat.message_service.event_bus.emit", new=AsyncMock()),
     ):
         await MessageService.send_message(
@@ -464,7 +473,10 @@ async def test_send_reply_emits_message_new_not_thread_reply():
         patch("ee.cloud.chat.message_service._get_group_or_404", new=AsyncMock(return_value=group)),
         patch("ee.cloud.chat.message_service._require_can_post", new=MagicMock()),
         patch("ee.cloud.chat.message_service.Message", new=fake_message_class),
-        patch("ee.cloud.chat.message_service._message_response", new=MagicMock(return_value={"_id": "r1"})),
+        patch(
+            "ee.cloud.chat.message_service._message_response",
+            new=MagicMock(return_value={"_id": "r1"}),
+        ),
         patch("ee.cloud.chat.message_service.event_bus.emit", new=AsyncMock()),
     ):
         await MessageService.send_message(

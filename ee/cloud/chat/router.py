@@ -341,9 +341,7 @@ async def search_workspace_messages(
     caller is a member. The query is regex-escaped before it hits Mongo,
     and capped at 100 results. Cluster E sub-PR 2.
     """
-    return await MessageService.search_workspace_messages(
-        workspace_id, user_id, q, limit=limit
-    )
+    return await MessageService.search_workspace_messages(workspace_id, user_id, q, limit=limit)
 
 
 # ---------------------------------------------------------------------------
@@ -414,11 +412,13 @@ async def suggest_mentions(
             ]
         users = await User.find(query).limit(8).to_list()
         for u in users:
-            results.append({
-                "type": "user",
-                "id": str(u.id),
-                "display_name": u.full_name or u.email,
-            })
+            results.append(
+                {
+                    "type": "user",
+                    "id": str(u.id),
+                    "display_name": u.full_name or u.email,
+                }
+            )
 
     if "agent" in kinds:
         aquery: dict = {"workspace": workspace_id}
@@ -429,11 +429,13 @@ async def suggest_mentions(
             ]
         agents = await AgentModel.find(aquery).limit(8).to_list()
         for a in agents:
-            results.append({
-                "type": "agent",
-                "id": str(a.id),
-                "display_name": a.name or a.slug,
-            })
+            results.append(
+                {
+                    "type": "agent",
+                    "id": str(a.id),
+                    "display_name": a.name or a.slug,
+                }
+            )
 
     if "channel" in kinds:
         cquery: dict = {"workspace": workspace_id, "type": "channel", "archived": False}
@@ -444,11 +446,13 @@ async def suggest_mentions(
             ]
         channels = await Group.find(cquery).limit(8).to_list()
         for c in channels:
-            results.append({
-                "type": "channel_ref",
-                "id": str(c.id),
-                "display_name": c.name or c.slug,
-            })
+            results.append(
+                {
+                    "type": "channel_ref",
+                    "id": str(c.id),
+                    "display_name": c.name or c.slug,
+                }
+            )
 
     # Broadcast tokens — always offered, filtered by prefix match when q is set.
     for token, display in (("here", "@here"), ("channel", "@channel"), ("everyone", "@everyone")):
@@ -512,9 +516,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
         peer_ids = await WorkspaceService.list_peer_ids(user_id)
         for peer_id in peer_ids:
             if manager.is_online(peer_id):
-                await websocket.send_json(
-                    {"type": "presence.online", "data": {"user_id": peer_id}}
-                )
+                await websocket.send_json({"type": "presence.online", "data": {"user_id": peer_id}})
     except Exception:
         logger.exception("Failed to send presence snapshot to user=%s", user_id)
 

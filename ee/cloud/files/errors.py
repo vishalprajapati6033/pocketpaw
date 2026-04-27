@@ -1,4 +1,5 @@
 """Typed errors raised by providers and the aggregator."""
+
 from __future__ import annotations
 
 

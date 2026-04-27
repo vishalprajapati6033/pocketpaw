@@ -56,10 +56,9 @@ async def test_kb_list_entries_scoped_to_workspace():
 async def test_kb_baseline_rbac_workspace_member_reads():
     svc = _FakeKbService([])
     p = KbProvider(service=svc)
-    ctx = RequestContext(
-        user_id="u2", workspace_id="ws_1", attributes={"role": "member"}
-    )
+    ctx = RequestContext(user_id="u2", workspace_id="ws_1", attributes={"role": "member"})
     from ee.cloud.files.dto import FileEntry
+
     e = FileEntry(
         id="kb:a",
         provider_id="kb",
@@ -86,6 +85,7 @@ async def test_kb_baseline_rbac_admin_manages():
     p = KbProvider(service=svc)
     ctx = RequestContext(user_id="u1", workspace_id="ws_1", attributes={"role": "admin"})
     from ee.cloud.files.dto import FileEntry
+
     e = FileEntry(
         id="kb:a",
         provider_id="kb",

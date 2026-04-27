@@ -71,7 +71,9 @@ def _call_kb_list(scope: str) -> list[Any]:
 )
 async def list_workspace_articles(
     workspace_id_q: str | None = Query(None, alias="workspace_id"),
-    agent_id: str | None = Query(None, description="Filter by agent; 'workspace' for workspace-only"),
+    agent_id: str | None = Query(
+        None, description="Filter by agent; 'workspace' for workspace-only"
+    ),
     active_workspace_id: str = Depends(current_workspace_id),
     user_id: str = Depends(current_user_id),
 ) -> dict:

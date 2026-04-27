@@ -86,9 +86,7 @@ class NotificationService:
             return False
         changed = await self._repo.mark_read(notification_id)
         if changed:
-            await emit(
-                NotificationRead(data={"id": notification_id, "user_id": user_id})
-            )
+            await emit(NotificationRead(data={"id": notification_id, "user_id": user_id}))
         return changed
 
     async def clear_all(self, user_id: str) -> int:

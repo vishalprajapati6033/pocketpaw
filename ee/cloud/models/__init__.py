@@ -30,6 +30,7 @@ def _ensure_file_upload():
         FileFolder = _FileFolder
     return FileUpload
 
+
 __all__ = [
     "Agent",
     "AgentConfig",
@@ -59,6 +60,7 @@ __all__ = [
     "WorkspaceMembership",
     "WorkspaceSettings",
 ]
+
 
 def get_all_documents():
     """Get all Beanie documents, with lazy FileUpload loading."""

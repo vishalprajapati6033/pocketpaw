@@ -39,9 +39,7 @@ class MongoFileStore:
         )
         await doc.insert()
 
-    async def get_doc_scoped(
-        self, file_id: str, workspace: str
-    ) -> FileUpload | None:
+    async def get_doc_scoped(self, file_id: str, workspace: str) -> FileUpload | None:
         return await FileUpload.find_one(
             FileUpload.file_id == file_id,
             FileUpload.workspace == workspace,
@@ -75,14 +73,12 @@ class MongoFileStore:
                 await d.save()
                 count += 1
             elif old_prefix != "/" and fp.startswith(old_prefix + "/"):
-                d.folder_path = new_prefix + fp[len(old_prefix):]
+                d.folder_path = new_prefix + fp[len(old_prefix) :]
                 await d.save()
                 count += 1
         return count
 
-    async def soft_delete_under_prefix(
-        self, workspace: str, prefix: str
-    ) -> int:
+    async def soft_delete_under_prefix(self, workspace: str, prefix: str) -> int:
         """Soft-delete every live file under ``prefix`` (at or below)."""
         count = 0
         now = datetime.now(UTC)
@@ -205,12 +201,7 @@ class MongoFileStore:
         }
         if chat_id:
             query["chat_id"] = chat_id
-        docs = (
-            await FileUpload.find(query)
-            .sort([("createdAt", -1)])
-            .limit(capped)
-            .to_list()
-        )
+        docs = await FileUpload.find(query).sort([("createdAt", -1)]).limit(capped).to_list()
         return [r for r in (self._to_record(d) for d in docs) if r is not None]
 
     async def soft_delete_scoped(self, file_id: str, workspace: str) -> None:
