@@ -173,6 +173,12 @@ class MongoWorkspaceRepository:
                 await member.save()
 
     async def list_for_user(self, user_id: str) -> list[Workspace]:
+        """List the user's non-deleted workspaces with member counts.
+
+        Member counts are loaded in a single aggregation rather than one
+        ``count()`` per workspace (the previous loop was O(N) Mongo
+        round-trips for a user in N workspaces).
+        """
         try:
             user = await _UserDoc.get(PydanticObjectId(user_id))
         except Exception:
@@ -186,11 +192,25 @@ class MongoWorkspaceRepository:
                 "deleted_at": None,
             }
         ).to_list()
-        out: list[Workspace] = []
-        for doc in docs:
-            count = await self.count_members(str(doc.id))
-            out.append(_workspace_to_domain(doc, member_count=count))
-        return out
+
+        # Single aggregation: count users per workspace_id in one round-trip.
+        counts = await self._count_members_bulk(ws_ids)
+
+        return [_workspace_to_domain(doc, member_count=counts.get(str(doc.id), 0)) for doc in docs]
+
+    async def _count_members_bulk(self, workspace_ids: list[str]) -> dict[str, int]:
+        """Aggregation pipeline returning ``{workspace_id: member_count}``
+        in a single Mongo round-trip. Empty input → empty dict (no query)."""
+        if not workspace_ids:
+            return {}
+        pipeline: list[dict] = [
+            {"$match": {"workspaces.workspace": {"$in": workspace_ids}}},
+            {"$unwind": "$workspaces"},
+            {"$match": {"workspaces.workspace": {"$in": workspace_ids}}},
+            {"$group": {"_id": "$workspaces.workspace", "count": {"$sum": 1}}},
+        ]
+        results = await _UserDoc.aggregate(pipeline).to_list()
+        return {row["_id"]: row["count"] for row in results}
 
     async def count_members(self, workspace_id: str) -> int:
         return await _UserDoc.find({"workspaces.workspace": workspace_id}).count()

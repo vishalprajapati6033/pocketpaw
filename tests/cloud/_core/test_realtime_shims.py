@@ -50,8 +50,8 @@ def test_events_identity() -> None:
         assert getattr(shim_events, name) is getattr(core_events, name), name
 
 
-def test_event_bus_port_re_export_in_core_ports() -> None:
-    from ee.cloud._core.ports import EventBus as port_EventBus
-    from ee.cloud._core.realtime.bus import EventBus as bus_EventBus
-
-    assert port_EventBus is bus_EventBus
+# The Phase 5 design re-exported EventBus through _core.ports as a
+# "port" location, but no production code imports it from there — the
+# canonical home is _core.realtime.bus. The cleanup pass dropped both
+# _core.ports.py and _core.repository.py because they had zero callers
+# in production code.

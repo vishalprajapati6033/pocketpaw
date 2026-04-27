@@ -16,6 +16,7 @@ instance services that depend on these protocols.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from beanie import PydanticObjectId
@@ -113,11 +114,21 @@ def _group_to_domain(doc: _GroupDoc) -> Group:
 @runtime_checkable
 class IMessageRepository(Protocol):
     async def get(self, message_id: str) -> Message | None: ...
+    async def get_many(self, message_ids: list[str]) -> list[Message]: ...
     async def list_for_group(
         self,
         group_id: str,
         *,
         before: str | None = None,
+        limit: int = 50,
+        include_deleted: bool = False,
+    ) -> list[Message]: ...
+    async def list_for_group_paged(
+        self,
+        group_id: str,
+        *,
+        before_time: datetime | None = None,
+        before_id: str | None = None,
         limit: int = 50,
         include_deleted: bool = False,
     ) -> list[Message]: ...
@@ -136,6 +147,58 @@ class MongoMessageRepository:
         except Exception:
             return None
         return _message_to_domain(doc) if doc else None
+
+    async def get_many(self, message_ids: list[str]) -> list[Message]:
+        """Batch fetch messages by ID — used to prefetch reply parents
+        without an N+1 round-trip per message."""
+        if not message_ids:
+            return []
+        oids: list[PydanticObjectId] = []
+        for mid in message_ids:
+            try:
+                oids.append(PydanticObjectId(mid))
+            except Exception:
+                continue
+        if not oids:
+            return []
+        docs = await _MessageDoc.find({"_id": {"$in": oids}}).to_list()
+        return [_message_to_domain(d) for d in docs]
+
+    async def list_for_group_paged(
+        self,
+        group_id: str,
+        *,
+        before_time: datetime | None = None,
+        before_id: str | None = None,
+        limit: int = 50,
+        include_deleted: bool = False,
+    ) -> list[Message]:
+        """Cursor-paginated history newest-first.
+
+        Pagination uses ``(createdAt, _id)`` as a composite cursor so
+        same-second messages don't get skipped or repeated. The caller
+        supplies the *parsed* cursor parts; cursor encoding is the
+        service's responsibility (it's a wire-shape concern).
+        """
+        query: dict = {"context_type": "group", "group": group_id}
+        if not include_deleted:
+            query["deleted"] = False
+        if before_time is not None and before_id is not None:
+            try:
+                cursor_oid = PydanticObjectId(before_id)
+            except Exception:
+                cursor_oid = None
+            if cursor_oid is not None:
+                query["$or"] = [
+                    {"createdAt": {"$lt": before_time}},
+                    {"createdAt": before_time, "_id": {"$lt": cursor_oid}},
+                ]
+        cursor = (
+            _MessageDoc.find(query)
+            .sort([("createdAt", -1), ("_id", -1)])  # type: ignore[list-item]
+            .limit(limit)
+        )
+        return [_message_to_domain(d) async for d in cursor]
 
     async def list_for_group(
         self,

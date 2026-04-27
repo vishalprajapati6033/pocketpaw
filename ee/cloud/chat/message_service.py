@@ -434,61 +434,60 @@ class MessageService:
     ) -> dict:
         """Cursor-based paginated messages, newest first.
 
+        Phase 10: routes through ``IMessageRepository.list_for_group_paged``
+        + ``IMessageRepository.get_many`` for the parent-prefetch. Cursor
+        encoding stays on the service (it's a wire concern).
+
         Cursor format: ``"{iso_timestamp}|{object_id}"``.
         Fetches ``limit + 1`` to determine ``has_more``.
         Excludes soft-deleted messages.
         """
-        group = await _get_group_or_404(group_id)
+        from ee.cloud.chat.dto import message_to_wire_dict
+        from ee.cloud.chat.repositories import get_message_repository
 
+        group = await _get_group_or_404(group_id)
         if group.type in ("private", "dm"):
             _require_group_member(group, user_id)
 
-        query: dict = {"context_type": "group", "group": group_id, "deleted": False}
-
+        # Decode cursor (wire concern, stays on service)
+        before_time: datetime | None = None
+        before_id: str | None = None
         if cursor:
             parts = cursor.split("|", 1)
             if len(parts) == 2:
-                cursor_time = datetime.fromisoformat(parts[0])
-                cursor_id = PydanticObjectId(parts[1])
-                query["$or"] = [
-                    {"createdAt": {"$lt": cursor_time}},
-                    {"createdAt": cursor_time, "_id": {"$lt": cursor_id}},
-                ]
+                try:
+                    before_time = datetime.fromisoformat(parts[0])
+                    before_id = parts[1]
+                except ValueError:
+                    before_time = None
+                    before_id = None
 
-        messages = (
-            await Message.find(query)
-            .sort([("createdAt", -1), ("_id", -1)])
-            .limit(limit + 1)
-            .to_list()
+        repo = get_message_repository()
+        messages = await repo.list_for_group_paged(
+            group_id,
+            before_time=before_time,
+            before_id=before_id,
+            limit=limit + 1,
         )
-
         has_more = len(messages) > limit
         if has_more:
             messages = messages[:limit]
 
-        # Batch-fetch parents for any replies in this page so ``replyPreview``
-        # lands on each reply without an N+1 round-trip. Missing parents are
-        # tolerated — the FE falls back to a "message unavailable" bubble.
-        parent_ids = {m.reply_to for m in messages if m.reply_to}
-        parents_by_id: dict[str, Message] = {}
-        if parent_ids:
-            try:
-                oids = [PydanticObjectId(pid) for pid in parent_ids if pid]
-            except Exception:
-                oids = []
-            if oids:
-                parent_docs = await Message.find({"_id": {"$in": oids}}).to_list()
-                parents_by_id = {str(p.id): p for p in parent_docs}
+        # Batch-fetch reply parents in a single round-trip
+        parent_ids = [m.reply_to for m in messages if m.reply_to]
+        parent_domains = await repo.get_many(parent_ids) if parent_ids else []
+        parents_by_id = {p.id: p for p in parent_domains}
 
         items = [
-            _message_response(m, parent=parents_by_id.get(m.reply_to) if m.reply_to else None)
+            message_to_wire_dict(m, parent=parents_by_id.get(m.reply_to) if m.reply_to else None)
             for m in messages
         ]
 
         next_cursor: str | None = None
         if has_more and messages:
             last = messages[-1]
-            next_cursor = f"{last.createdAt.isoformat()}|{last.id}"
+            if last.created_at is not None:
+                next_cursor = f"{last.created_at.isoformat()}|{last.id}"
 
         return {"items": items, "nextCursor": next_cursor, "hasMore": has_more}
 
