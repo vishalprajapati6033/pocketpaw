@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from ee.cloud.files.errors import ProviderUnsupported
-from ee.cloud.files.schemas import (
+from ee.cloud.files.dto import (
     FileEntry,
     Page,
     Permission,

@@ -11,7 +11,7 @@ from typing import Protocol, runtime_checkable
 
 from ee.cloud.files.errors import MountNotFound
 from ee.cloud.files.mounts_config import resolve_template
-from ee.cloud.files.schemas import (
+from ee.cloud.files.dto import (
     FileEntry,
     MountConfig,
     Page,

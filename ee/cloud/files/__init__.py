@@ -3,7 +3,7 @@
 from ee.cloud.files.bootstrap import build_files_router
 from ee.cloud.files.registry import FolderProvider, ProviderRegistry
 from ee.cloud.files.router import build_router, router  # noqa: F401
-from ee.cloud.files.schemas import (
+from ee.cloud.files.dto import (
     Capability,
     FileEntry,
     FolderNode,

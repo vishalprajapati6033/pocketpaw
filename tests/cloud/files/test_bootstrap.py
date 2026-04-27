@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from ee.cloud.files.bootstrap import build_files_router
-from ee.cloud.files.schemas import RequestContext
+from ee.cloud.files.dto import RequestContext
 
 
 class _Store:

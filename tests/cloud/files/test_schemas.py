@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from ee.cloud.files.schemas import (
+from ee.cloud.files.dto import (
     FileEntry,
     FolderNode,
     MountConfig,

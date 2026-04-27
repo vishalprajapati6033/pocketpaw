@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from ee.cloud.files.providers.base import BaseFolderProvider
-from ee.cloud.files.schemas import (
+from ee.cloud.files.dto import (
     FileEntry,
     Page,
     Permission,

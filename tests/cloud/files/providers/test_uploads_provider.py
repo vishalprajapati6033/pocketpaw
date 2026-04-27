@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from ee.cloud.files.providers.uploads import UploadsProvider
-from ee.cloud.files.schemas import RequestContext
+from ee.cloud.files.dto import RequestContext
 from tests.cloud.files.test_provider_contract import ProviderContract
 
 
@@ -96,7 +96,7 @@ async def test_uploads_provider_baseline_rbac_owner_is_manage():
     # Build an owned entry directly:
     from datetime import datetime as _dt
 
-    from ee.cloud.files.schemas import FileEntry
+    from ee.cloud.files.dto import FileEntry
     e = FileEntry(
         id="uploads:x",
         provider_id="uploads",
@@ -180,7 +180,7 @@ async def test_uploads_provider_admin_manage_on_other_user_folder():
     store = MagicMock()
     p = UploadsProvider(store=store, folder_store=_StubFolders())
     ctx = RequestContext(user_id="admin", workspace_id="ws", attributes={"role": "admin"})
-    from ee.cloud.files.schemas import FileEntry
+    from ee.cloud.files.dto import FileEntry
 
     now = datetime.now(UTC)
     e = FileEntry(
@@ -210,7 +210,7 @@ async def test_uploads_provider_baseline_rbac_non_owner_is_read_only():
     ctx = RequestContext(user_id="other", workspace_id="ws", attributes={})
     from datetime import datetime as _dt
 
-    from ee.cloud.files.schemas import FileEntry
+    from ee.cloud.files.dto import FileEntry
     e = FileEntry(
         id="uploads:x",
         provider_id="uploads",

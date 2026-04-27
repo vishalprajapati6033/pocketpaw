@@ -11,7 +11,7 @@ from ee.cloud.files.providers.kb import KbProvider
 from ee.cloud.files.providers.uploads import UploadsProvider
 from ee.cloud.files.registry import ProviderRegistry
 from ee.cloud.files.router import build_router
-from ee.cloud.files.schemas import RequestContext
+from ee.cloud.files.dto import RequestContext
 
 
 def build_files_router(

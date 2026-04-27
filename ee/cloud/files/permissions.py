@@ -13,7 +13,7 @@ Only capabilities the provider already declared on the entry survive
 from __future__ import annotations
 
 from ee.cloud.files.abac_config import AbacRuleSet
-from ee.cloud.files.schemas import (
+from ee.cloud.files.dto import (
     Capability,
     FileEntry,
     Permission,

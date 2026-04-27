@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from ee.cloud.files.schemas import FileEntry
+from ee.cloud.files.dto import FileEntry
 
 
 class FileAdded(BaseModel):

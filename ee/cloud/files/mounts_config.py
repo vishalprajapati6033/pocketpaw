@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from ee.cloud.files.schemas import MountConfig
+from ee.cloud.files.dto import MountConfig
 
 _DEFAULT_PATH = Path(__file__).parent / "mounts.yaml"
 

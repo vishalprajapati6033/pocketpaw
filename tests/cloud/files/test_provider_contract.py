@@ -13,7 +13,7 @@ import pytest
 
 from ee.cloud.files.errors import ProviderUnsupported
 from ee.cloud.files.registry import FolderProvider
-from ee.cloud.files.schemas import FileEntry, RequestContext
+from ee.cloud.files.dto import FileEntry, RequestContext
 
 
 def _entry(provider_id: str) -> FileEntry:

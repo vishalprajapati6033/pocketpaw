@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from ee.cloud.files.mounts_config import load_mounts, resolve_template
-from ee.cloud.files.schemas import MountConfig
+from ee.cloud.files.dto import MountConfig
 
 
 def test_load_mounts_returns_ordered_list(tmp_path: Path):

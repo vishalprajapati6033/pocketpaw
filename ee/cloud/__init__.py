@@ -120,7 +120,7 @@ def mount_cloud(app: FastAPI) -> None:
     from ee.cloud.files.providers.kb import KbProvider as _KbProvider
     from ee.cloud.files.providers.uploads import UploadsProvider as _UploadsProvider
     from ee.cloud.files.registry import ProviderRegistry as _ProviderRegistry
-    from ee.cloud.files.schemas import RequestContext as _RequestContext
+    from ee.cloud.files.dto import RequestContext as _RequestContext
     from ee.cloud.files.tree import CachedTreeBuilder as _CachedTreeBuilder
     from ee.cloud.models.user import User as _User
     from ee.cloud.uploads.mongo_store import MongoFileStore as _UploadsStore

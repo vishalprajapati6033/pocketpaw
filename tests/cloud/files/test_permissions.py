@@ -6,7 +6,7 @@ from ee.cloud.files.permissions import (
     apply_abac,
     derive_capabilities,
 )
-from ee.cloud.files.schemas import FileEntry, Permission, RequestContext
+from ee.cloud.files.dto import FileEntry, Permission, RequestContext
 
 
 def _entry(tags=None, caps=("read", "download")):

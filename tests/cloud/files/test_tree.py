@@ -2,7 +2,7 @@ import pytest
 
 from ee.cloud.files.abac_config import AbacRuleSet
 from ee.cloud.files.registry import ProviderRegistry
-from ee.cloud.files.schemas import MountConfig
+from ee.cloud.files.dto import MountConfig
 from ee.cloud.files.tree import build_tree
 from tests.cloud.files.conftest import FakeProvider
 
