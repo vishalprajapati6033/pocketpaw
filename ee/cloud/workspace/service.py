@@ -1,16 +1,34 @@
-"""Workspace domain — business logic service."""
+"""Workspace domain — business logic service.
+
+Refactored in Phase 4 of the cloud-restructure. Instance class taking
+`IWorkspaceRepository` + `IInviteRepository`. Methods accept
+`RequestContext` and return domain entities; the router maps to DTOs.
+
+The 11 mutating methods have classmethod-`*_default` facades so legacy
+callers (chat/router, uploads/router, ee/cloud/__init__, tests) keep
+working through the global default repos.
+
+The 3 realtime helpers (``list_member_ids``, ``list_admin_ids``,
+``list_peer_ids``) stay as classmethods unchanged because they're pure
+queries used as function references by ``realtime/audience.py`` and a
+couple of routers — preserving the call signature avoids touching those
+sites.
+"""
 
 from __future__ import annotations
 
 import secrets
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
-from beanie import PydanticObjectId
-
-from ee.cloud.models.invite import Invite
+from ee.cloud._core.context import RequestContext, ScopeKind
+from ee.cloud._core.errors import (
+    ConflictError,
+    Forbidden,
+    NotFound,
+    SeatLimitError,
+)
 from ee.cloud.models.notification import NotificationSource
-from ee.cloud.models.user import User, WorkspaceMembership
-from ee.cloud.models.workspace import Workspace, WorkspaceSettings
 from ee.cloud.notifications.service import NotificationService
 from ee.cloud.realtime.bus import get_resolver
 from ee.cloud.realtime.emit import emit
@@ -24,294 +42,186 @@ from ee.cloud.realtime.events import (
     WorkspaceMemberRole,
     WorkspaceUpdated,
 )
-from ee.cloud.shared.errors import ConflictError, Forbidden, NotFound, SeatLimitError
 from ee.cloud.shared.events import event_bus
-from ee.cloud.shared.time import iso_utc
-from ee.cloud.workspace.schemas import (
+from ee.cloud.workspace.domain import Invite, Workspace, WorkspaceMember
+from ee.cloud.workspace.dto import (
     CreateInviteRequest,
     CreateWorkspaceRequest,
     UpdateWorkspaceRequest,
+    invite_to_dto,
+    invite_to_validate_dto,
+    member_to_dto,
+    workspace_to_dto,
+)
+from ee.cloud.workspace.repositories import (
+    IInviteRepository,
+    IWorkspaceRepository,
+    get_invite_repository,
+    get_workspace_repository,
 )
 
+if TYPE_CHECKING:
+    from beanie import PydanticObjectId  # noqa: F401
 
-def _workspace_response(ws: Workspace, member_count: int = 0) -> dict:
-    """Build a frontend-compatible dict from a Workspace document."""
-    return {
-        "_id": str(ws.id),
-        "name": ws.name,
-        "slug": ws.slug,
-        "owner": ws.owner,
-        "plan": ws.plan,
-        "seats": ws.seats,
-        "createdAt": iso_utc(ws.createdAt),
-        "memberCount": member_count,
-    }
+    from ee.cloud.models.user import User
 
 
-def _invite_response(invite: Invite) -> dict:
-    """Build a frontend-compatible dict from an Invite document."""
-    return {
-        "_id": str(invite.id),
-        "email": invite.email,
-        "role": invite.role,
-        "invitedBy": invite.invited_by,
-        "token": invite.token,
-        "accepted": invite.accepted,
-        "revoked": invite.revoked,
-        "expired": invite.expired,
-        "expiresAt": iso_utc(invite.expires_at),
-    }
+# ---------------------------------------------------------------------------
+# Helpers — used by both instance methods and the legacy classmethod facade
+# ---------------------------------------------------------------------------
 
 
-def _get_membership(user: User, workspace_id: str) -> WorkspaceMembership:
-    """Find user's membership in a workspace or raise NotFound."""
-    for m in user.workspaces:
-        if m.workspace == workspace_id:
-            return m
-    raise NotFound("workspace", workspace_id)
+def _legacy_ctx(user: User) -> RequestContext:
+    """Build a RequestContext from a Beanie User doc — bridge for the
+    legacy ``*_default`` classmethods used by routers/tests that haven't
+    migrated to ``request_context``."""
+    return RequestContext(
+        user_id=str(user.id),
+        workspace_id=user.active_workspace,
+        request_id="legacy",
+        scope=ScopeKind.NONE,
+        started_at=datetime.now(UTC),
+    )
 
 
-async def _count_members(workspace_id: str) -> int:
-    """Count users who are members of the given workspace."""
-    return await User.find({"workspaces.workspace": workspace_id}).count()
+# ---------------------------------------------------------------------------
+# Service
+# ---------------------------------------------------------------------------
 
 
 class WorkspaceService:
-    """Stateless service encapsulating workspace business logic."""
+    """Workspace + members + invites."""
+
+    def __init__(
+        self,
+        ws_repo: IWorkspaceRepository,
+        invite_repo: IInviteRepository,
+    ) -> None:
+        self._ws = ws_repo
+        self._invites = invite_repo
 
     # ------------------------------------------------------------------
-    # Workspace CRUD
+    # Workspace CRUD (instance API)
     # ------------------------------------------------------------------
 
-    @staticmethod
-    async def create(user: User, body: CreateWorkspaceRequest) -> dict:
-        """Create a workspace and add the creator as owner."""
-        existing = await Workspace.find_one(
-            Workspace.slug == body.slug,
-            Workspace.deleted_at == None,  # noqa: E711
-        )
-        if existing:
+    async def create(self, ctx: RequestContext, body: CreateWorkspaceRequest) -> Workspace:
+        existing = await self._ws.get_by_slug(body.slug)
+        if existing is not None:
             raise ConflictError("workspace.slug_taken", f"Slug '{body.slug}' is already in use")
+        ws = await self._ws.create(name=body.name, slug=body.slug, owner_user_id=ctx.user_id)
+        await self._ws.add_member(ws.id, ctx.user_id, role="owner", set_active=True)
 
-        ws = Workspace(
-            name=body.name,
-            slug=body.slug,
-            owner=str(user.id),
-        )
-        await ws.insert()
-
-        # Add creator as owner member
-        user.workspaces.append(
-            WorkspaceMembership(
-                workspace=str(ws.id),
-                role="owner",
-                joined_at=datetime.now(UTC),
-            )
-        )
-        user.active_workspace = str(ws.id)
-        await user.save()
-
-        wid = str(ws.id)
         await emit(
             WorkspaceMemberAdded(
-                data={"workspace_id": wid, "user_id": str(user.id), "role": "owner"}
+                data={"workspace_id": ws.id, "user_id": ctx.user_id, "role": "owner"}
             )
         )
-        get_resolver().invalidate_workspace(wid)
+        get_resolver().invalidate_workspace(ws.id)
 
-        return _workspace_response(ws, member_count=1)
+        # Reload to get the post-add member_count
+        from dataclasses import replace
 
-    @staticmethod
-    async def get(workspace_id: str, user: User) -> dict:
-        """Get a workspace by ID. Requires membership."""
-        _get_membership(user, workspace_id)
+        return replace(ws, member_count=1)
 
-        ws = await Workspace.get(PydanticObjectId(workspace_id))
-        if not ws or ws.deleted_at is not None:
+    async def get(self, ctx: RequestContext, workspace_id: str) -> Workspace:
+        # Membership check
+        role = await self._ws.get_member_role(workspace_id, ctx.user_id)
+        if role is None:
             raise NotFound("workspace", workspace_id)
-
-        count = await _count_members(workspace_id)
-        return _workspace_response(ws, member_count=count)
-
-    @staticmethod
-    async def update(workspace_id: str, user: User, body: UpdateWorkspaceRequest) -> dict:
-        """Update workspace fields. Role check performed at route layer."""
-        ws = await Workspace.get(PydanticObjectId(workspace_id))
-        if not ws or ws.deleted_at is not None:
+        ws = await self._ws.get(workspace_id)
+        if ws is None:
             raise NotFound("workspace", workspace_id)
+        return ws
 
-        if body.name is not None:
-            ws.name = body.name
-        if body.settings is not None:
-            ws.settings = WorkspaceSettings(**body.settings)
-
-        await ws.save()
-        count = await _count_members(workspace_id)
-
+    async def update(
+        self,
+        ctx: RequestContext,
+        workspace_id: str,
+        body: UpdateWorkspaceRequest,
+    ) -> Workspace:
+        ws = await self._ws.update(workspace_id, name=body.name, settings=body.settings)
         patched = body.model_dump(exclude_unset=True)
         await emit(WorkspaceUpdated(data={"workspace_id": workspace_id, **patched}))
+        return ws
 
-        return _workspace_response(ws, member_count=count)
-
-    @staticmethod
-    async def delete(workspace_id: str, user: User) -> None:
-        """Soft-delete a workspace and cascade membership cleanup.
-
-        Route layer enforces the owner-only role check. This method does the
-        additional data-level housekeeping so the workspace disappears from
-        every member's UserMenu switcher immediately:
-
-        * Soft-delete the workspace document (``deleted_at``).
-        * Strip the workspace out of every user's ``workspaces`` list.
-        * Clear ``active_workspace`` on users who had the deleted workspace
-          selected; swap it for another membership if one exists, otherwise
-          reset to ``None`` so the first-run workspace modal fires again.
-        * Emit ``workspace.deleted`` so live clients can react.
-
-        Downstream artefacts (pockets, agents, groups, invites, sessions)
-        remain in the database but orphan naturally: their API endpoints
-        already scope reads by the caller's active workspace so they
-        disappear from the UI as soon as users flip away. A future offline
-        sweeper can purge them physically.
-        """
-        ws = await Workspace.get(PydanticObjectId(workspace_id))
-        if not ws or ws.deleted_at is not None:
-            raise NotFound("workspace", workspace_id)
-
-        ws.deleted_at = datetime.now(UTC)
-        await ws.save()
-
-        # Strip the workspace out of every member's workspaces list so
-        # GET /workspaces stops returning it and the switcher no longer
-        # renders it as a choice.
-        members = await User.find({"workspaces.workspace": workspace_id}).to_list()
-        for member in members:
-            before = len(member.workspaces)
-            member.workspaces = [m for m in member.workspaces if m.workspace != workspace_id]
-            if len(member.workspaces) != before:
-                if member.active_workspace == workspace_id:
-                    member.active_workspace = (
-                        member.workspaces[0].workspace if member.workspaces else None
-                    )
-                await member.save()
-
+    async def delete(self, ctx: RequestContext, workspace_id: str) -> None:
+        await self._ws.soft_delete_with_cascade(workspace_id)
         await emit(WorkspaceDeleted(data={"workspace_id": workspace_id}))
         get_resolver().invalidate_workspace(workspace_id)
 
-    @staticmethod
-    async def list_for_user(user: User) -> list[dict]:
-        """Return all non-deleted workspaces the user belongs to."""
-        ws_ids = [m.workspace for m in user.workspaces]
-        if not ws_ids:
-            return []
-
-        workspaces = await Workspace.find(
-            {"_id": {"$in": [PydanticObjectId(wid) for wid in ws_ids]}, "deleted_at": None}
-        ).to_list()
-
-        results = []
-        for ws in workspaces:
-            count = await _count_members(str(ws.id))
-            results.append(_workspace_response(ws, member_count=count))
-        return results
+    async def list_for_user(self, ctx: RequestContext) -> list[Workspace]:
+        return await self._ws.list_for_user(ctx.user_id)
 
     # ------------------------------------------------------------------
     # Members
     # ------------------------------------------------------------------
 
-    @staticmethod
-    async def list_members(workspace_id: str, user: User) -> list[dict]:
-        """List all members of a workspace. Requires membership."""
-        _get_membership(user, workspace_id)
+    async def list_members(self, ctx: RequestContext, workspace_id: str) -> list[WorkspaceMember]:
+        # Membership check
+        role = await self._ws.get_member_role(workspace_id, ctx.user_id)
+        if role is None:
+            raise NotFound("workspace", workspace_id)
+        return await self._ws.list_members(workspace_id)
 
-        members = await User.find({"workspaces.workspace": workspace_id}).to_list()
-        result = []
-        for member in members:
-            m = next(w for w in member.workspaces if w.workspace == workspace_id)
-            result.append(
-                {
-                    "_id": str(member.id),
-                    "email": member.email,
-                    "name": member.full_name,
-                    "avatar": member.avatar,
-                    "role": m.role,
-                    "joinedAt": iso_utc(m.joined_at),
-                }
-            )
-        return result
-
-    @staticmethod
     async def update_member_role(
-        workspace_id: str, target_user_id: str, role: str, user: User
+        self,
+        workspace_id: str,
+        target_user_id: str,
+        role: str,
+        actor_user_id: str,
     ) -> None:
-        """Update a member's role. Role check at route layer; owner-demotion
-        invariant enforced here because it's a data rule, not a role rule."""
-        # Load workspace to check owner
-        ws = await Workspace.get(PydanticObjectId(workspace_id))
-        if not ws or ws.deleted_at is not None:
+        ws = await self._ws.get(workspace_id)
+        if ws is None:
             raise NotFound("workspace", workspace_id)
         if ws.owner == target_user_id and role != "owner":
-            raise Forbidden("workspace.cannot_demote_owner", "Cannot demote the workspace owner")
-
-        target = await User.get(PydanticObjectId(target_user_id))
-        if not target:
-            raise NotFound("user", target_user_id)
-
-        target_membership = None
-        for m in target.workspaces:
-            if m.workspace == workspace_id:
-                target_membership = m
-                break
-        if not target_membership:
+            raise Forbidden(
+                "workspace.cannot_demote_owner",
+                "Cannot demote the workspace owner",
+            )
+        ok = await self._ws.update_member_role(workspace_id, target_user_id, role)
+        if not ok:
             raise NotFound("member", target_user_id)
-
-        target_membership.role = role
-        await target.save()
-
         await emit(
             WorkspaceMemberRole(
-                data={"workspace_id": workspace_id, "user_id": target_user_id, "role": role}
+                data={
+                    "workspace_id": workspace_id,
+                    "user_id": target_user_id,
+                    "role": role,
+                }
             )
         )
         get_resolver().invalidate_workspace(workspace_id)
 
-    @staticmethod
-    async def remove_member(workspace_id: str, target_user_id: str, user: User) -> None:
-        """Remove a member. Role check at route layer; owner-removal invariant
-        enforced here because it's a data rule, not a role rule."""
-        # Load workspace to check owner
-        ws = await Workspace.get(PydanticObjectId(workspace_id))
-        if not ws or ws.deleted_at is not None:
+    async def remove_member(
+        self,
+        workspace_id: str,
+        target_user_id: str,
+        actor_user_id: str,
+    ) -> None:
+        ws = await self._ws.get(workspace_id)
+        if ws is None:
             raise NotFound("workspace", workspace_id)
         if ws.owner == target_user_id:
             raise Forbidden("workspace.cannot_remove_owner", "Cannot remove the workspace owner")
-
-        target = await User.get(PydanticObjectId(target_user_id))
-        if not target:
-            raise NotFound("user", target_user_id)
-
-        original_len = len(target.workspaces)
-        target.workspaces = [m for m in target.workspaces if m.workspace != workspace_id]
-        if len(target.workspaces) == original_len:
+        ok = await self._ws.remove_member(workspace_id, target_user_id)
+        if not ok:
             raise NotFound("member", target_user_id)
-
-        # Clear active workspace if it was the removed one
-        if target.active_workspace == workspace_id:
-            target.active_workspace = None
-
-        await target.save()
 
         await event_bus.emit(
             "member.removed",
             {
                 "workspace_id": workspace_id,
                 "user_id": target_user_id,
-                "removed_by": str(user.id),
+                "removed_by": actor_user_id,
             },
         )
-
         await emit(
-            WorkspaceMemberRemoved(data={"workspace_id": workspace_id, "user_id": target_user_id})
+            WorkspaceMemberRemoved(
+                data={
+                    "workspace_id": workspace_id,
+                    "user_id": target_user_id,
+                }
+            )
         )
         get_resolver().invalidate_workspace(workspace_id)
 
@@ -319,228 +229,247 @@ class WorkspaceService:
     # Invites
     # ------------------------------------------------------------------
 
-    @staticmethod
-    async def list_invites(workspace_id: str) -> list[dict]:
-        """List pending (not accepted, not revoked, not expired) invites for
-        a workspace. Role check at route layer."""
-        invites = await Invite.find(
-            {
-                "workspace": workspace_id,
-                "accepted": False,
-                "revoked": False,
-            }
-        ).to_list()
-        return [_invite_response(inv) for inv in invites if not inv.expired]
+    async def list_invites(self, workspace_id: str) -> list[Invite]:
+        return await self._invites.list_pending_for_workspace(workspace_id)
 
-    @staticmethod
-    async def create_invite(workspace_id: str, user: User, body: CreateInviteRequest) -> dict:
-        """Create an invite. Role check at route layer; seat-limit + dedup
-        enforced here."""
-        ws = await Workspace.get(PydanticObjectId(workspace_id))
-        if not ws or ws.deleted_at is not None:
+    async def create_invite(
+        self,
+        ctx: RequestContext,
+        workspace_id: str,
+        body: CreateInviteRequest,
+    ) -> Invite:
+        ws = await self._ws.get(workspace_id)
+        if ws is None:
             raise NotFound("workspace", workspace_id)
 
-        # Check seat limit
-        member_count = await _count_members(workspace_id)
-        if member_count >= ws.seats:
+        if ws.member_count >= ws.seats:
             raise SeatLimitError(ws.seats)
 
-        # Check for existing pending invite to same email + group combination.
-        # Different groups can each have their own pending invite for the same email.
-        pending_query: dict = {
-            "workspace": workspace_id,
-            "email": body.email,
-            "accepted": False,
-            "revoked": False,
-        }
-        if body.group_id:
-            pending_query["group"] = body.group_id
-        else:
-            # Workspace-level invite (no group) — only one at a time
-            pending_query["group"] = None
-
-        existing = await Invite.find_one(pending_query)
-        if existing and not existing.expired:
-            raise ConflictError(
-                "invite.already_pending",
-                f"A pending invite already exists for {body.email}"
-                + (" in this group" if body.group_id else ""),
+        existing = await self._invites.find_pending(
+            workspace_id=workspace_id, email=body.email, group_id=body.group_id
+        )
+        if existing is not None and not existing.expired:
+            msg = f"A pending invite already exists for {body.email}" + (
+                " in this group" if body.group_id else ""
             )
+            raise ConflictError("invite.already_pending", msg)
 
-        invite = Invite(
-            workspace=workspace_id,
+        invite = await self._invites.create(
+            workspace_id=workspace_id,
             email=body.email,
             role=body.role,
-            invited_by=str(user.id),
+            invited_by=ctx.user_id,
             token=secrets.token_urlsafe(32),
-            group=body.group_id,
+            group_id=body.group_id,
         )
-        await invite.insert()
 
         # Resolve invitee-as-existing-user before emitting so the audience
-        # resolver can route the event to them (via user_id branch) in addition
-        # to workspace admins.
-        invited_user = await User.find_one(User.email == body.email)
+        # resolver can route the event (via user_id branch) as well as to
+        # workspace admins.
+        invited_user_id = await self._ws.find_user_id_by_email(body.email)
 
         event_data: dict = {
             "workspace_id": workspace_id,
-            "invite_id": str(invite.id),
+            "invite_id": invite.id,
             "email": body.email,
         }
-        if invited_user:
-            event_data["user_id"] = str(invited_user.id)
+        if invited_user_id:
+            event_data["user_id"] = invited_user_id
 
-        # Emit invite.created (token deliberately omitted from payload).
         await emit(WorkspaceInviteCreated(data=event_data))
 
-        # If the invited email matches an existing user, create an in-app
-        # notification so their bell icon lights up immediately.
-        if invited_user:
+        if invited_user_id:
             await NotificationService.create_default(
                 workspace_id=workspace_id,
-                recipient=str(invited_user.id),
+                recipient=invited_user_id,
                 kind="invite",
                 title=f"You were invited to join {ws.name}",
                 body="",
-                source=NotificationSource(type="invite", id=str(invite.id)),
+                source=NotificationSource(type="invite", id=invite.id),
             )
 
-        return _invite_response(invite)
+        return invite
 
-    @staticmethod
-    async def validate_invite(token: str) -> dict:
-        """Find an invite by token and return its status. No auth required.
-
-        Enriches the base invite shape with ``valid`` + ``workspace_name`` so
-        the /invite/[token] frontend can render the destination without a
-        second round-trip (otherwise the subtitle renders a blank name).
-        """
-        invite = await Invite.find_one(Invite.token == token)
-        if not invite:
+    async def validate_invite(self, token: str) -> tuple[Invite, str]:
+        """Return ``(invite, workspace_name)``. Raises NotFound if the
+        invite token is unknown."""
+        invite = await self._invites.get_by_token(token)
+        if invite is None:
             raise NotFound("invite")
+        ws = await self._ws.get(invite.workspace_id)
+        ws_name = ws.name if ws is not None else ""
+        return invite, ws_name
 
-        ws = await Workspace.get(PydanticObjectId(invite.workspace))
-        workspace_name = ws.name if ws and ws.deleted_at is None else ""
-
-        response = _invite_response(invite)
-        response["valid"] = not (invite.accepted or invite.revoked or invite.expired)
-        response["workspace_name"] = workspace_name
-        return response
-
-    @staticmethod
-    async def accept_invite(token: str, user: User) -> None:
-        """Accept an invite: validate it, check seat limit, add user to workspace."""
-        invite = await Invite.find_one(Invite.token == token)
-        if not invite:
+    async def accept_invite(self, ctx: RequestContext, token: str) -> None:
+        invite = await self._invites.get_by_token(token)
+        if invite is None:
             raise NotFound("invite")
-
         if invite.accepted:
-            raise ConflictError("invite.already_accepted", "This invite has already been accepted")
+            raise ConflictError(
+                "invite.already_accepted",
+                "This invite has already been accepted",
+            )
         if invite.revoked:
             raise Forbidden("invite.revoked", "This invite has been revoked")
         if invite.expired:
             raise Forbidden("invite.expired", "This invite has expired")
 
-        ws = await Workspace.get(PydanticObjectId(invite.workspace))
-        if not ws or ws.deleted_at is not None:
-            raise NotFound("workspace", invite.workspace)
+        ws = await self._ws.get(invite.workspace_id)
+        if ws is None:
+            raise NotFound("workspace", invite.workspace_id)
 
-        # Add to workspace if not already a member
-        already_member = any(m.workspace == invite.workspace for m in user.workspaces)
+        already_member = (
+            await self._ws.get_member_role(invite.workspace_id, ctx.user_id) is not None
+        )
         if not already_member:
-            # Only check seat limit for new members
-            member_count = await _count_members(invite.workspace)
-            if member_count >= ws.seats:
+            if ws.member_count >= ws.seats:
                 raise SeatLimitError(ws.seats)
-            user.workspaces.append(
-                WorkspaceMembership(
-                    workspace=invite.workspace,
-                    role=invite.role,
-                    joined_at=datetime.now(UTC),
-                )
+            await self._ws.add_member(
+                invite.workspace_id,
+                ctx.user_id,
+                role=invite.role,
+                set_active=True,
             )
-            user.active_workspace = invite.workspace
-            await user.save()
 
-        invite.accepted = True
-        await invite.save()
+        await self._invites.mark_accepted(invite.id)
 
         await event_bus.emit(
             "invite.accepted",
             {
-                "workspace_id": invite.workspace,
-                "user_id": str(user.id),
-                "invite_id": str(invite.id),
-                "group_id": invite.group,
+                "workspace_id": invite.workspace_id,
+                "user_id": ctx.user_id,
+                "invite_id": invite.id,
+                "group_id": invite.group_id,
             },
         )
 
-        wid = invite.workspace
-        uid = str(user.id)
+        wid = invite.workspace_id
         await emit(
             WorkspaceInviteAccepted(
-                data={"workspace_id": wid, "invite_id": str(invite.id), "user_id": uid}
+                data={
+                    "workspace_id": wid,
+                    "invite_id": invite.id,
+                    "user_id": ctx.user_id,
+                }
             )
         )
         await emit(
-            WorkspaceMemberAdded(data={"workspace_id": wid, "user_id": uid, "role": invite.role})
+            WorkspaceMemberAdded(
+                data={
+                    "workspace_id": wid,
+                    "user_id": ctx.user_id,
+                    "role": invite.role,
+                }
+            )
         )
         get_resolver().invalidate_workspace(wid)
 
-    @staticmethod
-    async def revoke_invite(workspace_id: str, invite_id: str, user: User) -> None:
-        """Revoke an invite. Role check at route layer."""
-        invite = await Invite.get(PydanticObjectId(invite_id))
-        if not invite or invite.workspace != workspace_id:
+    async def revoke_invite(self, workspace_id: str, invite_id: str) -> None:
+        invite = await self._invites.get(invite_id)
+        if invite is None or invite.workspace_id != workspace_id:
             raise NotFound("invite", invite_id)
-
-        invite.revoked = True
-        await invite.save()
-
+        await self._invites.mark_revoked(invite_id)
         await emit(
             WorkspaceInviteRevoked(data={"workspace_id": workspace_id, "invite_id": invite_id})
         )
 
     # ------------------------------------------------------------------
-    # Realtime helpers (audience lookups)
+    # Legacy classmethod facade — preserves call signatures used by
+    # routers/tests that haven't adopted RequestContext yet. Each
+    # classmethod builds a transient instance from the default repos
+    # and delegates. Returns the legacy wire-format dict (via DTO mapper)
+    # for the methods whose existing callers expect dicts.
     # ------------------------------------------------------------------
 
-    @staticmethod
-    async def list_member_ids(workspace_id: str) -> list[str]:
-        """Return user_ids of every workspace member."""
-        users = await User.find({"workspaces.workspace": workspace_id}).to_list()
-        return [str(u.id) for u in users]
+    @classmethod
+    def _default(cls) -> WorkspaceService:
+        return cls(get_workspace_repository(), get_invite_repository())
 
-    @staticmethod
-    async def list_admin_ids(workspace_id: str) -> list[str]:
-        """Return user_ids of owners + admins."""
-        users = await User.find(
-            {
-                "workspaces": {
-                    "$elemMatch": {
-                        "workspace": workspace_id,
-                        "role": {"$in": ["owner", "admin"]},
-                    }
-                }
-            }
-        ).to_list()
-        return [str(u.id) for u in users]
+    @classmethod
+    async def create_default(cls, user: User, body: CreateWorkspaceRequest) -> dict:
+        ws = await cls._default().create(_legacy_ctx(user), body)
+        return workspace_to_dto(ws).model_dump(by_alias=True)
 
-    @staticmethod
-    async def list_peer_ids(user_id: str) -> list[str]:
-        """Return user_ids that share at least one workspace with the given user.
+    @classmethod
+    async def get_default(cls, workspace_id: str, user: User) -> dict:
+        ws = await cls._default().get(_legacy_ctx(user), workspace_id)
+        return workspace_to_dto(ws).model_dump(by_alias=True)
 
-        Used for presence fan-out. Excludes the user themselves.
-        """
-        try:
-            me_oid = PydanticObjectId(user_id)
-        except Exception:
-            return []
-        me = await User.get(me_oid)
-        if not me or not getattr(me, "workspaces", None):
-            return []
-        workspace_ids = [m.workspace for m in me.workspaces]
-        peers = await User.find(
-            {"workspaces.workspace": {"$in": workspace_ids}, "_id": {"$ne": me.id}}
-        ).to_list()
-        return [str(u.id) for u in peers]
+    @classmethod
+    async def update_default(
+        cls, workspace_id: str, user: User, body: UpdateWorkspaceRequest
+    ) -> dict:
+        ws = await cls._default().update(_legacy_ctx(user), workspace_id, body)
+        return workspace_to_dto(ws).model_dump(by_alias=True)
+
+    @classmethod
+    async def delete_default(cls, workspace_id: str, user: User) -> None:
+        await cls._default().delete(_legacy_ctx(user), workspace_id)
+
+    @classmethod
+    async def list_for_user_default(cls, user: User) -> list[dict]:
+        items = await cls._default().list_for_user(_legacy_ctx(user))
+        return [workspace_to_dto(ws).model_dump(by_alias=True) for ws in items]
+
+    @classmethod
+    async def list_members_default(cls, workspace_id: str, user: User) -> list[dict]:
+        items = await cls._default().list_members(_legacy_ctx(user), workspace_id)
+        return [member_to_dto(m).model_dump(by_alias=True) for m in items]
+
+    @classmethod
+    async def update_member_role_default(
+        cls,
+        workspace_id: str,
+        target_user_id: str,
+        role: str,
+        user: User,
+    ) -> None:
+        await cls._default().update_member_role(workspace_id, target_user_id, role, str(user.id))
+
+    @classmethod
+    async def remove_member_default(
+        cls, workspace_id: str, target_user_id: str, user: User
+    ) -> None:
+        await cls._default().remove_member(workspace_id, target_user_id, str(user.id))
+
+    @classmethod
+    async def list_invites_default(cls, workspace_id: str) -> list[dict]:
+        items = await cls._default().list_invites(workspace_id)
+        return [invite_to_dto(i).model_dump(by_alias=True) for i in items]
+
+    @classmethod
+    async def create_invite_default(
+        cls, workspace_id: str, user: User, body: CreateInviteRequest
+    ) -> dict:
+        invite = await cls._default().create_invite(_legacy_ctx(user), workspace_id, body)
+        return invite_to_dto(invite).model_dump(by_alias=True)
+
+    @classmethod
+    async def validate_invite_default(cls, token: str) -> dict:
+        invite, ws_name = await cls._default().validate_invite(token)
+        return invite_to_validate_dto(invite, ws_name).model_dump(by_alias=True)
+
+    @classmethod
+    async def accept_invite_default(cls, token: str, user: User) -> None:
+        await cls._default().accept_invite(_legacy_ctx(user), token)
+
+    @classmethod
+    async def revoke_invite_default(cls, workspace_id: str, invite_id: str, user: User) -> None:
+        await cls._default().revoke_invite(workspace_id, invite_id)
+
+    # ------------------------------------------------------------------
+    # Realtime helpers (audience lookups) — used as function references
+    # by realtime/audience.py and a couple of routers. Preserve verbatim.
+    # ------------------------------------------------------------------
+
+    @classmethod
+    async def list_member_ids(cls, workspace_id: str) -> list[str]:
+        return await get_workspace_repository().list_member_ids(workspace_id)
+
+    @classmethod
+    async def list_admin_ids(cls, workspace_id: str) -> list[str]:
+        return await get_workspace_repository().list_admin_ids(workspace_id)
+
+    @classmethod
+    async def list_peer_ids(cls, user_id: str) -> list[str]:
+        return await get_workspace_repository().list_peer_ids(user_id)

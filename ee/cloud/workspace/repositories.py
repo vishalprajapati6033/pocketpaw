@@ -99,6 +99,7 @@ class IWorkspaceRepository(Protocol):
     async def list_member_ids(self, workspace_id: str) -> list[str]: ...
     async def list_admin_ids(self, workspace_id: str) -> list[str]: ...
     async def list_peer_ids(self, user_id: str) -> list[str]: ...
+    async def find_user_id_by_email(self, email: str) -> str | None: ...
 
 
 class MongoWorkspaceRepository:
@@ -303,6 +304,10 @@ class MongoWorkspaceRepository:
             {"workspaces.workspace": {"$in": ws_ids}, "_id": {"$ne": me.id}}
         ).to_list()
         return [str(u.id) for u in peers]
+
+    async def find_user_id_by_email(self, email: str) -> str | None:
+        user = await _UserDoc.find_one(_UserDoc.email == email)
+        return str(user.id) if user else None
 
 
 # ---------------------------------------------------------------------------
