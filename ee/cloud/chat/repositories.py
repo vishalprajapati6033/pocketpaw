@@ -278,6 +278,12 @@ class IGroupRepository(Protocol):
     ) -> list[Group]: ...
     async def list_for_user(self, workspace_id: str, user_id: str) -> list[Group]: ...
     async def list_visible_in_workspace(self, workspace_id: str, user_id: str) -> list[Group]: ...
+    async def find_dm_between_users(
+        self, workspace_id: str, members: list[str]
+    ) -> Group | None: ...
+    async def find_user_agent_dm(
+        self, workspace_id: str, user_id: str, agent_id: str
+    ) -> Group | None: ...
     async def update_fields(
         self,
         group_id: str,
@@ -367,6 +373,31 @@ class MongoGroupRepository:
             }
         ).to_list()
         return [_group_to_domain(d) for d in docs]
+
+    async def find_dm_between_users(self, workspace_id: str, members: list[str]) -> Group | None:
+        """Find a DM group whose members exactly equal the given set."""
+        doc = await _GroupDoc.find_one(
+            {
+                "workspace": workspace_id,
+                "type": "dm",
+                "members": {"$all": members, "$size": len(members)},
+            }
+        )
+        return _group_to_domain(doc) if doc else None
+
+    async def find_user_agent_dm(
+        self, workspace_id: str, user_id: str, agent_id: str
+    ) -> Group | None:
+        """Find a DM with exactly one user member and the given agent."""
+        doc = await _GroupDoc.find_one(
+            {
+                "workspace": workspace_id,
+                "type": "dm",
+                "members": [user_id],
+                "agents.agent": agent_id,
+            }
+        )
+        return _group_to_domain(doc) if doc else None
 
     async def update_fields(
         self,

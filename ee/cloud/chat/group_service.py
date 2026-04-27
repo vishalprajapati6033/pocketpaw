@@ -18,7 +18,7 @@ from ee.cloud.chat.schemas import (
     UpdateGroupAgentRequest,
     UpdateGroupRequest,
 )
-from ee.cloud.models.group import Group, GroupAgent, MemberRole
+from ee.cloud.models.group import Group, MemberRole
 from ee.cloud.realtime.bus import get_resolver
 from ee.cloud.realtime.emit import emit
 from ee.cloud.realtime.events import (
@@ -693,29 +693,31 @@ class GroupService:
         """Find an existing DM between two users, or create one.
 
         DM groups have type="dm", sorted members, and name="DM".
+
+        Phase 10: routes through ``IGroupRepository.find_dm_between_users``
+        + ``create``.
         """
+        from ee.cloud.chat.dto import group_to_wire_dict
+        from ee.cloud.chat.repositories import get_group_repository
+
+        repo = get_group_repository()
         members = sorted([user_id, target_user_id])
 
-        existing = await Group.find_one(
-            {
-                "workspace": workspace_id,
-                "type": "dm",
-                "members": {"$all": members, "$size": len(members)},
-            }
-        )
-        if existing:
-            return await _group_response(existing)
+        existing = await repo.find_dm_between_users(workspace_id, members)
+        if existing is not None:
+            users_by_id, agents_by_id = await _populate_lookups_for_domain_groups([existing])
+            return group_to_wire_dict(existing, users_by_id=users_by_id, agents_by_id=agents_by_id)
 
-        group = Group(
-            workspace=workspace_id,
+        group = await repo.create(
+            workspace_id=workspace_id,
             name="DM",
             slug=_generate_slug("dm"),
+            owner=user_id,
             type="dm",
             members=members,
-            owner=user_id,
         )
-        await group.insert()
-        resp = await _group_response(group)
+        users_by_id, agents_by_id = await _populate_lookups_for_domain_groups([group])
+        resp = group_to_wire_dict(group, users_by_id=users_by_id, agents_by_id=agents_by_id)
         await emit(GroupCreated(data={**resp, "member_ids": list(group.members)}))
         return resp
 
@@ -726,10 +728,15 @@ class GroupService:
         Stored as a type="dm" group with ``members=[user_id]`` and a single
         ``GroupAgent`` (respond_mode="auto" so the agent replies by default).
         Verifies the user can see the agent (owner | workspace-visible | public).
+
+        Phase 10: routes through ``IGroupRepository.find_user_agent_dm`` +
+        ``create``. Agent visibility check still queries the AgentModel
+        directly until the agents module gets an analogous repository.
         """
+        from ee.cloud.chat.dto import group_to_wire_dict
+        from ee.cloud.chat.repositories import get_group_repository
         from ee.cloud.models.agent import Agent as AgentModel
 
-        # Resolve the agent and verify access
         try:
             agent_oid = PydanticObjectId(agent_id)
         except Exception as exc:  # noqa: BLE001 - surface as NotFound
@@ -747,29 +754,23 @@ class GroupService:
         if not visible:
             raise NotFound("agent", agent_id)
 
-        # Idempotent lookup: a DM in this workspace with exactly this user and this agent
-        existing = await Group.find_one(
-            {
-                "workspace": workspace_id,
-                "type": "dm",
-                "members": [user_id],
-                "agents.agent": agent_id,
-            }
-        )
-        if existing:
-            return await _group_response(existing)
+        repo = get_group_repository()
+        existing = await repo.find_user_agent_dm(workspace_id, user_id, agent_id)
+        if existing is not None:
+            users_by_id, agents_by_id = await _populate_lookups_for_domain_groups([existing])
+            return group_to_wire_dict(existing, users_by_id=users_by_id, agents_by_id=agents_by_id)
 
-        group = Group(
-            workspace=workspace_id,
+        group = await repo.create(
+            workspace_id=workspace_id,
             name="DM",
             slug=_generate_slug("dm"),
+            owner=user_id,
             type="dm",
             members=[user_id],
-            agents=[GroupAgent(agent=agent_id, role="assistant", respond_mode="auto")],
-            owner=user_id,
+            agents=[(agent_id, "assistant", "auto")],
         )
-        await group.insert()
-        resp = await _group_response(group)
+        users_by_id, agents_by_id = await _populate_lookups_for_domain_groups([group])
+        resp = group_to_wire_dict(group, users_by_id=users_by_id, agents_by_id=agents_by_id)
         await emit(GroupCreated(data={**resp, "member_ids": list(group.members)}))
         return resp
 
