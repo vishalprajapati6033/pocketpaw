@@ -294,6 +294,14 @@ class IGroupRepository(Protocol):
         self, group_id: str, user_id: str, *, role: str | None = None
     ) -> Group: ...
     async def remove_member(self, group_id: str, user_id: str) -> Group: ...
+    async def set_member_role(self, group_id: str, user_id: str, role: str) -> Group: ...
+    async def add_group_agent(
+        self, group_id: str, agent_id: str, *, role: str, respond_mode: str
+    ) -> Group: ...
+    async def update_group_agent_respond_mode(
+        self, group_id: str, agent_id: str, respond_mode: str
+    ) -> Group | None: ...
+    async def remove_group_agent(self, group_id: str, agent_id: str) -> Group | None: ...
 
 
 class MongoGroupRepository:
@@ -413,6 +421,69 @@ class MongoGroupRepository:
             changed = True
         if changed:
             await doc.save()
+        return _group_to_domain(doc)
+
+    async def set_member_role(self, group_id: str, user_id: str, role: str) -> Group:
+        """Set member_roles[user_id] = role. ``role == "edit"`` clears
+        the entry (back-compat default). Caller is responsible for
+        verifying the user is a member and the role is valid."""
+        from ee.cloud._core.errors import NotFound
+
+        doc = await _GroupDoc.get(PydanticObjectId(group_id))
+        if doc is None:
+            raise NotFound("group", group_id)
+        if role == "edit":
+            doc.member_roles.pop(user_id, None)
+        else:
+            doc.member_roles[user_id] = role  # type: ignore[assignment]
+        await doc.save()
+        return _group_to_domain(doc)
+
+    async def add_group_agent(
+        self, group_id: str, agent_id: str, *, role: str, respond_mode: str
+    ) -> Group:
+        """Append a new GroupAgent. Caller is responsible for ensuring
+        the agent isn't already in the group — this method appends
+        unconditionally."""
+        from ee.cloud._core.errors import NotFound
+
+        doc = await _GroupDoc.get(PydanticObjectId(group_id))
+        if doc is None:
+            raise NotFound("group", group_id)
+        doc.agents.append(_GroupAgentDoc(agent=agent_id, role=role, respond_mode=respond_mode))
+        await doc.save()
+        return _group_to_domain(doc)
+
+    async def update_group_agent_respond_mode(
+        self, group_id: str, agent_id: str, respond_mode: str
+    ) -> Group | None:
+        """Update an agent's respond_mode. Returns ``None`` if the agent
+        wasn't found in the group (caller raises NotFound)."""
+        from ee.cloud._core.errors import NotFound
+
+        doc = await _GroupDoc.get(PydanticObjectId(group_id))
+        if doc is None:
+            raise NotFound("group", group_id)
+        for agent in doc.agents:
+            if agent.agent == agent_id:
+                agent.respond_mode = respond_mode  # type: ignore[assignment]
+                await doc.save()
+                return _group_to_domain(doc)
+        return None
+
+    async def remove_group_agent(self, group_id: str, agent_id: str) -> Group | None:
+        """Remove a group agent. Returns ``None`` if the agent wasn't
+        found in the group (caller raises NotFound)."""
+        from ee.cloud._core.errors import NotFound
+
+        doc = await _GroupDoc.get(PydanticObjectId(group_id))
+        if doc is None:
+            raise NotFound("group", group_id)
+        before = len(doc.agents)
+        doc.agents = [a for a in doc.agents if a.agent != agent_id]
+        if len(doc.agents) == before:
+            return None
+        await doc.save()
         return _group_to_domain(doc)
 
 
