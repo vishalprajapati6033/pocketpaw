@@ -85,6 +85,20 @@ def _check_edit_access(pocket: Pocket, user_id: str) -> None:
     raise Forbidden("pocket.access_denied", "You do not have edit access to this pocket")
 
 
+def _check_domain_owner(domain_pocket, user_id: str) -> None:
+    """Same owner check, but for a domain ``Pocket`` value object."""
+    if domain_pocket.owner != user_id:
+        from pocketpaw.ee.guards.audit import log_denial
+
+        log_denial(
+            actor=user_id,
+            action="pocket.share",
+            code="pocket.not_owner",
+            resource_id=domain_pocket.id,
+        )
+        raise Forbidden("pocket.not_owner", "Only the pocket owner can perform this action")
+
+
 def _check_domain_edit_access(domain_pocket, user_id: str) -> None:
     """Same edit-access check, but for a domain ``Pocket`` value object.
 
@@ -539,11 +553,17 @@ class PocketService:
 
     @staticmethod
     async def access_via_share_link(token: str) -> dict:
-        """Access a pocket via share link token."""
-        pocket = await Pocket.find_one(Pocket.share_link_token == token)
-        if not pocket:
+        """Access a pocket via share link token.
+
+        Phase 8: routes through ``IPocketRepository.find_by_share_link_token``.
+        """
+        from ee.cloud.pockets.dto import pocket_to_wire_dict
+        from ee.cloud.pockets.repositories import get_default_repository
+
+        pocket = await get_default_repository().find_by_share_link_token(token)
+        if pocket is None:
             raise NotFound("pocket", "shared link")
-        return _pocket_response(pocket)
+        return pocket_to_wire_dict(pocket)
 
     # -----------------------------------------------------------------
     # Collaborators
@@ -551,18 +571,24 @@ class PocketService:
 
     @staticmethod
     async def add_collaborator(pocket_id: str, user_id: str, body: AddCollaboratorRequest) -> None:
-        """Add a collaborator to the pocket. Owner only."""
-        pocket = await _get_pocket_or_404(pocket_id)
-        _check_owner(pocket, user_id)
+        """Add a collaborator to the pocket. Owner only.
 
-        if body.user_id not in pocket.shared_with:
-            pocket.shared_with.append(body.user_id)
-            await pocket.save()
+        Phase 8: routes through ``IPocketRepository.add_collaborator``.
+        """
+        from ee.cloud.pockets.repositories import get_default_repository
+
+        repo = get_default_repository()
+        pocket = await repo.get(pocket_id)
+        if pocket is None:
+            raise NotFound("pocket", pocket_id)
+        _check_domain_owner(pocket, user_id)
+
+        await repo.add_collaborator(pocket_id, body.user_id)
 
         await event_bus.emit(
             "pocket.shared",
             {
-                "pocket_id": str(pocket.id),
+                "pocket_id": pocket.id,
                 "owner_id": user_id,
                 "collaborator_id": body.user_id,
                 "access": body.access,
@@ -571,13 +597,19 @@ class PocketService:
 
     @staticmethod
     async def remove_collaborator(pocket_id: str, user_id: str, target_user_id: str) -> None:
-        """Remove a collaborator from the pocket. Owner only."""
-        pocket = await _get_pocket_or_404(pocket_id)
-        _check_owner(pocket, user_id)
+        """Remove a collaborator from the pocket. Owner only.
 
-        if target_user_id in pocket.shared_with:
-            pocket.shared_with.remove(target_user_id)
-            await pocket.save()
+        Phase 8: routes through ``IPocketRepository.remove_collaborator``.
+        """
+        from ee.cloud.pockets.repositories import get_default_repository
+
+        repo = get_default_repository()
+        pocket = await repo.get(pocket_id)
+        if pocket is None:
+            raise NotFound("pocket", pocket_id)
+        _check_domain_owner(pocket, user_id)
+
+        await repo.remove_collaborator(pocket_id, target_user_id)
 
     # -----------------------------------------------------------------
     # Team
@@ -585,27 +617,39 @@ class PocketService:
 
     @staticmethod
     async def add_team_member(pocket_id: str, user_id: str, member_id: str) -> dict:
-        """Add a team member to the pocket. Owner or edit access."""
-        pocket = await _get_pocket_or_404(pocket_id)
-        _check_edit_access(pocket, user_id)
+        """Add a team member to the pocket. Owner or edit access.
 
-        if member_id not in pocket.team:
-            pocket.team.append(member_id)
-            await pocket.save()
+        Phase 8: routes through ``IPocketRepository.add_team_member``.
+        """
+        from ee.cloud.pockets.dto import pocket_to_wire_dict
+        from ee.cloud.pockets.repositories import get_default_repository
 
-        return _pocket_response(pocket)
+        repo = get_default_repository()
+        pocket = await repo.get(pocket_id)
+        if pocket is None:
+            raise NotFound("pocket", pocket_id)
+        _check_domain_edit_access(pocket, user_id)
+
+        updated = await repo.add_team_member(pocket_id, member_id)
+        return pocket_to_wire_dict(updated)
 
     @staticmethod
     async def remove_team_member(pocket_id: str, user_id: str, member_id: str) -> dict:
-        """Remove a team member from the pocket. Owner or edit access."""
-        pocket = await _get_pocket_or_404(pocket_id)
-        _check_edit_access(pocket, user_id)
+        """Remove a team member from the pocket. Owner or edit access.
 
-        if member_id in pocket.team:
-            pocket.team.remove(member_id)
-            await pocket.save()
+        Phase 8: routes through ``IPocketRepository.remove_team_member``.
+        """
+        from ee.cloud.pockets.dto import pocket_to_wire_dict
+        from ee.cloud.pockets.repositories import get_default_repository
 
-        return _pocket_response(pocket)
+        repo = get_default_repository()
+        pocket = await repo.get(pocket_id)
+        if pocket is None:
+            raise NotFound("pocket", pocket_id)
+        _check_domain_edit_access(pocket, user_id)
+
+        updated = await repo.remove_team_member(pocket_id, member_id)
+        return pocket_to_wire_dict(updated)
 
     # -----------------------------------------------------------------
     # Agents
@@ -613,24 +657,36 @@ class PocketService:
 
     @staticmethod
     async def add_agent(pocket_id: str, user_id: str, agent_id: str) -> dict:
-        """Add an agent to the pocket. Owner or edit access."""
-        pocket = await _get_pocket_or_404(pocket_id)
-        _check_edit_access(pocket, user_id)
+        """Add an agent to the pocket. Owner or edit access.
 
-        if agent_id not in pocket.agents:
-            pocket.agents.append(agent_id)
-            await pocket.save()
+        Phase 8: routes through ``IPocketRepository.add_agent``.
+        """
+        from ee.cloud.pockets.dto import pocket_to_wire_dict
+        from ee.cloud.pockets.repositories import get_default_repository
 
-        return _pocket_response(pocket)
+        repo = get_default_repository()
+        pocket = await repo.get(pocket_id)
+        if pocket is None:
+            raise NotFound("pocket", pocket_id)
+        _check_domain_edit_access(pocket, user_id)
+
+        updated = await repo.add_agent(pocket_id, agent_id)
+        return pocket_to_wire_dict(updated)
 
     @staticmethod
     async def remove_agent(pocket_id: str, user_id: str, agent_id: str) -> dict:
-        """Remove an agent from the pocket. Owner or edit access."""
-        pocket = await _get_pocket_or_404(pocket_id)
-        _check_edit_access(pocket, user_id)
+        """Remove an agent from the pocket. Owner or edit access.
 
-        if agent_id in pocket.agents:
-            pocket.agents.remove(agent_id)
-            await pocket.save()
+        Phase 8: routes through ``IPocketRepository.remove_agent``.
+        """
+        from ee.cloud.pockets.dto import pocket_to_wire_dict
+        from ee.cloud.pockets.repositories import get_default_repository
 
-        return _pocket_response(pocket)
+        repo = get_default_repository()
+        pocket = await repo.get(pocket_id)
+        if pocket is None:
+            raise NotFound("pocket", pocket_id)
+        _check_domain_edit_access(pocket, user_id)
+
+        updated = await repo.remove_agent(pocket_id, agent_id)
+        return pocket_to_wire_dict(updated)

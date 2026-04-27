@@ -61,6 +61,7 @@ def _pocket_to_domain(doc: _PocketDoc) -> Pocket:
 @runtime_checkable
 class IPocketRepository(Protocol):
     async def get(self, pocket_id: str) -> Pocket | None: ...
+    async def find_by_share_link_token(self, token: str) -> Pocket | None: ...
     async def list_visible_in_workspace(self, workspace_id: str, user_id: str) -> list[Pocket]: ...
     async def update_fields(
         self,
@@ -94,6 +95,12 @@ class IPocketRepository(Protocol):
     ) -> Pocket: ...
     async def remove_widget(self, pocket_id: str, widget_id: str) -> Pocket: ...
     async def reorder_widgets(self, pocket_id: str, widget_ids: list[str]) -> Pocket: ...
+    async def add_collaborator(self, pocket_id: str, target_user_id: str) -> Pocket: ...
+    async def remove_collaborator(self, pocket_id: str, target_user_id: str) -> Pocket: ...
+    async def add_team_member(self, pocket_id: str, member_id: str) -> Pocket: ...
+    async def remove_team_member(self, pocket_id: str, member_id: str) -> Pocket: ...
+    async def add_agent(self, pocket_id: str, agent_id: str) -> Pocket: ...
+    async def remove_agent(self, pocket_id: str, agent_id: str) -> Pocket: ...
 
 
 class MongoPocketRepository:
@@ -274,6 +281,56 @@ class MongoPocketRepository:
         doc.widgets = [widgets_by_id[wid] for wid in widget_ids]
         await doc.save()
         return _pocket_to_domain(doc)
+
+    async def find_by_share_link_token(self, token: str) -> Pocket | None:
+        doc = await _PocketDoc.find_one(_PocketDoc.share_link_token == token)
+        return _pocket_to_domain(doc) if doc else None
+
+    async def _mutate_list_field(
+        self,
+        pocket_id: str,
+        field: str,
+        value: str,
+        action: str,
+    ) -> Pocket:
+        """Append-or-remove a string value on one of the array fields
+        (``shared_with`` / ``team`` / ``agents``). ``action`` is
+        ``"add"`` or ``"remove"``; both are idempotent."""
+        from ee.cloud._core.errors import NotFound
+
+        doc = await _PocketDoc.get(PydanticObjectId(pocket_id))
+        if doc is None:
+            raise NotFound("pocket", pocket_id)
+        current: list[str] = list(getattr(doc, field))
+        if action == "add":
+            if value not in current:
+                current.append(value)
+                setattr(doc, field, current)
+                await doc.save()
+        else:
+            if value in current:
+                current.remove(value)
+                setattr(doc, field, current)
+                await doc.save()
+        return _pocket_to_domain(doc)
+
+    async def add_collaborator(self, pocket_id: str, target_user_id: str) -> Pocket:
+        return await self._mutate_list_field(pocket_id, "shared_with", target_user_id, "add")
+
+    async def remove_collaborator(self, pocket_id: str, target_user_id: str) -> Pocket:
+        return await self._mutate_list_field(pocket_id, "shared_with", target_user_id, "remove")
+
+    async def add_team_member(self, pocket_id: str, member_id: str) -> Pocket:
+        return await self._mutate_list_field(pocket_id, "team", member_id, "add")
+
+    async def remove_team_member(self, pocket_id: str, member_id: str) -> Pocket:
+        return await self._mutate_list_field(pocket_id, "team", member_id, "remove")
+
+    async def add_agent(self, pocket_id: str, agent_id: str) -> Pocket:
+        return await self._mutate_list_field(pocket_id, "agents", agent_id, "add")
+
+    async def remove_agent(self, pocket_id: str, agent_id: str) -> Pocket:
+        return await self._mutate_list_field(pocket_id, "agents", agent_id, "remove")
 
 
 _default: IPocketRepository | None = None
