@@ -153,18 +153,15 @@ class PocketService:
         """List pockets visible to the user.
 
         Includes: owned by user, shared with user, or workspace-visible.
+
+        Phase 8: routes through ``IPocketRepository.list_visible_in_workspace``
+        + the domain → wire mapper. Wire shape unchanged.
         """
-        pockets = await Pocket.find(
-            Pocket.workspace == workspace_id,
-            {
-                "$or": [
-                    {"owner": user_id},
-                    {"shared_with": user_id},
-                    {"visibility": "workspace"},
-                ]
-            },
-        ).to_list()
-        return [_pocket_response(p) for p in pockets]
+        from ee.cloud.pockets.dto import pocket_to_wire_dict
+        from ee.cloud.pockets.repositories import get_default_repository
+
+        pockets = await get_default_repository().list_visible_in_workspace(workspace_id, user_id)
+        return [pocket_to_wire_dict(p) for p in pockets]
 
     @staticmethod
     async def get(pocket_id: str, user_id: str) -> dict:
