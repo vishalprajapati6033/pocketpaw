@@ -147,6 +147,18 @@ class IMessageRepository(Protocol):
     async def toggle_reaction(
         self, message_id: str, user_id: str, emoji: str
     ) -> tuple[Message, bool]: ...
+    async def create_group_message(
+        self,
+        *,
+        group_id: str,
+        sender: str | None,
+        sender_type: str,
+        content: str,
+        agent: str | None = None,
+        mentions: list[dict] | None = None,
+        attachments: list[dict] | None = None,
+        reply_to: str | None = None,
+    ) -> Message: ...
 
 
 class MongoMessageRepository:
@@ -353,6 +365,41 @@ class MongoMessageRepository:
         await doc.save()
         return _message_to_domain(doc), added
 
+    async def create_group_message(
+        self,
+        *,
+        group_id: str,
+        sender: str | None,
+        sender_type: str,
+        content: str,
+        agent: str | None = None,
+        mentions: list[dict] | None = None,
+        attachments: list[dict] | None = None,
+        reply_to: str | None = None,
+    ) -> Message:
+        """Insert a new group-context message.
+
+        The caller is responsible for permission checks; this just
+        persists. Mentions and attachments accept dict payloads
+        matching the wire shape (``{type, id, display_name}`` and
+        ``{type, url, name, meta}`` respectively).
+        """
+        mention_docs = [_MentionDoc(**m) for m in mentions or []]
+        attachment_docs = [_AttachmentDoc(**a) for a in attachments or []]
+        doc = _MessageDoc(
+            context_type="group",
+            group=group_id,
+            sender=sender,
+            sender_type=sender_type,
+            agent=agent,
+            content=content,
+            mentions=mention_docs,
+            attachments=attachment_docs,
+            reply_to=reply_to,
+        )
+        await doc.insert()
+        return _message_to_domain(doc)
+
 
 # ---------------------------------------------------------------------------
 # Group repository
@@ -417,6 +464,7 @@ class IGroupRepository(Protocol):
     async def remove_group_agent(self, group_id: str, agent_id: str) -> Group | None: ...
     async def pin_message(self, group_id: str, message_id: str) -> Group: ...
     async def unpin_message(self, group_id: str, message_id: str) -> Group | None: ...
+    async def bump_message_stats(self, group_id: str, *, last_message_at: datetime) -> None: ...
 
 
 class MongoGroupRepository:
@@ -725,6 +773,17 @@ class MongoGroupRepository:
         doc.pinned_messages.remove(message_id)
         await doc.save()
         return _group_to_domain(doc)
+
+    async def bump_message_stats(self, group_id: str, *, last_message_at: datetime) -> None:
+        """Atomic ``$set last_message_at, $inc message_count`` for the
+        send-message hot path. Avoids the round-trip of load → mutate
+        → save."""
+        await _GroupDoc.find_one(_GroupDoc.id == PydanticObjectId(group_id)).update(
+            {
+                "$set": {"last_message_at": last_message_at},
+                "$inc": {"message_count": 1},
+            }
+        )
 
 
 # ---------------------------------------------------------------------------

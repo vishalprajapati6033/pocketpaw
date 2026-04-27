@@ -29,7 +29,7 @@ from ee.cloud.chat.schemas import (
     SendMessageRequest,
 )
 from ee.cloud.chat.unread_service import UnreadService
-from ee.cloud.models.message import Attachment, Mention, Message
+from ee.cloud.models.message import Attachment, Message
 from ee.cloud.models.notification import NotificationSource
 from ee.cloud.notifications.service import NotificationService
 from ee.cloud.realtime.emit import emit
@@ -132,32 +132,35 @@ class MessageService:
         Verifies membership, checks group is not archived, creates the
         Message document, emits a ``message.sent`` event, and updates
         the group's last_message_at / message_count.
+
+        Phase 10: routes through ``IMessageRepository.create_group_message``
+        + ``IGroupRepository.bump_message_stats``. The membership check
+        still loads the Beanie group via ``_get_group_or_404`` because
+        the helper is shared with non-migrated paths.
         """
+        from ee.cloud.chat.dto import message_to_wire_dict
+        from ee.cloud.chat.repositories import get_group_repository, get_message_repository
+
         group = await _get_group_or_404(group_id)
         _require_can_post(group, user_id)
 
         if group.archived:
             raise Forbidden("group.archived", "Cannot send messages to an archived group")
 
-        mentions = [Mention(**m) for m in body.mentions]
-        attachments = [Attachment(**a) for a in body.attachments]
-
-        msg = Message(
-            context_type="group",
-            group=group_id,
+        msg_repo = get_message_repository()
+        domain_msg = await msg_repo.create_group_message(
+            group_id=group_id,
             sender=user_id,
             sender_type="user",
             content=body.content,
-            mentions=mentions,
+            mentions=body.mentions,
+            attachments=body.attachments,
             reply_to=body.reply_to,
-            attachments=attachments,
         )
-        await msg.insert()
 
-        # Update group stats
-        group.last_message_at = msg.createdAt
-        group.message_count += 1
-        await group.save()
+        # Atomic last_message_at / message_count bump via the group repo.
+        bumped_at = domain_msg.created_at or datetime.now(UTC)
+        await get_group_repository().bump_message_stats(group_id, last_message_at=bumped_at)
 
         # Resolve the reply parent once so we can both embed a preview in
         # the response and keep replies rendering inline in the main feed.
@@ -166,17 +169,11 @@ class MessageService:
         # quoted replies (Telegram-style), so neither is needed: the
         # parent's counter isn't displayed anywhere and the reply fans out
         # via ``MessageNew`` like any other message.
-        parent: Message | None = None
-        if body.reply_to:
-            try:
-                parent_id = PydanticObjectId(body.reply_to)
-                parent = await Message.find_one({"_id": parent_id, "context_type": "group"})
-            except Exception:
-                # Bad reply_to — the reply still sends; FE will render it
-                # without a quote bubble.
-                parent = None
+        parent_domain = await msg_repo.get(body.reply_to) if body.reply_to else None
+        if parent_domain is not None and parent_domain.context_type != "group":
+            parent_domain = None
 
-        response = _message_response(msg, parent=parent)
+        response = message_to_wire_dict(domain_msg, parent=parent_domain)
 
         # Thread reply-target metadata into the event so the agent bridge can
         # decide whether an ``auto``-mode agent should respond. A reply aimed
@@ -186,15 +183,15 @@ class MessageService:
         reply_meta: dict = {}
         if body.reply_to:
             reply_meta["reply_to"] = body.reply_to
-            if parent is not None:
-                reply_meta["reply_to_sender_type"] = parent.sender_type
-                reply_meta["reply_to_agent_id"] = parent.agent
+            if parent_domain is not None:
+                reply_meta["reply_to_sender_type"] = parent_domain.sender_type
+                reply_meta["reply_to_agent_id"] = parent_domain.agent
 
         await event_bus.emit(
             "message.sent",
             {
                 "group_id": group_id,
-                "message_id": str(msg.id),
+                "message_id": domain_msg.id,
                 "sender_id": user_id,
                 "sender_type": "user",
                 "content": body.content,
@@ -262,7 +259,7 @@ class MessageService:
                 body=body.content[:200],
                 source=NotificationSource(
                     type="message",
-                    id=str(msg.id),
+                    id=domain_msg.id,
                     pocket_id=None,
                 ),
             )
