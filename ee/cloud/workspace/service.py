@@ -396,7 +396,7 @@ class WorkspaceService:
         # If the invited email matches an existing user, create an in-app
         # notification so their bell icon lights up immediately.
         if invited_user:
-            await NotificationService.create(
+            await NotificationService.create_default(
                 workspace_id=workspace_id,
                 recipient=str(invited_user.id),
                 kind="invite",

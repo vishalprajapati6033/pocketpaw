@@ -254,11 +254,13 @@ class MessageService:
             # "agent" and "channel_ref" skip — not a user notification trigger.
 
         async def _fan_out_mention(target: str) -> None:
-            await NotificationService.create(
+            await NotificationService.create_default(
                 workspace_id=str(group.workspace),
                 recipient=target,
                 kind="mention",
-                title=f"You were mentioned in #{group_name}" if group_name else "You were mentioned",
+                title=(
+                    f"You were mentioned in #{group_name}" if group_name else "You were mentioned"
+                ),
                 body=body.content[:200],
                 source=NotificationSource(
                     type="message",
@@ -412,7 +414,7 @@ class MessageService:
         # Derive reaction notification: only on ADD, and only if the reactor
         # is not the original sender of the message.
         if added and msg.sender and msg.sender != user_id:
-            await NotificationService.create(
+            await NotificationService.create_default(
                 workspace_id=str(group.workspace),
                 recipient=msg.sender,
                 kind="reaction",
