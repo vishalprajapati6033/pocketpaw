@@ -85,6 +85,29 @@ def _check_edit_access(pocket: Pocket, user_id: str) -> None:
     raise Forbidden("pocket.access_denied", "You do not have edit access to this pocket")
 
 
+def _check_domain_edit_access(domain_pocket, user_id: str) -> None:
+    """Same edit-access check, but for a domain ``Pocket`` value object.
+
+    Used by the methods migrated to the repository — they receive the
+    domain entity (frozen dataclass) rather than the Beanie doc.
+    """
+    if domain_pocket.owner == user_id:
+        return
+    if user_id in domain_pocket.shared_with:
+        return
+    if domain_pocket.visibility == "workspace":
+        return
+    from pocketpaw.ee.guards.audit import log_denial
+
+    log_denial(
+        actor=user_id,
+        action="pocket.edit",
+        code="pocket.access_denied",
+        resource_id=domain_pocket.id,
+    )
+    raise Forbidden("pocket.access_denied", "You do not have edit access to this pocket")
+
+
 async def _get_pocket_or_404(pocket_id: str) -> Pocket:
     """Fetch pocket by ID or raise NotFound."""
     pocket = await Pocket.get(PydanticObjectId(pocket_id))
@@ -313,86 +336,119 @@ class PocketService:
 
     @staticmethod
     async def add_widget(pocket_id: str, user_id: str, body: AddWidgetRequest) -> dict:
-        """Add a widget to the pocket."""
-        pocket = await _get_pocket_or_404(pocket_id)
-        _check_edit_access(pocket, user_id)
+        """Add a widget to the pocket.
 
-        widget = Widget(
-            name=body.name,
-            type=body.type,
-            icon=body.icon,
-            color=body.color,
-            span=body.span,
-            dataSourceType=body.data_source_type,
-            config=body.config,
-            props=body.props,
-            assignedAgent=body.assigned_agent,
+        Phase 8: routes through ``IPocketRepository.add_widget``.
+        """
+        from ee.cloud.pockets.dto import pocket_to_wire_dict
+        from ee.cloud.pockets.repositories import get_default_repository
+
+        repo = get_default_repository()
+        pocket = await repo.get(pocket_id)
+        if pocket is None:
+            raise NotFound("pocket", pocket_id)
+        _check_domain_edit_access(pocket, user_id)
+
+        updated = await repo.add_widget(
+            pocket_id,
+            {
+                "name": body.name,
+                "type": body.type,
+                "icon": body.icon,
+                "color": body.color,
+                "span": body.span,
+                "dataSourceType": body.data_source_type,
+                "config": body.config,
+                "props": body.props,
+                "assignedAgent": body.assigned_agent,
+            },
         )
-        pocket.widgets.append(widget)
-        await pocket.save()
-        return _pocket_response(pocket)
+        return pocket_to_wire_dict(updated)
 
     @staticmethod
     async def update_widget(
         pocket_id: str, widget_id: str, user_id: str, body: UpdateWidgetRequest
     ) -> dict:
-        """Update a specific widget inside the pocket."""
-        pocket = await _get_pocket_or_404(pocket_id)
-        _check_edit_access(pocket, user_id)
+        """Update a specific widget inside the pocket.
 
-        widget = next((w for w in pocket.widgets if w.id == widget_id), None)
-        if not widget:
-            raise NotFound("widget", widget_id)
+        Phase 8: routes through ``IPocketRepository.update_widget_fields``.
+        """
+        from ee.cloud.pockets.dto import pocket_to_wire_dict
+        from ee.cloud.pockets.repositories import get_default_repository
 
-        if body.name is not None:
-            widget.name = body.name
-        if body.type is not None:
-            widget.type = body.type
-        if body.icon is not None:
-            widget.icon = body.icon
-        if body.config is not None:
-            widget.config = body.config
-        if body.props is not None:
-            widget.props = body.props
-        if body.data is not None:
-            widget.data = body.data
-        if body.assigned_agent is not None:
-            widget.assignedAgent = body.assigned_agent
+        repo = get_default_repository()
+        pocket = await repo.get(pocket_id)
+        if pocket is None:
+            raise NotFound("pocket", pocket_id)
+        _check_domain_edit_access(pocket, user_id)
 
-        await pocket.save()
-        return _pocket_response(pocket)
+        updated = await repo.update_widget_fields(
+            pocket_id,
+            widget_id,
+            name=body.name,
+            type=body.type,
+            icon=body.icon,
+            config=body.config,
+            props=body.props,
+            data=body.data,
+            assigned_agent=body.assigned_agent,
+        )
+        return pocket_to_wire_dict(updated)
 
     @staticmethod
     async def remove_widget(pocket_id: str, widget_id: str, user_id: str) -> dict:
-        """Remove a widget from the pocket."""
-        pocket = await _get_pocket_or_404(pocket_id)
-        _check_edit_access(pocket, user_id)
+        """Remove a widget from the pocket.
 
-        original_count = len(pocket.widgets)
-        pocket.widgets = [w for w in pocket.widgets if w.id != widget_id]
-        if len(pocket.widgets) == original_count:
-            raise NotFound("widget", widget_id)
+        Phase 8: routes through ``IPocketRepository.remove_widget``.
+        """
+        from ee.cloud.pockets.dto import pocket_to_wire_dict
+        from ee.cloud.pockets.repositories import get_default_repository
 
-        await pocket.save()
-        return _pocket_response(pocket)
+        repo = get_default_repository()
+        pocket = await repo.get(pocket_id)
+        if pocket is None:
+            raise NotFound("pocket", pocket_id)
+        _check_domain_edit_access(pocket, user_id)
+
+        updated = await repo.remove_widget(pocket_id, widget_id)
+        return pocket_to_wire_dict(updated)
 
     @staticmethod
     async def reorder_widgets(pocket_id: str, user_id: str, widget_ids: list[str]) -> dict:
-        """Reorder widgets by the given ordered list of widget IDs."""
-        pocket = await _get_pocket_or_404(pocket_id)
-        _check_edit_access(pocket, user_id)
+        """Reorder widgets by the given ordered list of widget IDs.
 
-        widget_map = {w.id: w for w in pocket.widgets}
-        reordered: list[Widget] = []
+        Phase 8: routes through ``IPocketRepository.reorder_widgets``.
+        Note: legacy behavior tolerated unknown ids by appending leftovers
+        at the end. The repository now strictly requires the id set to
+        match — callers must include every existing widget id exactly
+        once.
+        """
+        from ee.cloud.pockets.dto import pocket_to_wire_dict
+        from ee.cloud.pockets.repositories import get_default_repository
+
+        repo = get_default_repository()
+        pocket = await repo.get(pocket_id)
+        if pocket is None:
+            raise NotFound("pocket", pocket_id)
+        _check_domain_edit_access(pocket, user_id)
+
+        # Preserve the legacy tolerance: missing ids in widget_ids get
+        # appended; unknown ids are dropped. Achieve this by computing
+        # the full reorder list before calling the strict repo method.
+        existing_ids = {w.id for w in pocket.widgets}
+        seen: set[str] = set()
+        ordered: list[str] = []
         for wid in widget_ids:
-            if wid in widget_map:
-                reordered.append(widget_map.pop(wid))
-        # Append any widgets not in the reorder list at the end
-        reordered.extend(widget_map.values())
-        pocket.widgets = reordered
+            if wid in existing_ids and wid not in seen:
+                ordered.append(wid)
+                seen.add(wid)
+        for w in pocket.widgets:
+            if w.id not in seen:
+                ordered.append(w.id)
+                seen.add(w.id)
 
-        await pocket.save()
-        return _pocket_response(pocket)
+        updated = await repo.reorder_widgets(pocket_id, ordered)
+        return pocket_to_wire_dict(updated)
 
     # -----------------------------------------------------------------
     # Sharing — Share links

@@ -78,6 +78,22 @@ class IPocketRepository(Protocol):
     ) -> Pocket: ...
     async def delete(self, pocket_id: str) -> None: ...
     async def clear_share_link(self, pocket_id: str) -> None: ...
+    async def add_widget(self, pocket_id: str, widget_payload: dict) -> Pocket: ...
+    async def update_widget_fields(
+        self,
+        pocket_id: str,
+        widget_id: str,
+        *,
+        name: str | None = None,
+        type: str | None = None,
+        icon: str | None = None,
+        config: dict | None = None,
+        props: dict | None = None,
+        data: object = None,
+        assigned_agent: str | None = None,
+    ) -> Pocket: ...
+    async def remove_widget(self, pocket_id: str, widget_id: str) -> Pocket: ...
+    async def reorder_widgets(self, pocket_id: str, widget_ids: list[str]) -> Pocket: ...
 
 
 class MongoPocketRepository:
@@ -165,6 +181,99 @@ class MongoPocketRepository:
         doc.share_link_token = None
         doc.share_link_access = "view"
         await doc.save()
+
+    async def add_widget(self, pocket_id: str, widget_payload: dict) -> Pocket:
+        """Append a widget to the pocket's embedded widgets array."""
+        from ee.cloud._core.errors import NotFound
+
+        doc = await _PocketDoc.get(PydanticObjectId(pocket_id))
+        if doc is None:
+            raise NotFound("pocket", pocket_id)
+        widget = _WidgetDoc(
+            name=widget_payload.get("name", "Widget"),
+            type=widget_payload.get("type", "custom"),
+            icon=widget_payload.get("icon", ""),
+            color=widget_payload.get("color", ""),
+            span=widget_payload.get("span", "col-span-1"),
+            dataSourceType=widget_payload.get(
+                "dataSourceType", widget_payload.get("data_source_type", "static")
+            ),
+            config=widget_payload.get("config", {}),
+            props=widget_payload.get("props", {}),
+            data=widget_payload.get("data"),
+            assignedAgent=widget_payload.get("assignedAgent", widget_payload.get("assigned_agent")),
+        )
+        doc.widgets.append(widget)
+        await doc.save()
+        return _pocket_to_domain(doc)
+
+    async def update_widget_fields(
+        self,
+        pocket_id: str,
+        widget_id: str,
+        *,
+        name: str | None = None,
+        type: str | None = None,
+        icon: str | None = None,
+        config: dict | None = None,
+        props: dict | None = None,
+        data: object = None,
+        assigned_agent: str | None = None,
+    ) -> Pocket:
+        from ee.cloud._core.errors import NotFound
+
+        doc = await _PocketDoc.get(PydanticObjectId(pocket_id))
+        if doc is None:
+            raise NotFound("pocket", pocket_id)
+        widget = next((w for w in doc.widgets if w.id == widget_id), None)
+        if widget is None:
+            raise NotFound("widget", widget_id)
+        if name is not None:
+            widget.name = name
+        if type is not None:
+            widget.type = type
+        if icon is not None:
+            widget.icon = icon
+        if config is not None:
+            widget.config = config
+        if props is not None:
+            widget.props = props
+        if data is not None:
+            widget.data = data
+        if assigned_agent is not None:
+            widget.assignedAgent = assigned_agent
+        await doc.save()
+        return _pocket_to_domain(doc)
+
+    async def remove_widget(self, pocket_id: str, widget_id: str) -> Pocket:
+        from ee.cloud._core.errors import NotFound
+
+        doc = await _PocketDoc.get(PydanticObjectId(pocket_id))
+        if doc is None:
+            raise NotFound("pocket", pocket_id)
+        before = len(doc.widgets)
+        doc.widgets = [w for w in doc.widgets if w.id != widget_id]
+        if len(doc.widgets) == before:
+            raise NotFound("widget", widget_id)
+        await doc.save()
+        return _pocket_to_domain(doc)
+
+    async def reorder_widgets(self, pocket_id: str, widget_ids: list[str]) -> Pocket:
+        from ee.cloud._core.errors import NotFound, ValidationError
+
+        doc = await _PocketDoc.get(PydanticObjectId(pocket_id))
+        if doc is None:
+            raise NotFound("pocket", pocket_id)
+        existing_ids = {w.id for w in doc.widgets}
+        if set(widget_ids) != existing_ids:
+            raise ValidationError(
+                "widget.reorder_mismatch",
+                "widget_ids must match the current set exactly",
+            )
+        widgets_by_id = {w.id: w for w in doc.widgets}
+        doc.widgets = [widgets_by_id[wid] for wid in widget_ids]
+        await doc.save()
+        return _pocket_to_domain(doc)
 
 
 _default: IPocketRepository | None = None
