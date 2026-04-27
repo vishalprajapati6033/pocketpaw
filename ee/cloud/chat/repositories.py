@@ -137,6 +137,10 @@ class IMessageRepository(Protocol):
     async def search_in_group(
         self, group_id: str, query: str, *, limit: int = 100
     ) -> list[Message]: ...
+    async def edit_content(
+        self, message_id: str, content: str, *, edited_at: datetime
+    ) -> Message: ...
+    async def soft_delete(self, message_id: str) -> Message: ...
 
 
 class MongoMessageRepository:
@@ -262,6 +266,30 @@ class MongoMessageRepository:
             .to_list()
         )
         return [_message_to_domain(d) for d in docs]
+
+    async def edit_content(self, message_id: str, content: str, *, edited_at: datetime) -> Message:
+        """Update content + mark as edited. Used by MessageService.edit."""
+        from ee.cloud._core.errors import NotFound
+
+        doc = await _MessageDoc.get(PydanticObjectId(message_id))
+        if doc is None:
+            raise NotFound("message", message_id)
+        doc.content = content
+        doc.edited = True
+        doc.edited_at = edited_at
+        await doc.save()
+        return _message_to_domain(doc)
+
+    async def soft_delete(self, message_id: str) -> Message:
+        """Set deleted=True without removing the row."""
+        from ee.cloud._core.errors import NotFound
+
+        doc = await _MessageDoc.get(PydanticObjectId(message_id))
+        if doc is None:
+            raise NotFound("message", message_id)
+        doc.deleted = True
+        await doc.save()
+        return _message_to_domain(doc)
 
 
 # ---------------------------------------------------------------------------

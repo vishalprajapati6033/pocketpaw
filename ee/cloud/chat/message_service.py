@@ -307,7 +307,15 @@ class MessageService:
 
     @staticmethod
     async def edit_message(message_id: str, user_id: str, body: EditMessageRequest) -> dict:
-        """Edit a message. Author only, and the author must still be able to post."""
+        """Edit a message. Author only, and the author must still be able to post.
+
+        Phase 10: routes through ``IMessageRepository.edit_content``.
+        Author + can-post check still goes through the legacy Beanie
+        helpers because they are shared with non-migrated paths.
+        """
+        from ee.cloud.chat.dto import message_to_wire_dict
+        from ee.cloud.chat.repositories import get_message_repository
+
         msg = await _get_group_message_or_404(message_id)
 
         if msg.sender != user_id:
@@ -318,31 +326,34 @@ class MessageService:
         group = await _get_group_or_404(cast(str, msg.group))
         _require_can_post(group, user_id)
 
-        msg.content = body.content
-        msg.edited = True
-        msg.edited_at = datetime.now(UTC)
-        await msg.save()
+        edited_at = datetime.now(UTC)
+        domain_msg = await get_message_repository().edit_content(
+            message_id, body.content, edited_at=edited_at
+        )
 
         await emit(
             MessageEdited(
                 data={
-                    "message_id": str(msg.id),
-                    "group_id": cast(str, msg.group),
-                    "content": msg.content,
-                    "edited_at": str(msg.edited_at),
+                    "message_id": domain_msg.id,
+                    "group_id": cast(str, domain_msg.group),
+                    "content": domain_msg.content,
+                    "edited_at": str(domain_msg.edited_at),
                 }
             )
         )
-
-        return _message_response(msg)
+        return message_to_wire_dict(domain_msg)
 
     @staticmethod
     async def delete_message(message_id: str, user_id: str) -> None:
-        """Soft-delete a message. Author or group owner can delete."""
+        """Soft-delete a message. Author or group owner can delete.
+
+        Phase 10: routes through ``IMessageRepository.soft_delete``.
+        """
+        from ee.cloud.chat.repositories import get_message_repository
+
         msg = await _get_group_message_or_404(message_id)
 
         if msg.sender != user_id:
-            # Check if user is the group owner
             group = await _get_group_or_404(cast(str, msg.group))
             if group.owner != user_id:
                 raise Forbidden(
@@ -350,8 +361,7 @@ class MessageService:
                     "Only the author or group owner can delete this message",
                 )
 
-        msg.deleted = True
-        await msg.save()
+        await get_message_repository().soft_delete(message_id)
 
         await emit(
             MessageDeleted(
