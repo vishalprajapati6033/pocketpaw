@@ -280,26 +280,32 @@ class MessageService:
         """Create a message from an agent in a group.
 
         Used by agent_bridge to persist agent responses instead of creating
-        Message documents directly. Returns the persisted Message document.
+        Message documents directly. Returns the persisted Beanie Message
+        document for legacy callers; new code should consume the domain
+        ``Message`` value object instead.
+
+        Phase 10: routes through ``IMessageRepository.create_group_message``
+        + ``IGroupRepository.bump_message_stats``. The Beanie doc is
+        re-fetched to satisfy the legacy return type.
         """
-        msg = Message(
-            context_type="group",
-            group=group_id,
+        from ee.cloud.chat.repositories import get_group_repository, get_message_repository
+
+        attachment_dicts = (
+            [a.model_dump() if hasattr(a, "model_dump") else dict(a) for a in attachments or []]
+            if attachments
+            else None
+        )
+        domain_msg = await get_message_repository().create_group_message(
+            group_id=group_id,
             sender=None,
             sender_type="agent",
             agent=agent_id,
             content=content,
-            attachments=attachments or [],
+            attachments=attachment_dicts,
         )
-        await msg.insert()
-
-        # Update group stats
-        group = await _get_group_or_404(group_id)
-        group.last_message_at = msg.createdAt
-        group.message_count += 1
-        await group.save()
-
-        return msg
+        bumped_at = domain_msg.created_at or datetime.now(UTC)
+        await get_group_repository().bump_message_stats(group_id, last_message_at=bumped_at)
+        return await Message.get(PydanticObjectId(domain_msg.id))
 
     @staticmethod
     async def edit_message(message_id: str, user_id: str, body: EditMessageRequest) -> dict:
