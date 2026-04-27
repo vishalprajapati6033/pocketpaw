@@ -1,6 +1,12 @@
-# Created: Request/response schemas for the knowledge base REST API.
-# SearchRequest, IngestTextRequest, IngestUrlRequest, LintRequest.
-"""Knowledge base domain — request/response schemas."""
+"""Wire DTOs for the knowledge base REST API.
+
+Renamed from ``schemas.py`` to ``dto.py`` in Phase 6b for naming
+consistency with the rest of the cloud modules. KB is intentionally
+NOT refactored to the full hexagonal layout (domain/repositories/
+service) because it's an adapter to the external ``kb-go`` binary,
+not a domain in its own right; ``backend_adapter.py`` and
+``workspace_aggregator.py`` already isolate that concern.
+"""
 
 from __future__ import annotations
 
