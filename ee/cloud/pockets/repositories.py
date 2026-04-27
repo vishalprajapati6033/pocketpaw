@@ -77,6 +77,7 @@ class IPocketRepository(Protocol):
         share_link_access: str | None = None,
     ) -> Pocket: ...
     async def delete(self, pocket_id: str) -> None: ...
+    async def clear_share_link(self, pocket_id: str) -> None: ...
 
 
 class MongoPocketRepository:
@@ -151,6 +152,19 @@ class MongoPocketRepository:
         if doc is None:
             raise NotFound("pocket", pocket_id)
         await doc.delete()
+
+    async def clear_share_link(self, pocket_id: str) -> None:
+        """Set share_link_token to None and reset access to 'view'.
+        Separate from update_fields because the latter treats ``None`` as
+        'unchanged' rather than 'set to null'."""
+        from ee.cloud._core.errors import NotFound
+
+        doc = await _PocketDoc.get(PydanticObjectId(pocket_id))
+        if doc is None:
+            raise NotFound("pocket", pocket_id)
+        doc.share_link_token = None
+        doc.share_link_access = "view"
+        await doc.save()
 
 
 _default: IPocketRepository | None = None

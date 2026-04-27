@@ -400,39 +400,81 @@ class PocketService:
 
     @staticmethod
     async def generate_share_link(pocket_id: str, user_id: str, access: str) -> dict:
-        """Generate a share link token. Owner only."""
-        pocket = await _get_pocket_or_404(pocket_id)
-        _check_owner(pocket, user_id)
+        """Generate a share link token. Owner only.
+
+        Phase 8: routes through ``IPocketRepository.update_fields``.
+        """
+        from ee.cloud.pockets.repositories import get_default_repository
+
+        repo = get_default_repository()
+        pocket = await repo.get(pocket_id)
+        if pocket is None:
+            raise NotFound("pocket", pocket_id)
+        if pocket.owner != user_id:
+            from pocketpaw.ee.guards.audit import log_denial
+
+            log_denial(
+                actor=user_id,
+                action="pocket.share",
+                code="pocket.not_owner",
+                resource_id=pocket.id,
+            )
+            raise Forbidden("pocket.not_owner", "Only the pocket owner can perform this action")
 
         token = secrets.token_urlsafe(32)
-        pocket.share_link_token = token
-        pocket.share_link_access = access
-        await pocket.save()
-
+        await repo.update_fields(pocket_id, share_link_token=token, share_link_access=access)
         return {"token": token, "access": access, "url": f"/shared/{token}"}
 
     @staticmethod
     async def revoke_share_link(pocket_id: str, user_id: str) -> None:
-        """Revoke the share link. Owner only."""
-        pocket = await _get_pocket_or_404(pocket_id)
-        _check_owner(pocket, user_id)
+        """Revoke the share link. Owner only.
 
-        pocket.share_link_token = None
-        pocket.share_link_access = "view"
-        await pocket.save()
+        Phase 8: routes through ``IPocketRepository.clear_share_link``.
+        """
+        from ee.cloud.pockets.repositories import get_default_repository
+
+        repo = get_default_repository()
+        pocket = await repo.get(pocket_id)
+        if pocket is None:
+            raise NotFound("pocket", pocket_id)
+        if pocket.owner != user_id:
+            from pocketpaw.ee.guards.audit import log_denial
+
+            log_denial(
+                actor=user_id,
+                action="pocket.share",
+                code="pocket.not_owner",
+                resource_id=pocket.id,
+            )
+            raise Forbidden("pocket.not_owner", "Only the pocket owner can perform this action")
+        await repo.clear_share_link(pocket_id)
 
     @staticmethod
     async def update_share_link(pocket_id: str, user_id: str, access: str) -> dict:
-        """Update the share link access level. Owner only."""
-        pocket = await _get_pocket_or_404(pocket_id)
-        _check_owner(pocket, user_id)
+        """Update the share link access level. Owner only.
 
+        Phase 8: routes through ``IPocketRepository.update_fields``.
+        """
+        from ee.cloud.pockets.repositories import get_default_repository
+
+        repo = get_default_repository()
+        pocket = await repo.get(pocket_id)
+        if pocket is None:
+            raise NotFound("pocket", pocket_id)
+        if pocket.owner != user_id:
+            from pocketpaw.ee.guards.audit import log_denial
+
+            log_denial(
+                actor=user_id,
+                action="pocket.share",
+                code="pocket.not_owner",
+                resource_id=pocket.id,
+            )
+            raise Forbidden("pocket.not_owner", "Only the pocket owner can perform this action")
         if not pocket.share_link_token:
             raise NotFound("share_link", pocket_id)
 
-        pocket.share_link_access = access
-        await pocket.save()
-
+        await repo.update_fields(pocket_id, share_link_access=access)
         return {
             "token": pocket.share_link_token,
             "access": access,
