@@ -789,6 +789,12 @@ class GroupService:
 
     @staticmethod
     async def list_member_ids(group_id: str) -> list[str]:
-        """Return the user_ids that are members of the group. Empty if missing."""
-        group = await GroupService._fetch_group(group_id)
+        """Return the user_ids that are members of the group. Empty if missing.
+
+        Phase 10: routes through ``IGroupRepository.get`` so the realtime
+        audience lookup avoids a Beanie call from the service layer.
+        """
+        from ee.cloud.chat.repositories import get_group_repository
+
+        group = await get_group_repository().get(group_id)
         return list(group.members) if group else []
