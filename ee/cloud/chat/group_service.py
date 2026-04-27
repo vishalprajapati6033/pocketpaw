@@ -264,20 +264,71 @@ class GroupService:
 
         Returns public groups in the workspace plus private/dm groups
         where the user is a member.
+
+        Phase 10: routes through ``IGroupRepository.list_visible_in_workspace``.
+        Member/agent population was N+1 (one user/agent batch per group);
+        new path batches across ALL groups in a single user-find and a
+        single agent-find — O(1) Mongo round-trips for the populated
+        list regardless of how many groups the user has.
         """
-        groups = await Group.find(
-            {
-                "workspace": workspace_id,
-                "archived": False,
-                "$or": [
-                    # Public groups + channels are visible to any workspace member.
-                    # Private groups + DMs require membership.
-                    {"type": {"$in": ["public", "channel"]}},
-                    {"members": user_id},
-                ],
-            }
-        ).to_list()
-        return [await _group_response(g) for g in groups]
+        from ee.cloud.chat.dto import group_to_wire_dict
+        from ee.cloud.chat.repositories import get_group_repository
+        from ee.cloud.models.agent import Agent as AgentModel
+        from ee.cloud.models.user import User
+
+        groups = await get_group_repository().list_visible_in_workspace(workspace_id, user_id)
+        if not groups:
+            return []
+
+        # Collect ALL member + agent ids across the entire result set
+        all_user_ids: set[str] = set()
+        all_agent_ids: set[str] = set()
+        for g in groups:
+            all_user_ids.update(g.members)
+            for ga in g.agents:
+                all_agent_ids.add(ga.agent_id)
+
+        # Two batched queries instead of one-per-group
+        users_by_id: dict[str, dict[str, str]] = {}
+        if all_user_ids:
+            user_oids = []
+            for uid in all_user_ids:
+                try:
+                    user_oids.append(PydanticObjectId(uid))
+                except Exception:
+                    pass
+            user_docs = await User.find({"_id": {"$in": user_oids}}).to_list() if user_oids else []
+            for u in user_docs:
+                users_by_id[str(u.id)] = {
+                    "_id": str(u.id),
+                    "name": u.full_name or u.email,
+                    "email": u.email,
+                    "avatar": u.avatar,
+                }
+
+        agents_by_id: dict[str, dict[str, str]] = {}
+        if all_agent_ids:
+            agent_oids = []
+            for aid in all_agent_ids:
+                try:
+                    agent_oids.append(PydanticObjectId(aid))
+                except Exception:
+                    pass
+            agent_docs = (
+                await AgentModel.find({"_id": {"$in": agent_oids}}).to_list() if agent_oids else []
+            )
+            for a in agent_docs:
+                agents_by_id[str(a.id)] = {
+                    "_id": str(a.id),
+                    "name": a.name,
+                    "uname": a.slug,
+                    "avatar": a.avatar,
+                }
+
+        return [
+            group_to_wire_dict(g, users_by_id=users_by_id, agents_by_id=agents_by_id)
+            for g in groups
+        ]
 
     @staticmethod
     async def get_group(group_id: str, user_id: str) -> dict:

@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import Any
 
 from ee.cloud._core.time import iso_utc
-from ee.cloud.chat.domain import Message
+from ee.cloud.chat.domain import Group, Message
 from ee.cloud.chat.schemas import (  # noqa: F401
     AddGroupAgentRequest,
     AddGroupMembersRequest,
@@ -96,6 +96,76 @@ def _reply_preview(parent: Message | None) -> dict[str, Any] | None:
     }
 
 
+def group_to_wire_dict(
+    group: Group,
+    *,
+    users_by_id: dict[str, dict[str, str]] | None = None,
+    agents_by_id: dict[str, dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    """Convert a domain ``Group`` to the legacy wire-format dict.
+
+    ``users_by_id`` and ``agents_by_id`` provide pre-batched lookups
+    (typically populated by the caller in a single Mongo query each)
+    so list-views avoid the N+1 of fetching users/agents per group.
+
+    Each user dict has shape ``{_id, name, email, avatar}``.
+    Each agent dict has shape ``{_id, name, uname, avatar}`` (slug
+    becomes uname; agent_id is preserved separately on the membership).
+    """
+    users_by_id = users_by_id or {}
+    agents_by_id = agents_by_id or {}
+
+    populated_members = []
+    for uid in group.members:
+        u = users_by_id.get(uid)
+        if u:
+            populated_members.append(
+                {
+                    "_id": u["_id"],
+                    "name": u["name"],
+                    "email": u["email"],
+                    "avatar": u.get("avatar", ""),
+                }
+            )
+        else:
+            populated_members.append({"_id": uid, "name": uid, "email": ""})
+
+    populated_agents = []
+    for ga in group.agents:
+        a = agents_by_id.get(ga.agent_id)
+        populated_agents.append(
+            {
+                "_id": a["_id"] if a else ga.agent_id,
+                "agent": ga.agent_id,
+                "name": a["name"] if a else "Agent",
+                "uname": a.get("uname", "") if a else "",
+                "avatar": a.get("avatar", "") if a else "",
+                "role": ga.role,
+                "respond_mode": ga.respond_mode,
+            }
+        )
+
+    return {
+        "_id": group.id,
+        "workspace": group.workspace_id,
+        "name": group.name,
+        "slug": group.slug,
+        "description": group.description,
+        "type": group.type,
+        "icon": group.icon,
+        "color": group.color,
+        "owner": group.owner,
+        "members": populated_members,
+        "memberRoles": dict(group.member_roles),
+        "agents": populated_agents,
+        "pinnedMessages": list(group.pinned_messages),
+        "archived": group.archived,
+        "lastMessageAt": iso_utc(group.last_message_at),
+        "messageCount": group.message_count,
+        "createdAt": iso_utc(group.created_at),
+    }
+
+
 __all__ = [
     "AddGroupAgentRequest",
     "AddGroupMembersRequest",
@@ -111,5 +181,6 @@ __all__ = [
     "UpdateMemberRoleRequest",
     "WsInbound",
     "WsOutbound",
+    "group_to_wire_dict",
     "message_to_wire_dict",
 ]

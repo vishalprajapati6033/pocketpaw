@@ -265,6 +265,7 @@ class IGroupRepository(Protocol):
         self, workspace_id: str, *, include_archived: bool = False
     ) -> list[Group]: ...
     async def list_for_user(self, workspace_id: str, user_id: str) -> list[Group]: ...
+    async def list_visible_in_workspace(self, workspace_id: str, user_id: str) -> list[Group]: ...
 
 
 class MongoGroupRepository:
@@ -296,6 +297,21 @@ class MongoGroupRepository:
     async def list_for_user(self, workspace_id: str, user_id: str) -> list[Group]:
         docs = await _GroupDoc.find(
             {"workspace": workspace_id, "members": user_id, "archived": False}
+        ).to_list()
+        return [_group_to_domain(d) for d in docs]
+
+    async def list_visible_in_workspace(self, workspace_id: str, user_id: str) -> list[Group]:
+        """Public/channel groups in the workspace + private/DM groups
+        the user is a member of. Excludes archived."""
+        docs = await _GroupDoc.find(
+            {
+                "workspace": workspace_id,
+                "archived": False,
+                "$or": [
+                    {"type": {"$in": ["public", "channel"]}},
+                    {"members": user_id},
+                ],
+            }
         ).to_list()
         return [_group_to_domain(d) for d in docs]
 
