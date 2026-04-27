@@ -493,20 +493,22 @@ class MessageService:
 
     @staticmethod
     async def get_thread(message_id: str, user_id: str) -> list[dict]:
-        """Get all replies to a message, sorted ascending by creation time."""
-        msg = await _get_group_message_or_404(message_id)
+        """Get all replies to a message, sorted ascending by creation time.
 
-        # Verify user can access the group
+        Phase 10: routes through ``IMessageRepository.list_replies``.
+        Auth check still hits the Beanie ``Group`` doc directly because
+        the group-membership predicate isn't on the domain Group yet.
+        """
+        from ee.cloud.chat.dto import message_to_wire_dict
+        from ee.cloud.chat.repositories import get_message_repository
+
+        msg = await _get_group_message_or_404(message_id)
         group = await _get_group_or_404(cast(str, msg.group))
         if group.type in ("private", "dm"):
             _require_group_member(group, user_id)
 
-        replies = (
-            await Message.find({"context_type": "group", "reply_to": str(msg.id), "deleted": False})
-            .sort([("createdAt", 1)])
-            .to_list()
-        )
-        return [_message_response(r) for r in replies]
+        replies = await get_message_repository().list_replies(str(msg.id))
+        return [message_to_wire_dict(r) for r in replies]
 
     @staticmethod
     async def pin_message(group_id: str, user_id: str, message_id: str) -> None:

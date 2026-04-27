@@ -133,6 +133,7 @@ class IMessageRepository(Protocol):
         include_deleted: bool = False,
     ) -> list[Message]: ...
     async def list_for_session(self, session_key: str, *, limit: int = 50) -> list[Message]: ...
+    async def list_replies(self, parent_message_id: str) -> list[Message]: ...
     async def search_in_group(
         self, group_id: str, query: str, *, limit: int = 100
     ) -> list[Message]: ...
@@ -229,6 +230,17 @@ class MongoMessageRepository:
             .sort(_MessageDoc.id)  # type: ignore[arg-type]
             .limit(limit)
         )
+        return [_message_to_domain(d) async for d in cursor]
+
+    async def list_replies(self, parent_message_id: str) -> list[Message]:
+        """All non-deleted group-context replies to a parent, oldest first."""
+        cursor = _MessageDoc.find(
+            {
+                "context_type": "group",
+                "reply_to": parent_message_id,
+                "deleted": False,
+            }
+        ).sort([("createdAt", 1)])  # type: ignore[list-item]
         return [_message_to_domain(d) async for d in cursor]
 
     async def search_in_group(
