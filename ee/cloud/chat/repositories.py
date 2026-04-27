@@ -325,6 +325,8 @@ class IGroupRepository(Protocol):
         self, group_id: str, agent_id: str, respond_mode: str
     ) -> Group | None: ...
     async def remove_group_agent(self, group_id: str, agent_id: str) -> Group | None: ...
+    async def pin_message(self, group_id: str, message_id: str) -> Group: ...
+    async def unpin_message(self, group_id: str, message_id: str) -> Group | None: ...
 
 
 class MongoGroupRepository:
@@ -602,6 +604,35 @@ class MongoGroupRepository:
         doc.agents = [a for a in doc.agents if a.agent != agent_id]
         if len(doc.agents) == before:
             return None
+        await doc.save()
+        return _group_to_domain(doc)
+
+    async def pin_message(self, group_id: str, message_id: str) -> Group:
+        """Append a message id to the group's pinned_messages list
+        (idempotent). Caller is responsible for verifying the message
+        belongs to this group."""
+        from ee.cloud._core.errors import NotFound
+
+        doc = await _GroupDoc.get(PydanticObjectId(group_id))
+        if doc is None:
+            raise NotFound("group", group_id)
+        if message_id not in doc.pinned_messages:
+            doc.pinned_messages.append(message_id)
+            await doc.save()
+        return _group_to_domain(doc)
+
+    async def unpin_message(self, group_id: str, message_id: str) -> Group | None:
+        """Remove a message id from the group's pinned_messages list.
+        Returns ``None`` if the message wasn't pinned (caller raises
+        NotFound)."""
+        from ee.cloud._core.errors import NotFound
+
+        doc = await _GroupDoc.get(PydanticObjectId(group_id))
+        if doc is None:
+            raise NotFound("group", group_id)
+        if message_id not in doc.pinned_messages:
+            return None
+        doc.pinned_messages.remove(message_id)
         await doc.save()
         return _group_to_domain(doc)
 

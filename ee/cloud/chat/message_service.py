@@ -23,7 +23,6 @@ from beanie import PydanticObjectId
 from ee.cloud.chat.group_service import (
     _get_group_or_404,
     _require_can_post,
-    _require_group_admin,
     _require_group_member,
 )
 from ee.cloud.chat.schemas import (
@@ -512,30 +511,45 @@ class MessageService:
 
     @staticmethod
     async def pin_message(group_id: str, user_id: str, message_id: str) -> None:
-        """Pin a message in a group. Owner only."""
-        group = await _get_group_or_404(group_id)
-        _require_group_admin(group, user_id)
+        """Pin a message in a group. Owner only.
 
-        # Verify message belongs to this group
-        msg = await _get_group_message_or_404(message_id)
-        if msg.group != group_id:
+        Phase 10: routes through ``IGroupRepository.pin_message`` after
+        verifying the message belongs to the group via the message
+        repository.
+        """
+        from ee.cloud.chat.group_service import _require_domain_group_admin
+        from ee.cloud.chat.repositories import get_group_repository, get_message_repository
+
+        group_repo = get_group_repository()
+        group = await group_repo.get(group_id)
+        if group is None:
+            raise NotFound("group", group_id)
+        _require_domain_group_admin(group, user_id)
+
+        msg = await get_message_repository().get(message_id)
+        if msg is None or msg.group != group_id:
             raise NotFound("message", message_id)
 
-        if message_id not in group.pinned_messages:
-            group.pinned_messages.append(message_id)
-            await group.save()
+        await group_repo.pin_message(group_id, message_id)
 
     @staticmethod
     async def unpin_message(group_id: str, user_id: str, message_id: str) -> None:
-        """Unpin a message from a group. Owner only."""
-        group = await _get_group_or_404(group_id)
-        _require_group_admin(group, user_id)
+        """Unpin a message from a group. Owner only.
 
-        if message_id not in group.pinned_messages:
+        Phase 10: routes through ``IGroupRepository.unpin_message``.
+        """
+        from ee.cloud.chat.group_service import _require_domain_group_admin
+        from ee.cloud.chat.repositories import get_group_repository
+
+        group_repo = get_group_repository()
+        group = await group_repo.get(group_id)
+        if group is None:
+            raise NotFound("group", group_id)
+        _require_domain_group_admin(group, user_id)
+
+        result = await group_repo.unpin_message(group_id, message_id)
+        if result is None:
             raise NotFound("pinned_message", message_id)
-
-        group.pinned_messages.remove(message_id)
-        await group.save()
 
     @staticmethod
     async def search_messages(group_id: str, user_id: str, query: str) -> list[dict]:
