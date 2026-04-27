@@ -538,28 +538,26 @@ class MessageService:
 
     @staticmethod
     async def search_messages(group_id: str, user_id: str, query: str) -> list[dict]:
-        """Search messages by content using regex. Limited to 50 results."""
-        group = await _get_group_or_404(group_id)
+        """Search messages by content using regex. Limited to 50 results.
 
+        Phase 10: routes through ``IMessageRepository.search_in_group``
+        and the domain → wire mapper, demonstrating the new repository
+        abstraction is callable end-to-end. Auth/membership check still
+        runs against the Beanie ``Group`` doc directly because the group
+        repository's ``get`` returns a domain entity that doesn't expose
+        the ``_require_group_member`` predicate yet.
+        """
+        from ee.cloud.chat.dto import message_to_wire_dict
+        from ee.cloud.chat.repositories import get_message_repository
+
+        group = await _get_group_or_404(group_id)
         if group.type in ("private", "dm"):
             _require_group_member(group, user_id)
 
-        # Escape regex special characters for safe search
-        escaped = re.escape(query)
-        messages = (
-            await Message.find(
-                {
-                    "context_type": "group",
-                    "group": group_id,
-                    "deleted": False,
-                    "content": {"$regex": escaped, "$options": "i"},
-                }
-            )
-            .sort([("createdAt", -1)])
-            .limit(50)
-            .to_list()
-        )
-        return [_message_response(m) for m in messages]
+        # Repository handles regex escaping + the Mongo query construction;
+        # service stays focused on auth and shape.
+        domain_messages = await get_message_repository().search_in_group(group_id, query, limit=50)
+        return [message_to_wire_dict(m) for m in domain_messages]
 
     @staticmethod
     async def search_workspace_messages(
