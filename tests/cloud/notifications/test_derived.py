@@ -100,7 +100,8 @@ async def test_send_message_with_mention_creates_notification_for_target():
         ),
         patch("ee.cloud.chat.message_service._require_can_post"),
         patch("ee.cloud.chat.message_service.Message", new=fake_message_ctor),
-        patch("ee.cloud.chat.message_service.NotificationService.create", new=spy),
+        patch("ee.cloud.chat.message_service.NotificationService.create_default", new=spy),
+        patch("ee.cloud.chat.message_service.UnreadService.bump_mention", new=AsyncMock()),
     ):
         from ee.cloud.chat.message_service import MessageService
 
@@ -147,7 +148,8 @@ async def test_send_message_self_mention_does_not_notify():
         ),
         patch("ee.cloud.chat.message_service._require_can_post"),
         patch("ee.cloud.chat.message_service.Message", new=fake_message_ctor),
-        patch("ee.cloud.chat.message_service.NotificationService.create", new=spy),
+        patch("ee.cloud.chat.message_service.NotificationService.create_default", new=spy),
+        patch("ee.cloud.chat.message_service.UnreadService.bump_mention", new=AsyncMock()),
     ):
         from ee.cloud.chat.message_service import MessageService
 
@@ -187,7 +189,8 @@ async def test_toggle_reaction_adding_notifies_original_sender():
             new=AsyncMock(return_value=group),
         ),
         patch("ee.cloud.chat.message_service._require_can_post"),
-        patch("ee.cloud.chat.message_service.NotificationService.create", new=spy),
+        patch("ee.cloud.chat.message_service.NotificationService.create_default", new=spy),
+        patch("ee.cloud.chat.message_service.UnreadService.bump_mention", new=AsyncMock()),
     ):
         from ee.cloud.chat.message_service import MessageService
 
@@ -223,7 +226,8 @@ async def test_toggle_reaction_self_reaction_does_not_notify():
             new=AsyncMock(return_value=group),
         ),
         patch("ee.cloud.chat.message_service._require_can_post"),
-        patch("ee.cloud.chat.message_service.NotificationService.create", new=spy),
+        patch("ee.cloud.chat.message_service.NotificationService.create_default", new=spy),
+        patch("ee.cloud.chat.message_service.UnreadService.bump_mention", new=AsyncMock()),
     ):
         from ee.cloud.chat.message_service import MessageService
 
@@ -257,7 +261,8 @@ async def test_toggle_reaction_removing_does_not_notify():
             new=AsyncMock(return_value=group),
         ),
         patch("ee.cloud.chat.message_service._require_can_post"),
-        patch("ee.cloud.chat.message_service.NotificationService.create", new=spy),
+        patch("ee.cloud.chat.message_service.NotificationService.create_default", new=spy),
+        patch("ee.cloud.chat.message_service.UnreadService.bump_mention", new=AsyncMock()),
     ):
         from ee.cloud.chat.message_service import MessageService
 
