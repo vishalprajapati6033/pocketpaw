@@ -9,9 +9,6 @@ from __future__ import annotations
 import logging
 import secrets
 
-from beanie import PydanticObjectId
-
-from ee.cloud.models.pocket import Pocket
 from ee.cloud.pockets.dto import (
     AddCollaboratorRequest,
     AddWidgetRequest,
@@ -22,70 +19,16 @@ from ee.cloud.pockets.dto import (
 from ee.cloud.ripple_normalizer import normalize_ripple_spec
 from ee.cloud.shared.errors import Forbidden, NotFound
 from ee.cloud.shared.events import event_bus
-from ee.cloud.shared.time import iso_utc
 
 logger = logging.getLogger(__name__)
 
 
-def _pocket_response(pocket: Pocket) -> dict:
-    """Build a frontend-compatible dict from a Pocket document."""
-    return {
-        "_id": str(pocket.id),
-        "workspace": pocket.workspace,
-        "name": pocket.name,
-        "description": pocket.description,
-        "type": pocket.type,
-        "icon": pocket.icon,
-        "color": pocket.color,
-        "owner": pocket.owner,
-        "visibility": pocket.visibility,
-        "team": pocket.team,
-        "agents": pocket.agents,
-        "widgets": [w.model_dump(by_alias=True) for w in pocket.widgets],
-        "rippleSpec": pocket.rippleSpec,
-        "shareLinkToken": pocket.share_link_token,
-        "shareLinkAccess": pocket.share_link_access,
-        "sharedWith": pocket.shared_with,
-        "createdAt": iso_utc(pocket.createdAt),
-        "updatedAt": iso_utc(pocket.updatedAt),
-    }
-
-
-def _check_owner(pocket: Pocket, user_id: str) -> None:
-    """Raise Forbidden if user is not the pocket owner."""
-    if pocket.owner != user_id:
-        from pocketpaw.ee.guards.audit import log_denial
-
-        log_denial(
-            actor=user_id,
-            action="pocket.share",
-            code="pocket.not_owner",
-            resource_id=str(pocket.id),
-        )
-        raise Forbidden("pocket.not_owner", "Only the pocket owner can perform this action")
-
-
-def _check_edit_access(pocket: Pocket, user_id: str) -> None:
-    """Raise Forbidden if user has no edit access (owner or shared_with)."""
-    if pocket.owner == user_id:
-        return
-    if user_id in pocket.shared_with:
-        return
-    if pocket.visibility == "workspace":
-        return
-    from pocketpaw.ee.guards.audit import log_denial
-
-    log_denial(
-        actor=user_id,
-        action="pocket.edit",
-        code="pocket.access_denied",
-        resource_id=str(pocket.id),
-    )
-    raise Forbidden("pocket.access_denied", "You do not have edit access to this pocket")
-
-
 def _check_domain_owner(domain_pocket, user_id: str) -> None:
-    """Same owner check, but for a domain ``Pocket`` value object."""
+    """Raise Forbidden if user is not the pocket owner.
+
+    Operates on the domain ``Pocket`` value object returned by the
+    repository.
+    """
     if domain_pocket.owner != user_id:
         from pocketpaw.ee.guards.audit import log_denial
 
@@ -99,10 +42,8 @@ def _check_domain_owner(domain_pocket, user_id: str) -> None:
 
 
 def _check_domain_edit_access(domain_pocket, user_id: str) -> None:
-    """Same edit-access check, but for a domain ``Pocket`` value object.
-
-    Used by the methods migrated to the repository — they receive the
-    domain entity (frozen dataclass) rather than the Beanie doc.
+    """Raise Forbidden if user has no edit access (owner / shared_with /
+    workspace-visible). Operates on the domain ``Pocket`` value object.
     """
     if domain_pocket.owner == user_id:
         return
@@ -119,14 +60,6 @@ def _check_domain_edit_access(domain_pocket, user_id: str) -> None:
         resource_id=domain_pocket.id,
     )
     raise Forbidden("pocket.access_denied", "You do not have edit access to this pocket")
-
-
-async def _get_pocket_or_404(pocket_id: str) -> Pocket:
-    """Fetch pocket by ID or raise NotFound."""
-    pocket = await Pocket.get(PydanticObjectId(pocket_id))
-    if not pocket:
-        raise NotFound("pocket", pocket_id)
-    return pocket
 
 
 class PocketService:
