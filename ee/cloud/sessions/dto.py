@@ -1,10 +1,14 @@
-"""Sessions domain — Pydantic request/response schemas."""
+"""Sessions domain — Pydantic request/response schemas + domain → wire mapper."""
 
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel
+
+from ee.cloud._core.time import iso_utc
+from ee.cloud.sessions.domain import Session
 
 # ---------------------------------------------------------------------------
 # Requests
@@ -42,3 +46,34 @@ class SessionResponse(BaseModel):
     last_activity: datetime
     created_at: datetime
     deleted_at: datetime | None = None
+
+
+def session_to_wire_dict(s: Session) -> dict[str, Any]:
+    """Map a domain ``Session`` to the legacy wire-format dict.
+
+    Byte-equivalent to the existing ``_session_response`` in
+    ``service.py`` so callers migrating to the repository abstraction
+    don't shift the API contract.
+    """
+    return {
+        "_id": s.id,
+        "sessionId": s.sessionId,
+        "workspace": s.workspace,
+        "owner": s.owner,
+        "title": s.title,
+        "pocket": s.pocket,
+        "group": s.group,
+        "agent": s.agent,
+        "messageCount": s.message_count,
+        "lastActivity": iso_utc(s.last_activity),
+        "createdAt": iso_utc(s.created_at),
+        "deletedAt": iso_utc(s.deleted_at),
+    }
+
+
+__all__ = [
+    "CreateSessionRequest",
+    "SessionResponse",
+    "UpdateSessionRequest",
+    "session_to_wire_dict",
+]

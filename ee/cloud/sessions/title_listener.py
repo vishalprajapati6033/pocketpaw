@@ -50,7 +50,9 @@ async def _on_system_event(event: SystemEvent) -> None:
     # Respect user-edited titles. Only overwrite the default placeholder.
     if session.title and session.title not in ("New Chat", "Chat"):
         logger.info(
-            "session %s already titled %r; skipping overwrite", session_id, session.title,
+            "session %s already titled %r; skipping overwrite",
+            session_id,
+            session.title,
         )
         return
 

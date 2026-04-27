@@ -395,7 +395,7 @@ async def create_pocket_session(
 ) -> dict:
     from ee.cloud.sessions.service import SessionService
 
-    return await SessionService.create_for_pocket(workspace_id, user_id, pocket_id, body)
+    return await SessionService.create_for_pocket_default(workspace_id, user_id, pocket_id, body)
 
 
 @router.get("/{pocket_id}/sessions")
@@ -405,4 +405,4 @@ async def list_pocket_sessions(
 ) -> list[dict]:
     from ee.cloud.sessions.service import SessionService
 
-    return await SessionService.list_for_pocket(pocket_id, user_id)
+    return await SessionService.list_for_pocket_default(pocket_id, user_id)
