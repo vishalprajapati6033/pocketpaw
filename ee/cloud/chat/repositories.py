@@ -141,6 +141,9 @@ class IMessageRepository(Protocol):
         self, message_id: str, content: str, *, edited_at: datetime
     ) -> Message: ...
     async def soft_delete(self, message_id: str) -> Message: ...
+    async def toggle_reaction(
+        self, message_id: str, user_id: str, emoji: str
+    ) -> tuple[Message, bool]: ...
 
 
 class MongoMessageRepository:
@@ -290,6 +293,37 @@ class MongoMessageRepository:
         doc.deleted = True
         await doc.save()
         return _message_to_domain(doc)
+
+    async def toggle_reaction(
+        self, message_id: str, user_id: str, emoji: str
+    ) -> tuple[Message, bool]:
+        """Toggle ``(user_id, emoji)`` on the message's reactions.
+
+        Returns ``(updated_message, added)`` where ``added`` is True if
+        the reaction was newly added, False if it was removed. An emoji
+        with no users left is dropped from the reactions array.
+        """
+        from ee.cloud._core.errors import NotFound
+
+        doc = await _MessageDoc.get(PydanticObjectId(message_id))
+        if doc is None:
+            raise NotFound("message", message_id)
+
+        existing = next((r for r in doc.reactions if r.emoji == emoji), None)
+        added = True
+        if existing is not None:
+            if user_id in existing.users:
+                existing.users.remove(user_id)
+                if not existing.users:
+                    doc.reactions.remove(existing)
+                added = False
+            else:
+                existing.users.append(user_id)
+        else:
+            doc.reactions.append(_ReactionDoc(emoji=emoji, users=[user_id]))
+
+        await doc.save()
+        return _message_to_domain(doc), added
 
 
 # ---------------------------------------------------------------------------

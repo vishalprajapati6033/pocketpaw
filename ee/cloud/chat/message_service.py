@@ -30,7 +30,7 @@ from ee.cloud.chat.schemas import (
     SendMessageRequest,
 )
 from ee.cloud.chat.unread_service import UnreadService
-from ee.cloud.models.message import Attachment, Mention, Message, Reaction
+from ee.cloud.models.message import Attachment, Mention, Message
 from ee.cloud.models.notification import NotificationSource
 from ee.cloud.notifications.service import NotificationService
 from ee.cloud.realtime.emit import emit
@@ -379,41 +379,27 @@ class MessageService:
         If the user already reacted with the given emoji, remove their
         reaction. Otherwise, add it. If the emoji reaction has no users
         left, remove the entire reaction entry.
+
+        Phase 10: routes through ``IMessageRepository.toggle_reaction``.
         """
+        from ee.cloud.chat.dto import message_to_wire_dict
+        from ee.cloud.chat.repositories import get_message_repository
+
         msg = await _get_group_message_or_404(message_id)
 
         # View-only members cannot react
         group = await _get_group_or_404(cast(str, msg.group))
         _require_can_post(group, user_id)
 
-        # Find existing reaction for this emoji
-        existing: Reaction | None = None
-        for r in msg.reactions:
-            if r.emoji == emoji:
-                existing = r
-                break
-
-        added = True
-        if existing is not None:
-            if user_id in existing.users:
-                # Remove user from this reaction
-                existing.users.remove(user_id)
-                # Remove the reaction entry entirely if no users left
-                if not existing.users:
-                    msg.reactions.remove(existing)
-                added = False
-            else:
-                existing.users.append(user_id)
-        else:
-            msg.reactions.append(Reaction(emoji=emoji, users=[user_id]))
-
-        await msg.save()
+        domain_msg, added = await get_message_repository().toggle_reaction(
+            message_id, user_id, emoji
+        )
 
         await emit(
             MessageReaction(
                 data={
-                    "message_id": str(msg.id),
-                    "group_id": cast(str, msg.group),
+                    "message_id": domain_msg.id,
+                    "group_id": cast(str, domain_msg.group),
                     "emoji": emoji,
                     "user_id": user_id,
                 }
@@ -422,17 +408,17 @@ class MessageService:
 
         # Derive reaction notification: only on ADD, and only if the reactor
         # is not the original sender of the message.
-        if added and msg.sender and msg.sender != user_id:
+        if added and domain_msg.sender and domain_msg.sender != user_id:
             await NotificationService.create_default(
                 workspace_id=str(group.workspace),
-                recipient=msg.sender,
+                recipient=domain_msg.sender,
                 kind="reaction",
                 title=f"{emoji} on your message",
-                body=(msg.content or "")[:200],
-                source=NotificationSource(type="message", id=str(msg.id)),
+                body=(domain_msg.content or "")[:200],
+                source=NotificationSource(type="message", id=domain_msg.id),
             )
 
-        return _message_response(msg)
+        return message_to_wire_dict(domain_msg)
 
     @staticmethod
     async def get_messages(
