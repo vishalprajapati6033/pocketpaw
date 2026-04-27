@@ -298,7 +298,7 @@ async def test_send_message_fans_out_everyone_mention_to_all_members():
             new=AsyncMock(),
         ),
         patch(
-            "ee.cloud.chat.message_service.NotificationService.create",
+            "ee.cloud.chat.message_service.NotificationService.create_default",
             new=fake_notif,
         ),
         patch(
@@ -344,7 +344,7 @@ async def test_send_message_user_and_broadcast_mention_dedupes():
         patch("ee.cloud.chat.message_service.Message", new=MagicMock(return_value=fake_msg_ns)),
         patch("ee.cloud.chat.message_service._message_response", new=MagicMock(return_value={"_id": "m1"})),
         patch("ee.cloud.chat.message_service.event_bus.emit", new=AsyncMock()),
-        patch("ee.cloud.chat.message_service.NotificationService.create", new=fake_notif),
+        patch("ee.cloud.chat.message_service.NotificationService.create_default", new=fake_notif),
         patch("ee.cloud.chat.message_service.UnreadService.bump_mention", new=AsyncMock()),
     ):
         body = SendMessageRequest(
