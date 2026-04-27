@@ -278,6 +278,22 @@ class IGroupRepository(Protocol):
     ) -> list[Group]: ...
     async def list_for_user(self, workspace_id: str, user_id: str) -> list[Group]: ...
     async def list_visible_in_workspace(self, workspace_id: str, user_id: str) -> list[Group]: ...
+    async def update_fields(
+        self,
+        group_id: str,
+        *,
+        name: str | None = None,
+        slug: str | None = None,
+        description: str | None = None,
+        type: str | None = None,
+        icon: str | None = None,
+        color: str | None = None,
+        archived: bool | None = None,
+    ) -> Group: ...
+    async def add_member(
+        self, group_id: str, user_id: str, *, role: str | None = None
+    ) -> Group: ...
+    async def remove_member(self, group_id: str, user_id: str) -> Group: ...
 
 
 class MongoGroupRepository:
@@ -326,6 +342,78 @@ class MongoGroupRepository:
             }
         ).to_list()
         return [_group_to_domain(d) for d in docs]
+
+    async def update_fields(
+        self,
+        group_id: str,
+        *,
+        name: str | None = None,
+        slug: str | None = None,
+        description: str | None = None,
+        type: str | None = None,
+        icon: str | None = None,
+        color: str | None = None,
+        archived: bool | None = None,
+    ) -> Group:
+        from ee.cloud._core.errors import NotFound
+
+        doc = await _GroupDoc.get(PydanticObjectId(group_id))
+        if doc is None:
+            raise NotFound("group", group_id)
+        if name is not None:
+            doc.name = name
+        if slug is not None:
+            doc.slug = slug
+        if description is not None:
+            doc.description = description
+        if type is not None:
+            doc.type = type
+        if icon is not None:
+            doc.icon = icon
+        if color is not None:
+            doc.color = color
+        if archived is not None:
+            doc.archived = archived
+        await doc.save()
+        return _group_to_domain(doc)
+
+    async def add_member(self, group_id: str, user_id: str, *, role: str | None = None) -> Group:
+        """Add user_id to the group's members list (idempotent).
+        ``role`` optionally records the user's role in member_roles."""
+        from ee.cloud._core.errors import NotFound
+
+        doc = await _GroupDoc.get(PydanticObjectId(group_id))
+        if doc is None:
+            raise NotFound("group", group_id)
+        changed = False
+        if user_id not in doc.members:
+            doc.members.append(user_id)
+            changed = True
+        if role is not None and doc.member_roles.get(user_id) != role:
+            doc.member_roles[user_id] = role  # type: ignore[assignment]
+            changed = True
+        if changed:
+            await doc.save()
+        return _group_to_domain(doc)
+
+    async def remove_member(self, group_id: str, user_id: str) -> Group:
+        """Remove user_id from the group's members list (idempotent).
+        Also clears any member_roles entry for the user."""
+        from ee.cloud._core.errors import NotFound
+
+        doc = await _GroupDoc.get(PydanticObjectId(group_id))
+        if doc is None:
+            raise NotFound("group", group_id)
+        changed = False
+        if user_id in doc.members:
+            doc.members.remove(user_id)
+            changed = True
+        if user_id in doc.member_roles:
+            del doc.member_roles[user_id]
+            changed = True
+        if changed:
+            await doc.save()
+        return _group_to_domain(doc)
 
 
 # ---------------------------------------------------------------------------

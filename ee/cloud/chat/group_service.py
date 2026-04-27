@@ -231,6 +231,25 @@ def _require_domain_group_member(group, user_id: str) -> None:
         raise Forbidden("group.not_member", "You are not a member of this group")
 
 
+def _require_domain_group_admin(group, user_id: str) -> None:
+    """Raise Forbidden if user is not a group admin or owner.
+
+    Operates on the domain ``Group`` value object. ``member_roles`` is
+    a tuple of (user_id, role) pairs on the domain entity.
+    """
+    if group.owner == user_id:
+        return
+    if dict(group.member_roles).get(user_id) == "admin":
+        return
+    log_denial(
+        actor=user_id,
+        action="group.admin",
+        code="group.not_admin",
+        resource_id=group.id,
+    )
+    raise Forbidden("group.not_admin", "Only group admins can perform this action")
+
+
 async def _populate_lookups_for_domain_groups(
     groups: list,
 ) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]]]:
@@ -378,46 +397,66 @@ class GroupService:
 
     @staticmethod
     async def update_group(group_id: str, user_id: str, body: UpdateGroupRequest) -> dict:
-        """Update group fields. Owner only. Cannot update DMs."""
-        group = await _get_group_or_404(group_id)
+        """Update group fields. Owner only. Cannot update DMs.
 
+        Phase 10: routes through ``IGroupRepository.update_fields``.
+        """
+        from ee.cloud.chat.dto import group_to_wire_dict
+        from ee.cloud.chat.repositories import get_group_repository
+
+        repo = get_group_repository()
+        group = await repo.get(group_id)
+        if group is None:
+            raise NotFound("group", group_id)
         if group.type == "dm":
             raise Forbidden("group.cannot_update_dm", "DM groups cannot be updated")
-        _require_group_admin(group, user_id)
+        _require_domain_group_admin(group, user_id)
 
-        if body.name is not None:
-            group.name = body.name
-            group.slug = _generate_slug(body.name)
-        if body.description is not None:
-            group.description = body.description
-        if body.icon is not None:
-            group.icon = body.icon
-        if body.color is not None:
-            group.color = body.color
-        if body.type is not None and body.type != group.type:
-            # DMs can't change type; enforced above. Switching between
-            # private/public/channel just changes who can read.
-            group.type = body.type
-
-        await group.save()
+        new_slug = _generate_slug(body.name) if body.name is not None else None
+        new_type = body.type if (body.type is not None and body.type != group.type) else None
+        updated = await repo.update_fields(
+            group_id,
+            name=body.name,
+            slug=new_slug,
+            description=body.description,
+            type=new_type,
+            icon=body.icon,
+            color=body.color,
+        )
         patched = body.model_dump(exclude_unset=True)
         await emit(GroupUpdated(data={"group_id": group_id, **patched}))
-        return await _group_response(group)
+        users_by_id, agents_by_id = await _populate_lookups_for_domain_groups([updated])
+        return group_to_wire_dict(updated, users_by_id=users_by_id, agents_by_id=agents_by_id)
 
     @staticmethod
     async def archive_group(group_id: str, user_id: str) -> None:
-        """Archive a group. Owner only."""
-        group = await _get_group_or_404(group_id)
-        _require_group_admin(group, user_id)
-        group.archived = True
-        await group.save()
+        """Archive a group. Owner only.
+
+        Phase 10: routes through ``IGroupRepository.update_fields``.
+        """
+        from ee.cloud.chat.repositories import get_group_repository
+
+        repo = get_group_repository()
+        group = await repo.get(group_id)
+        if group is None:
+            raise NotFound("group", group_id)
+        _require_domain_group_admin(group, user_id)
+        await repo.update_fields(group_id, archived=True)
         await emit(GroupUpdated(data={"group_id": group_id, "archived": True}))
 
     @staticmethod
     async def join_group(group_id: str, user_id: str) -> None:
-        """Join a public group. Adds user to members list."""
-        group = await _get_group_or_404(group_id)
+        """Join a public group. Adds user to members list.
 
+        Phase 10: routes through ``IGroupRepository.add_member``.
+        """
+        from ee.cloud.chat.dto import group_to_wire_dict
+        from ee.cloud.chat.repositories import get_group_repository
+
+        repo = get_group_repository()
+        group = await repo.get(group_id)
+        if group is None:
+            raise NotFound("group", group_id)
         if group.type not in ("public", "channel"):
             raise Forbidden(
                 "group.not_joinable",
@@ -426,33 +465,40 @@ class GroupService:
         if group.archived:
             raise Forbidden("group.archived", "Cannot join an archived group")
 
-        if user_id not in group.members:
-            group.members.append(user_id)
-            await group.save()
-            await emit(
-                GroupMemberAdded(data={"group_id": group_id, "user_id": user_id, "role": "edit"})
-            )
-            # The joining user has no local record of this group yet — a
-            # ``group.joined`` (audience = just them) hydrates the room in their
-            # sidebar so they don't have to refresh to see it.
-            resp = await _group_response(group)
-            await emit(GroupJoined(data={**resp, "member_ids": [user_id]}))
-            get_resolver().invalidate_group(group_id)
+        if user_id in group.members:
+            return
+
+        updated = await repo.add_member(group_id, user_id)
+        await emit(
+            GroupMemberAdded(data={"group_id": group_id, "user_id": user_id, "role": "edit"})
+        )
+        # The joining user has no local record of this group yet — a
+        # ``group.joined`` (audience = just them) hydrates the room in their
+        # sidebar so they don't have to refresh to see it.
+        users_by_id, agents_by_id = await _populate_lookups_for_domain_groups([updated])
+        resp = group_to_wire_dict(updated, users_by_id=users_by_id, agents_by_id=agents_by_id)
+        await emit(GroupJoined(data={**resp, "member_ids": [user_id]}))
+        get_resolver().invalidate_group(group_id)
 
     @staticmethod
     async def leave_group(group_id: str, user_id: str) -> None:
-        """Leave a group. Owner cannot leave (must transfer ownership first)."""
-        group = await _get_group_or_404(group_id)
-        _require_group_member(group, user_id)
+        """Leave a group. Owner cannot leave (must transfer ownership first).
 
+        Phase 10: routes through ``IGroupRepository.remove_member``.
+        """
+        from ee.cloud.chat.repositories import get_group_repository
+
+        repo = get_group_repository()
+        group = await repo.get(group_id)
+        if group is None:
+            raise NotFound("group", group_id)
+        _require_domain_group_member(group, user_id)
         if group.owner == user_id:
             raise Forbidden(
                 "group.owner_cannot_leave",
                 "The group owner cannot leave. Transfer ownership first.",
             )
-
-        group.members.remove(user_id)
-        await group.save()
+        await repo.remove_member(group_id, user_id)
         await emit(GroupMemberRemoved(data={"group_id": group_id, "user_id": user_id}))
         get_resolver().invalidate_group(group_id)
 
