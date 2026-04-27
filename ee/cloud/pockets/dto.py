@@ -94,3 +94,57 @@ class PocketResponse(BaseModel):
     shared_with: list[str]
     created_at: datetime
     updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Domain → wire mappers (Phase 8)
+# ---------------------------------------------------------------------------
+
+
+def pocket_to_wire_dict(p) -> dict:
+    """Convert a domain ``Pocket`` (from ``ee.cloud.pockets.domain``) to
+    the legacy wire-format dict. Byte-equivalent to the
+    ``_pocket_response`` helper in ``service.py``.
+    """
+    from ee.cloud._core.time import iso_utc
+
+    return {
+        "_id": p.id,
+        "workspace": p.workspace_id,
+        "name": p.name,
+        "description": p.description,
+        "type": p.type,
+        "icon": p.icon,
+        "color": p.color,
+        "owner": p.owner,
+        "visibility": p.visibility,
+        "team": list(p.team),
+        "agents": list(p.agents),
+        "widgets": [_widget_to_wire(w) for w in p.widgets],
+        "rippleSpec": p.ripple_spec,
+        "shareLinkToken": p.share_link_token,
+        "shareLinkAccess": p.share_link_access,
+        "sharedWith": list(p.shared_with),
+        "createdAt": iso_utc(p.created_at),
+        "updatedAt": iso_utc(p.updated_at),
+    }
+
+
+def _widget_to_wire(w) -> dict:
+    """Convert a domain ``Widget`` to the legacy wire-format dict. The
+    Beanie model's ``model_dump(by_alias=True)`` produces the same shape
+    so this just rebuilds it from the frozen dataclass."""
+    return {
+        "_id": w.id,
+        "name": w.name,
+        "type": w.type,
+        "icon": w.icon,
+        "color": w.color,
+        "span": w.span,
+        "dataSourceType": w.data_source_type,
+        "config": dict(w.config),
+        "props": dict(w.props),
+        "data": w.data,
+        "assignedAgent": w.assigned_agent,
+        "position": {"row": w.position.row, "col": w.position.col},
+    }

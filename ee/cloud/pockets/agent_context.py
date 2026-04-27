@@ -286,9 +286,7 @@ async def create_pocket_for_agent(
         logger.warning("create_pocket_for_agent insert failed: %s", exc, exc_info=True)
         return {"ok": False, "error": f"insert failed: {exc}"}
 
-    safe = _json_safe(
-        pocket.model_dump(mode="json", by_alias=True, exclude_none=True)
-    )
+    safe = _json_safe(pocket.model_dump(mode="json", by_alias=True, exclude_none=True))
     for k in _AGENT_INVISIBLE_FIELDS:
         safe.pop(k, None)
 

@@ -21,13 +21,6 @@ from pydantic import BaseModel, Field
 from starlette.responses import Response
 
 from ee.cloud.license import require_license
-from ee.cloud.pockets.layouts import (
-    UserPocketTemplate,
-    UserTemplateStore,
-    export_layout_yaml,
-    get_user_template_store,
-    parse_layout_yaml,
-)
 from ee.cloud.pockets.dto import (
     AddCollaboratorRequest,
     AddWidgetRequest,
@@ -36,6 +29,13 @@ from ee.cloud.pockets.dto import (
     ShareLinkRequest,
     UpdatePocketRequest,
     UpdateWidgetRequest,
+)
+from ee.cloud.pockets.layouts import (
+    UserPocketTemplate,
+    UserTemplateStore,
+    export_layout_yaml,
+    get_user_template_store,
+    parse_layout_yaml,
 )
 from ee.cloud.pockets.service import PocketService
 from ee.cloud.sessions.dto import CreateSessionRequest

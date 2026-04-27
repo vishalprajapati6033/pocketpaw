@@ -168,8 +168,18 @@ class PocketService:
 
     @staticmethod
     async def get(pocket_id: str, user_id: str) -> dict:
-        """Get a single pocket. Checks access."""
-        pocket = await _get_pocket_or_404(pocket_id)
+        """Get a single pocket. Checks access.
+
+        Phase 8: routes through ``IPocketRepository.get`` and the
+        domain → wire mapper. The remaining 14 PocketService methods
+        still call Beanie directly; they will migrate incrementally.
+        """
+        from ee.cloud.pockets.dto import pocket_to_wire_dict
+        from ee.cloud.pockets.repositories import get_default_repository
+
+        pocket = await get_default_repository().get(pocket_id)
+        if pocket is None:
+            raise NotFound("pocket", pocket_id)
 
         # Access check: owner, shared_with, or workspace-visible
         if (
@@ -179,7 +189,7 @@ class PocketService:
         ):
             raise Forbidden("pocket.access_denied", "You do not have access to this pocket")
 
-        return _pocket_response(pocket)
+        return pocket_to_wire_dict(pocket)
 
     @staticmethod
     async def update(pocket_id: str, user_id: str, body: UpdatePocketRequest) -> dict:
