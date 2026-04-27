@@ -133,7 +133,7 @@ async def _create_pocket_and_session(spec: dict, session_key: str) -> str | None
         workspace_id = str(workspace.id)
 
         # Create pocket
-        from ee.cloud.pockets.schemas import CreatePocketRequest
+        from ee.cloud.pockets.dto import CreatePocketRequest
         from ee.cloud.pockets.service import PocketService
 
         meta = spec.get("metadata", {})

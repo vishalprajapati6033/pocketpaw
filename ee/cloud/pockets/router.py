@@ -28,7 +28,7 @@ from ee.cloud.pockets.layouts import (
     get_user_template_store,
     parse_layout_yaml,
 )
-from ee.cloud.pockets.schemas import (
+from ee.cloud.pockets.dto import (
     AddCollaboratorRequest,
     AddWidgetRequest,
     CreatePocketRequest,

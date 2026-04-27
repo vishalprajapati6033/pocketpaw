@@ -13,7 +13,7 @@ from beanie import PydanticObjectId
 
 from ee.cloud.models.pocket import Pocket, Widget
 from ee.cloud.models.session import Session
-from ee.cloud.pockets.schemas import (
+from ee.cloud.pockets.dto import (
     AddCollaboratorRequest,
     AddWidgetRequest,
     CreatePocketRequest,
