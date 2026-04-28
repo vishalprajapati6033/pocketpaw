@@ -407,14 +407,18 @@ async def test_update_member_role_blocks_demoting_owner(service, repos) -> None:
     assert exc.value.code == "workspace.cannot_demote_owner"
 
 
-async def test_update_member_role_emits_role_event(service, repos, captured_events) -> None:
+async def test_update_member_role_emits_role_event(
+    service, repos, captured_events, resolver_mock
+) -> None:
     ws_repo, _ = repos
     ws_repo.seed_user("u1")
     ws = await service.create(_ctx("u1"), CreateWorkspaceRequest(name="A", slug="a"))
     ws_repo.seed_membership(ws.id, "u2", "member")
     captured_events.clear()
+    resolver_mock.invalidate_workspace.reset_mock()
     await service.update_member_role(ws.id, "u2", "admin", "u1")
     assert any(isinstance(e, WorkspaceMemberRole) for e in captured_events)
+    resolver_mock.invalidate_workspace.assert_called_with(ws.id)
 
 
 async def test_remove_member_blocks_owner(service, repos) -> None:
@@ -427,7 +431,7 @@ async def test_remove_member_blocks_owner(service, repos) -> None:
 
 
 async def test_remove_member_emits_both_paths(
-    service, repos, captured_events, captured_legacy_events
+    service, repos, captured_events, captured_legacy_events, resolver_mock
 ) -> None:
     ws_repo, _ = repos
     ws_repo.seed_user("u1")
@@ -435,10 +439,12 @@ async def test_remove_member_emits_both_paths(
     ws_repo.seed_membership(ws.id, "u2", "member")
     captured_events.clear()
     captured_legacy_events.clear()
+    resolver_mock.invalidate_workspace.reset_mock()
 
     await service.remove_member(ws.id, "u2", "u1")
     assert any(isinstance(e, WorkspaceMemberRemoved) for e in captured_events)
     assert any(name == "member.removed" for (name, _) in captured_legacy_events)
+    resolver_mock.invalidate_workspace.assert_called_with(ws.id)
 
 
 async def test_create_invite_seat_limit(service, repos) -> None:
@@ -503,7 +509,7 @@ async def test_create_invite_to_existing_user_includes_user_id_and_notifies(
 
 
 async def test_accept_invite_adds_member_and_emits(
-    service, repos, captured_events, monkeypatch
+    service, repos, captured_events, monkeypatch, resolver_mock
 ) -> None:
     monkeypatch.setattr(
         "ee.cloud.workspace.service.NotificationService.create_default",
@@ -515,11 +521,13 @@ async def test_accept_invite_adds_member_and_emits(
     ws = await service.create(_ctx("u1"), CreateWorkspaceRequest(name="A", slug="a"))
     invite = await service.create_invite(_ctx("u1"), ws.id, CreateInviteRequest(email="u2@b.c"))
     captured_events.clear()
+    resolver_mock.invalidate_workspace.reset_mock()
     await service.accept_invite(_ctx("u2"), invite.token)
 
     assert await ws_repo.get_member_role(ws.id, "u2") == invite.role
     assert any(isinstance(e, WorkspaceInviteAccepted) for e in captured_events)
     assert any(isinstance(e, WorkspaceMemberAdded) for e in captured_events)
+    resolver_mock.invalidate_workspace.assert_called_with(ws.id)
 
 
 async def test_accept_invite_rejects_revoked(service, repos) -> None:

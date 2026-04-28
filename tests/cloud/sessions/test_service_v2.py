@@ -311,3 +311,52 @@ async def test_create_for_pocket_default_links_pocket(
         "w1", "u1", "p1", CreateSessionRequest(title="t")
     )
     assert out["pocket"] == "p1"
+
+
+# ---------------------------------------------------------------------------
+# touch — bumps lastActivity / messageCount and emits SessionUpdated.
+# Stays on Beanie (chat persistence hot path), so these tests patch
+# the ``_SessionDoc`` seam directly rather than going through the
+# repository fake. Restores coverage from the deleted ``test_session_emits.py``.
+# ---------------------------------------------------------------------------
+
+
+async def test_touch_emits_session_updated(captured_events) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    session = SimpleNamespace(
+        id="s_oid",
+        sessionId="websocket_abc",
+        owner="u1",
+        lastActivity=datetime.now(UTC),
+        messageCount=0,
+        save=AsyncMock(),
+    )
+
+    doc_stub = MagicMock()
+    doc_stub.find_one = AsyncMock(return_value=session)
+
+    with patch("ee.cloud.sessions.service._SessionDoc", new=doc_stub):
+        await SessionService.touch("websocket_abc")
+
+    events = [e for e in captured_events if isinstance(e, SessionUpdated)]
+    assert len(events) == 1
+    data = events[0].data
+    assert data["session_id"] == "s_oid"
+    assert data["user_id"] == "u1"
+    assert isinstance(data["last_message_at"], str)
+    session.save.assert_awaited_once()
+    assert session.messageCount == 1
+
+
+async def test_touch_no_emit_when_session_missing(captured_events) -> None:
+    from unittest.mock import MagicMock, patch
+
+    doc_stub = MagicMock()
+    doc_stub.find_one = AsyncMock(return_value=None)
+
+    with patch("ee.cloud.sessions.service._SessionDoc", new=doc_stub):
+        await SessionService.touch("missing")
+
+    assert not [e for e in captured_events if isinstance(e, SessionUpdated)]

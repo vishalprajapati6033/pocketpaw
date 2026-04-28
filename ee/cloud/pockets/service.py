@@ -159,30 +159,12 @@ class PocketService:
         if pocket is None:
             raise NotFound("pocket", pocket_id)
 
-        # Auth: edit access for non-visibility fields, owner-only for visibility
-        if pocket.owner != user_id and user_id not in pocket.shared_with:
-            if pocket.visibility != "workspace":
-                from pocketpaw.ee.guards.audit import log_denial
-
-                log_denial(
-                    actor=user_id,
-                    action="pocket.edit",
-                    code="pocket.access_denied",
-                    resource_id=pocket.id,
-                )
-                raise Forbidden(
-                    "pocket.access_denied", "You do not have edit access to this pocket"
-                )
-        if body.visibility is not None and pocket.owner != user_id:
-            from pocketpaw.ee.guards.audit import log_denial
-
-            log_denial(
-                actor=user_id,
-                action="pocket.share",
-                code="pocket.not_owner",
-                resource_id=pocket.id,
-            )
-            raise Forbidden("pocket.not_owner", "Only the pocket owner can perform this action")
+        # Edit-access check covers non-visibility fields. Visibility changes
+        # additionally require ownership — the helper raises pocket.share /
+        # pocket.not_owner with the matching audit entry.
+        _check_domain_edit_access(pocket, user_id)
+        if body.visibility is not None:
+            _check_domain_owner(pocket, user_id)
 
         normalized_spec = normalize_ripple_spec(body.ripple_spec) if body.ripple_spec else None
         updated = await repo.update_fields(

@@ -134,6 +134,10 @@ ACTIONS: dict[str, ActionRule] = {
     # authenticated caller could install into any workspace
     # (docs/plans/cluster-D-reality.md#106-112, P0 fix 2026-04-19).
     "fleet.install": ActionRule(WorkspaceRole.ADMIN, "workspace.insufficient_role"),
+    # Admin — operational endpoints (perf timing dumps, etc.). Owner-only
+    # because per-route timing reveals traffic patterns and request
+    # cadence that shouldn't be visible to every admin in a workspace.
+    "admin.perf": ActionRule(WorkspaceRole.OWNER, "admin.access_denied"),
 }
 
 
