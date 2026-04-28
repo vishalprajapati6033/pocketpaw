@@ -65,13 +65,11 @@ def _reset_repo_singletons():
     # global directly) would otherwise leak the fake into later tests.
     # This will become a no-op once all modules drop their repositories.py;
     # the fixture is removed in the final cleanup commit of Milestone 1.
-    from ee.cloud.agents import repositories as agents_repos
     from ee.cloud.chat import repositories as chat_repos
     from ee.cloud.pockets import repositories as pockets_repos
     from ee.cloud.workspace import repositories as workspace_repos
 
     snapshots: list[tuple[object, str, object]] = [
-        (agents_repos, "_default", agents_repos._default),  # type: ignore[attr-defined]
         (chat_repos, "_default_message", chat_repos._default_message),  # type: ignore[attr-defined]
         (chat_repos, "_default_group", chat_repos._default_group),  # type: ignore[attr-defined]
         (pockets_repos, "_default", pockets_repos._default),  # type: ignore[attr-defined]

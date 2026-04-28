@@ -20,7 +20,8 @@ from ee.cloud.agents.dto import (
     ScopeAssignmentResponse,
     UpdateAgentRequest,
 )
-from ee.cloud.agents.service import AgentService
+from ee.cloud.agents import service as agents_service
+from ee.cloud.agents.dto import agent_to_dict
 from ee.cloud.license import require_license
 from ee.cloud.shared.deps import (
     current_user_id,
@@ -68,7 +69,8 @@ async def create_agent(
     workspace_id: str = Depends(current_workspace_id),
     user_id: str = Depends(current_user_id),
 ) -> dict:
-    return await AgentService.create_default(workspace_id, user_id, body)
+    ctx = agents_service.legacy_ctx(user_id, workspace_id)
+    return agent_to_dict(await agents_service.create(ctx, workspace_id, body))
 
 
 @router.get("")
@@ -76,12 +78,13 @@ async def list_agents(
     workspace_id: str = Depends(current_workspace_id),
     query: str | None = Query(default=None),
 ) -> list[dict]:
-    return await AgentService.list_agents_default(workspace_id, query)
+    items = await agents_service.list_agents(workspace_id, query=query)
+    return [agent_to_dict(a) for a in items]
 
 
 @router.get("/{agent_id}")
 async def get_agent(agent_id: str) -> dict:
-    return await AgentService.get_default(agent_id)
+    return agent_to_dict(await agents_service.get(agent_id))
 
 
 @router.get("/uname/{slug}")
@@ -89,7 +92,7 @@ async def get_by_slug(
     slug: str,
     workspace_id: str = Depends(current_workspace_id),
 ) -> dict:
-    return await AgentService.get_by_slug_default(workspace_id, slug)
+    return agent_to_dict(await agents_service.get_by_slug(workspace_id, slug))
 
 
 @router.patch("/{agent_id}", dependencies=[Depends(require_agent_owner_or_admin)])
@@ -98,7 +101,8 @@ async def update_agent(
     body: UpdateAgentRequest,
     user_id: str = Depends(current_user_id),
 ) -> dict:
-    return await AgentService.update_default(agent_id, user_id, body)
+    ctx = agents_service.legacy_ctx(user_id)
+    return agent_to_dict(await agents_service.update(ctx, agent_id, body))
 
 
 @router.delete("/{agent_id}", status_code=204, dependencies=[Depends(require_agent_owner_or_admin)])
@@ -106,7 +110,8 @@ async def delete_agent(
     agent_id: str,
     user_id: str = Depends(current_user_id),
 ) -> Response:
-    await AgentService.delete_default(agent_id, user_id)
+    ctx = agents_service.legacy_ctx(user_id)
+    await agents_service.delete(ctx, agent_id)
     return Response(status_code=204)
 
 
@@ -121,7 +126,9 @@ async def discover_agents(
     workspace_id: str = Depends(current_workspace_id),
     user_id: str = Depends(current_user_id),
 ) -> list[dict]:
-    return await AgentService.discover_default(workspace_id, user_id, body)
+    ctx = agents_service.legacy_ctx(user_id, workspace_id)
+    items = await agents_service.discover(ctx, workspace_id, body)
+    return [agent_to_dict(a) for a in items]
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +253,8 @@ async def upload_profile_pic(
     avatar_url = f"{base}/uploads/avatars/{filename}"
 
     # Update the agent's avatar field
-    await AgentService.update_default(agent_id, user_id, UpdateAgentRequest(avatar=avatar_url))
+    ctx = agents_service.legacy_ctx(user_id)
+    await agents_service.update(ctx, agent_id, UpdateAgentRequest(avatar=avatar_url))
 
     return {"url": avatar_url}
 
@@ -319,7 +327,7 @@ async def get_agent_scope(agent_id: str) -> ScopeAssignmentResponse:
     Empty list means "no scope narrowing" — the agent sees everything in
     its workspace. Non-empty list bounds retrieval + fabric queries.
     """
-    scopes = await AgentService.get_scopes_default(agent_id)
+    scopes = await agents_service.get_scopes(agent_id)
     return ScopeAssignmentResponse(agent_id=agent_id, scopes=scopes)
 
 
@@ -339,5 +347,5 @@ async def set_agent_scope(
     fleet installer calling ``set_scopes`` directly gets the same
     guarantees.
     """
-    updated = await AgentService.set_scopes_default(agent_id, body.scopes)
+    updated = await agents_service.set_scopes(agent_id, body.scopes)
     return ScopeAssignmentResponse(agent_id=agent_id, scopes=updated)

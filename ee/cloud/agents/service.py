@@ -1,40 +1,118 @@
 """Agents domain — business logic service.
 
-Refactored in Phase 6 of the cloud-restructure. Instance class taking
-``IAgentRepository``. Methods accept ``RequestContext`` and return
-domain entities; the router maps to legacy wire dicts via
-``agent_to_dict``.
+Sole owner of writes to the ``Agent`` Beanie document. Module-level
+``async def`` API. Eager soul materialization
+(``get_agent_pool().ensure_soul``) preserved on create when
+``soul_enabled``.
 
-Eager soul materialization (``get_agent_pool().ensure_soul``) preserved
-on create when ``soul_enabled``.
-
-The legacy classmethod facade (``create_default``, ``list_agents_default``,
-etc.) preserves the existing wire shape for the sole external caller —
-the agents/router.py — until it migrates to the instance API.
+Public API:
+- ``create(ctx, workspace_id, body)``
+- ``get(agent_id)``
+- ``get_by_slug(workspace_id, slug)``
+- ``list_agents(workspace_id, query=None)``
+- ``update(ctx, agent_id, body)``
+- ``delete(ctx, agent_id)``
+- ``get_scopes(agent_id)``
+- ``set_scopes(agent_id, scopes)``
+- ``discover(ctx, workspace_id, body)``
+- ``legacy_ctx(user_id, workspace_id)`` — helper for the router
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from datetime import UTC, datetime
+from typing import Any
 
-from ee.cloud._core.context import RequestContext
+from beanie import PydanticObjectId
+
+from ee.cloud._core.context import RequestContext, ScopeKind
 from ee.cloud._core.errors import ConflictError, Forbidden, NotFound
 from ee.cloud.agents.domain import Agent, AgentConfigSpec
 from ee.cloud.agents.dto import (
     CreateAgentRequest,
     DiscoverRequest,
     UpdateAgentRequest,
-    agent_to_dict,
 )
-from ee.cloud.agents.repositories import IAgentRepository, get_default_repository
 from ee.cloud.agents.scope_rules import normalise_and_validate_scopes
-
-if TYPE_CHECKING:
-    pass
+from ee.cloud.models.agent import Agent as _AgentDoc
+from ee.cloud.models.agent import AgentConfig as _AgentConfigDoc
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Private mapping helpers
+# ---------------------------------------------------------------------------
+
+
+def _config_to_domain(c: _AgentConfigDoc) -> AgentConfigSpec:
+    return AgentConfigSpec(
+        backend=c.backend,
+        model=c.model,
+        system_prompt=c.system_prompt,
+        tools=tuple(c.tools),
+        trust_level=c.trust_level,
+        temperature=c.temperature,
+        max_tokens=c.max_tokens,
+        scopes=tuple(c.scopes),
+        soul_enabled=c.soul_enabled,
+        soul_persona=c.soul_persona,
+        soul_archetype=c.soul_archetype,
+        soul_values=tuple(c.soul_values),
+        soul_ocean=tuple(c.soul_ocean.items()),
+    )
+
+
+def _config_to_doc(c: AgentConfigSpec) -> _AgentConfigDoc:
+    return _AgentConfigDoc(
+        backend=c.backend,
+        model=c.model,
+        system_prompt=c.system_prompt,
+        tools=list(c.tools),
+        trust_level=c.trust_level,
+        temperature=c.temperature,
+        max_tokens=c.max_tokens,
+        scopes=list(c.scopes),
+        soul_enabled=c.soul_enabled,
+        soul_persona=c.soul_persona,
+        soul_archetype=c.soul_archetype,
+        soul_values=list(c.soul_values),
+        soul_ocean=dict(c.soul_ocean),
+    )
+
+
+def _to_domain(doc: _AgentDoc) -> Agent:
+    return Agent(
+        id=str(doc.id),
+        workspace_id=doc.workspace,
+        name=doc.name,
+        slug=doc.slug,
+        avatar=doc.avatar,
+        visibility=doc.visibility,
+        owner=doc.owner,
+        config=_config_to_domain(doc.config),
+        created_at=getattr(doc, "createdAt", None),  # type: ignore[arg-type]
+        updated_at=getattr(doc, "updatedAt", None),  # type: ignore[arg-type]
+    )
+
+
+def legacy_ctx(user_id: str, workspace_id: str | None = None) -> RequestContext:
+    """Build a RequestContext for routers that haven't migrated to
+    ``Depends(request_context)`` yet."""
+    return RequestContext(
+        user_id=user_id,
+        workspace_id=workspace_id,
+        request_id="legacy",
+        scope=ScopeKind.NONE,
+        started_at=datetime.now(UTC),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Config builders
+# ---------------------------------------------------------------------------
 
 
 def _build_create_config(body: CreateAgentRequest) -> AgentConfigSpec:
@@ -47,7 +125,7 @@ def _build_create_config(body: CreateAgentRequest) -> AgentConfigSpec:
         soul_persona=body.persona,
         soul_archetype=body.soul_archetype or f"The {body.name}",
     )
-    overrides = {}
+    overrides: dict[str, Any] = {}
     if body.temperature is not None:
         overrides["temperature"] = body.temperature
     if body.max_tokens is not None:
@@ -66,10 +144,8 @@ def _build_create_config(body: CreateAgentRequest) -> AgentConfigSpec:
 
 
 def _apply_update(current: AgentConfigSpec, body: UpdateAgentRequest) -> AgentConfigSpec:
-    """Apply config-shaped overrides from an UpdateAgentRequest. Returns
-    a new AgentConfigSpec — caller decides whether to persist."""
+    """Apply config-shaped overrides from an UpdateAgentRequest."""
     if body.config is not None:
-        # Full replacement
         c = body.config
         return AgentConfigSpec(
             backend=c.get("backend", current.backend),
@@ -91,7 +167,7 @@ def _apply_update(current: AgentConfigSpec, body: UpdateAgentRequest) -> AgentCo
             ),
         )
 
-    overrides: dict = {}
+    overrides: dict[str, Any] = {}
     for field, attr in [
         ("backend", body.backend),
         ("model", body.model),
@@ -115,215 +191,184 @@ def _apply_update(current: AgentConfigSpec, body: UpdateAgentRequest) -> AgentCo
     if body.persona is not None:
         overrides["soul_persona"] = body.persona
 
-    return replace(current, **overrides) if overrides else current  # type: ignore[arg-type]
-
-
-class AgentService:
-    """Agent CRUD + scope assignment + discovery."""
-
-    def __init__(self, repository: IAgentRepository) -> None:
-        self._repo = repository
-
-    # ------------------------------------------------------------------
-    # Instance API
-    # ------------------------------------------------------------------
-
-    async def create(
-        self, ctx: RequestContext, workspace_id: str, body: CreateAgentRequest
-    ) -> Agent:
-        existing = await self._repo.get_by_slug(workspace_id, body.slug)
-        if existing is not None:
-            raise ConflictError(
-                "agent.slug_taken",
-                f"Slug '{body.slug}' is already in use in this workspace",
-            )
-
-        from datetime import UTC, datetime
-
-        now = datetime.now(UTC)
-        proto = Agent(
-            id="",
-            workspace_id=workspace_id,
-            name=body.name,
-            slug=body.slug,
-            avatar=body.avatar,
-            visibility=body.visibility,
-            owner=ctx.user_id,
-            config=_build_create_config(body),
-            created_at=now,
-            updated_at=now,
-        )
-        agent = await self._repo.create(proto)
-
-        # Eagerly materialize the soul on disk if enabled. Failures here
-        # are non-fatal; AgentPool will retry lazily on first chat.
-        if agent.config.soul_enabled:
-            await _try_eager_soul(agent)
-
-        return agent
-
-    async def get(self, agent_id: str) -> Agent:
-        agent = await self._repo.get(agent_id)
-        if agent is None:
-            raise NotFound("agent", agent_id)
-        return agent
-
-    async def get_by_slug(self, workspace_id: str, slug: str) -> Agent:
-        agent = await self._repo.get_by_slug(workspace_id, slug)
-        if agent is None:
-            raise NotFound("agent", slug)
-        return agent
-
-    async def list_agents(self, workspace_id: str, *, query: str | None = None) -> list[Agent]:
-        return await self._repo.list_by_workspace(workspace_id, query=query)
-
-    async def update(self, ctx: RequestContext, agent_id: str, body: UpdateAgentRequest) -> Agent:
-        existing = await self._repo.get(agent_id)
-        if existing is None:
-            raise NotFound("agent", agent_id)
-        if existing.owner != ctx.user_id:
-            raise Forbidden("agent.not_owner", "Only the agent owner can update it")
-
-        new_config = _apply_update(existing.config, body)
-        return await self._repo.update_config(
-            agent_id,
-            name=body.name,
-            avatar=body.avatar,
-            visibility=body.visibility,
-            config=new_config if new_config != existing.config else None,
-        )
-
-    async def delete(self, ctx: RequestContext, agent_id: str) -> None:
-        existing = await self._repo.get(agent_id)
-        if existing is None:
-            raise NotFound("agent", agent_id)
-        if existing.owner != ctx.user_id:
-            raise Forbidden("agent.not_owner", "Only the agent owner can delete it")
-        await self._repo.delete(agent_id)
-
-    async def get_scopes(self, agent_id: str) -> list[str]:
-        agent = await self._repo.get(agent_id)
-        if agent is None:
-            raise NotFound("agent", agent_id)
-        return list(agent.config.scopes)
-
-    async def set_scopes(self, agent_id: str, scopes: list[str]) -> list[str]:
-        cleaned = normalise_and_validate_scopes(scopes)
-        existing = await self._repo.get(agent_id)
-        if existing is None:
-            raise NotFound("agent", agent_id)
-        new_config = replace(existing.config, scopes=tuple(cleaned))
-        updated = await self._repo.update_config(agent_id, config=new_config)
-        return list(updated.config.scopes)
-
-    async def discover(
-        self,
-        ctx: RequestContext,
-        workspace_id: str,
-        body: DiscoverRequest,
-    ) -> list[Agent]:
-        return await self._repo.discover(
-            workspace_id=workspace_id,
-            user_id=ctx.user_id,
-            visibility=body.visibility,
-            query=body.query,
-            page=body.page,
-            page_size=body.page_size,
-        )
-
-    # ------------------------------------------------------------------
-    # Legacy classmethod facade — preserves the existing call signatures
-    # and wire-format dicts used by agents/router.py.
-    # ------------------------------------------------------------------
-
-    @classmethod
-    def _default(cls) -> AgentService:
-        return cls(get_default_repository())
-
-    @classmethod
-    async def create_default(
-        cls, workspace_id: str, user_id: str, body: CreateAgentRequest
-    ) -> dict:
-        ctx = _legacy_ctx(user_id, workspace_id)
-        agent = await cls._default().create(ctx, workspace_id, body)
-        return agent_to_dict(agent)
-
-    @classmethod
-    async def list_agents_default(cls, workspace_id: str, query: str | None = None) -> list[dict]:
-        items = await cls._default().list_agents(workspace_id, query=query)
-        return [agent_to_dict(a) for a in items]
-
-    @classmethod
-    async def get_default(cls, agent_id: str) -> dict:
-        agent = await cls._default().get(agent_id)
-        return agent_to_dict(agent)
-
-    @classmethod
-    async def get_by_slug_default(cls, workspace_id: str, slug: str) -> dict:
-        agent = await cls._default().get_by_slug(workspace_id, slug)
-        return agent_to_dict(agent)
-
-    @classmethod
-    async def update_default(cls, agent_id: str, user_id: str, body: UpdateAgentRequest) -> dict:
-        ctx = _legacy_ctx(user_id, None)
-        agent = await cls._default().update(ctx, agent_id, body)
-        return agent_to_dict(agent)
-
-    @classmethod
-    async def delete_default(cls, agent_id: str, user_id: str) -> None:
-        ctx = _legacy_ctx(user_id, None)
-        await cls._default().delete(ctx, agent_id)
-
-    @classmethod
-    async def get_scopes_default(cls, agent_id: str) -> list[str]:
-        return await cls._default().get_scopes(agent_id)
-
-    @classmethod
-    async def set_scopes_default(cls, agent_id: str, scopes: list[str]) -> list[str]:
-        return await cls._default().set_scopes(agent_id, scopes)
-
-    @classmethod
-    async def discover_default(
-        cls, workspace_id: str, user_id: str, body: DiscoverRequest
-    ) -> list[dict]:
-        ctx = _legacy_ctx(user_id, workspace_id)
-        items = await cls._default().discover(ctx, workspace_id, body)
-        return [agent_to_dict(a) for a in items]
+    return replace(current, **overrides) if overrides else current
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Public API
 # ---------------------------------------------------------------------------
 
 
-def _legacy_ctx(user_id: str, workspace_id: str | None) -> RequestContext:
-    """Build a RequestContext for the legacy classmethod facade."""
-    from datetime import UTC, datetime
-
-    from ee.cloud._core.context import ScopeKind
-
-    return RequestContext(
-        user_id=user_id,
-        workspace_id=workspace_id,
-        request_id="legacy",
-        scope=ScopeKind.NONE,
-        started_at=datetime.now(UTC),
+async def create(
+    ctx: RequestContext, workspace_id: str, body: CreateAgentRequest
+) -> Agent:
+    existing = await _AgentDoc.find_one(
+        _AgentDoc.workspace == workspace_id,
+        _AgentDoc.slug == body.slug,
     )
+    if existing is not None:
+        raise ConflictError(
+            "agent.slug_taken",
+            f"Slug '{body.slug}' is already in use in this workspace",
+        )
+
+    config = _build_create_config(body)
+    doc = _AgentDoc(
+        workspace=workspace_id,
+        name=body.name,
+        slug=body.slug,
+        avatar=body.avatar,
+        visibility=body.visibility,
+        owner=ctx.user_id,
+        config=_config_to_doc(config),
+    )
+    await doc.insert()
+    agent = _to_domain(doc)
+
+    # Eagerly materialize the soul on disk if enabled. Failures are
+    # non-fatal; AgentPool will retry lazily on first chat.
+    if agent.config.soul_enabled:
+        await _try_eager_soul(agent)
+
+    return agent
+
+
+async def get(agent_id: str) -> Agent:
+    try:
+        doc = await _AgentDoc.get(PydanticObjectId(agent_id))
+    except Exception:
+        doc = None
+    if doc is None:
+        raise NotFound("agent", agent_id)
+    return _to_domain(doc)
+
+
+async def get_by_slug(workspace_id: str, slug: str) -> Agent:
+    doc = await _AgentDoc.find_one(
+        _AgentDoc.workspace == workspace_id,
+        _AgentDoc.slug == slug,
+    )
+    if doc is None:
+        raise NotFound("agent", slug)
+    return _to_domain(doc)
+
+
+async def list_agents(
+    workspace_id: str, *, query: str | None = None
+) -> list[Agent]:
+    filters: dict[str, Any] = {"workspace": workspace_id}
+    if query:
+        filters["name"] = {"$regex": query, "$options": "i"}
+    docs = await _AgentDoc.find(filters).to_list()
+    return [_to_domain(d) for d in docs]
+
+
+async def update(
+    ctx: RequestContext, agent_id: str, body: UpdateAgentRequest
+) -> Agent:
+    try:
+        doc = await _AgentDoc.get(PydanticObjectId(agent_id))
+    except Exception:
+        doc = None
+    if doc is None:
+        raise NotFound("agent", agent_id)
+    if doc.owner != ctx.user_id:
+        raise Forbidden("agent.not_owner", "Only the agent owner can update it")
+
+    new_config = _apply_update(_config_to_domain(doc.config), body)
+
+    if body.name is not None:
+        doc.name = body.name
+    if body.avatar is not None:
+        doc.avatar = body.avatar
+    if body.visibility is not None:
+        doc.visibility = body.visibility
+    if new_config != _config_to_domain(doc.config):
+        doc.config = _config_to_doc(new_config)
+    await doc.save()
+    return _to_domain(doc)
+
+
+async def delete(ctx: RequestContext, agent_id: str) -> None:
+    try:
+        doc = await _AgentDoc.get(PydanticObjectId(agent_id))
+    except Exception:
+        doc = None
+    if doc is None:
+        raise NotFound("agent", agent_id)
+    if doc.owner != ctx.user_id:
+        raise Forbidden("agent.not_owner", "Only the agent owner can delete it")
+    await doc.delete()
+
+
+async def get_scopes(agent_id: str) -> list[str]:
+    agent = await get(agent_id)
+    return list(agent.config.scopes)
+
+
+async def set_scopes(agent_id: str, scopes: list[str]) -> list[str]:
+    cleaned = normalise_and_validate_scopes(scopes)
+    try:
+        doc = await _AgentDoc.get(PydanticObjectId(agent_id))
+    except Exception:
+        doc = None
+    if doc is None:
+        raise NotFound("agent", agent_id)
+    new_config = replace(_config_to_domain(doc.config), scopes=tuple(cleaned))
+    doc.config = _config_to_doc(new_config)
+    await doc.save()
+    return list(new_config.scopes)
+
+
+async def discover(
+    ctx: RequestContext,
+    workspace_id: str,
+    body: DiscoverRequest,
+) -> list[Agent]:
+    filters: dict[str, Any] = {}
+    if body.visibility == "private":
+        filters["workspace"] = workspace_id
+        filters["owner"] = ctx.user_id
+    elif body.visibility == "workspace":
+        filters["workspace"] = workspace_id
+    elif body.visibility == "public":
+        filters["visibility"] = "public"
+    else:
+        filters["$or"] = [
+            {"workspace": workspace_id, "owner": ctx.user_id},
+            {"workspace": workspace_id, "visibility": "workspace"},
+            {"visibility": "public"},
+        ]
+    if body.query:
+        filters["name"] = {"$regex": body.query, "$options": "i"}
+
+    skip = (body.page - 1) * body.page_size
+    docs = await _AgentDoc.find(filters).skip(skip).limit(body.page_size).to_list()
+    return [_to_domain(d) for d in docs]
 
 
 async def _try_eager_soul(agent: Agent) -> None:
-    """Best-effort eager soul materialization. Logs and continues on
-    failure — AgentPool will retry on first chat."""
+    """Best-effort eager soul materialization. Logs and continues on failure."""
     try:
-        from beanie import PydanticObjectId
-
-        from ee.cloud.models.agent import Agent as _AgentDoc
         from pocketpaw.agents.pool import get_agent_pool
 
-        # AgentPool.ensure_soul expects a Beanie doc; reload it.
         doc = await _AgentDoc.get(PydanticObjectId(agent.id))
         if doc is None:
             return
         await get_agent_pool().ensure_soul(doc)
     except Exception:
         logger.warning("Eager soul creation failed for agent %s", agent.id, exc_info=True)
+
+
+__all__ = [
+    "legacy_ctx",
+    "create",
+    "get",
+    "get_by_slug",
+    "list_agents",
+    "update",
+    "delete",
+    "get_scopes",
+    "set_scopes",
+    "discover",
+]
