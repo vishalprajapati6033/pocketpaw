@@ -114,13 +114,13 @@ def mount_cloud(app: FastAPI) -> None:
     from ee.cloud.auth.core import current_active_user as _current_active_user
     from ee.cloud.files.abac_config import load_rules as _load_abac_rules
     from ee.cloud.files.browse import browse_mount as _browse_mount
+    from ee.cloud.files.dto import RequestContext as _RequestContext
     from ee.cloud.files.errors import FilesError as _FilesError
     from ee.cloud.files.errors import MountNotFound as _MountNotFound
     from ee.cloud.files.mounts_config import load_mounts as _load_mounts
     from ee.cloud.files.providers.kb import KbProvider as _KbProvider
     from ee.cloud.files.providers.uploads import UploadsProvider as _UploadsProvider
     from ee.cloud.files.registry import ProviderRegistry as _ProviderRegistry
-    from ee.cloud.files.dto import RequestContext as _RequestContext
     from ee.cloud.files.tree import CachedTreeBuilder as _CachedTreeBuilder
     from ee.cloud.models.user import User as _User
     from ee.cloud.uploads.mongo_store import MongoFileStore as _UploadsStore

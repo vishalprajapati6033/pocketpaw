@@ -20,7 +20,6 @@ from ee.cloud._core.errors import NotFound, ValidationError
 from ee.cloud.auth.domain import AuthUser, WorkspaceMembershipRef
 from ee.cloud.models.user import User as _UserDoc
 
-
 # ---------------------------------------------------------------------------
 # Private mapping helpers
 # ---------------------------------------------------------------------------

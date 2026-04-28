@@ -43,7 +43,6 @@ from ee.cloud.workspace.dto import (
     UpdateWorkspaceRequest,
 )
 
-
 pytestmark = pytest.mark.usefixtures("mongo_db")
 
 

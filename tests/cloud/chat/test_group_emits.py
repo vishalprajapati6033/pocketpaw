@@ -85,10 +85,9 @@ async def test_create_group_emits_group_created(chat_repos):
 
 @pytest.mark.asyncio
 async def test_update_group_emits_group_updated(chat_repos):
-    from tests.cloud.chat.conftest import make_domain_group
-
     from ee.cloud.chat.group_service import GroupService
     from ee.cloud.chat.schemas import UpdateGroupRequest
+    from tests.cloud.chat.conftest import make_domain_group
 
     _msg_repo, grp_repo = chat_repos
     grp_repo.add(make_domain_group(id="g1", owner="u1"))
@@ -117,9 +116,8 @@ async def test_update_group_emits_group_updated(chat_repos):
 
 @pytest.mark.asyncio
 async def test_archive_group_emits_group_updated_archived(chat_repos):
-    from tests.cloud.chat.conftest import make_domain_group
-
     from ee.cloud.chat.group_service import GroupService
+    from tests.cloud.chat.conftest import make_domain_group
 
     _msg_repo, grp_repo = chat_repos
     grp_repo.add(make_domain_group(id="g1", owner="u1"))
@@ -141,9 +139,8 @@ async def test_archive_group_emits_group_updated_archived(chat_repos):
 
 @pytest.mark.asyncio
 async def test_join_group_emits_member_added_and_invalidates_cache(chat_repos):
-    from tests.cloud.chat.conftest import make_domain_group
-
     from ee.cloud.chat.group_service import GroupService
+    from tests.cloud.chat.conftest import make_domain_group
 
     _msg_repo, grp_repo = chat_repos
     grp_repo.add(make_domain_group(id="g1", owner="u1", type="public", members=["u1"]))
@@ -175,9 +172,8 @@ async def test_join_group_emits_member_added_and_invalidates_cache(chat_repos):
 
 @pytest.mark.asyncio
 async def test_join_group_no_emit_when_already_member(chat_repos):
-    from tests.cloud.chat.conftest import make_domain_group
-
     from ee.cloud.chat.group_service import GroupService
+    from tests.cloud.chat.conftest import make_domain_group
 
     _msg_repo, grp_repo = chat_repos
     grp_repo.add(
@@ -204,9 +200,8 @@ async def test_join_group_no_emit_when_already_member(chat_repos):
 
 @pytest.mark.asyncio
 async def test_leave_group_emits_member_removed_and_invalidates_cache(chat_repos):
-    from tests.cloud.chat.conftest import make_domain_group
-
     from ee.cloud.chat.group_service import GroupService
+    from tests.cloud.chat.conftest import make_domain_group
 
     _msg_repo, grp_repo = chat_repos
     grp_repo.add(make_domain_group(id="g1", owner="u1", members=["u1", "u2"]))
@@ -233,9 +228,8 @@ async def test_leave_group_emits_member_removed_and_invalidates_cache(chat_repos
 
 @pytest.mark.asyncio
 async def test_add_members_emits_one_event_per_newly_added_user(chat_repos):
-    from tests.cloud.chat.conftest import make_domain_group
-
     from ee.cloud.chat.group_service import GroupService
+    from tests.cloud.chat.conftest import make_domain_group
 
     _msg_repo, grp_repo = chat_repos
     grp_repo.add(
@@ -277,9 +271,8 @@ async def test_add_members_emits_one_event_per_newly_added_user(chat_repos):
 async def test_add_members_skips_duplicates_and_does_not_invalidate_when_none_added(
     chat_repos,
 ):
-    from tests.cloud.chat.conftest import make_domain_group
-
     from ee.cloud.chat.group_service import GroupService
+    from tests.cloud.chat.conftest import make_domain_group
 
     _msg_repo, grp_repo = chat_repos
     grp_repo.add(
@@ -309,9 +302,8 @@ async def test_add_members_skips_duplicates_and_does_not_invalidate_when_none_ad
 
 @pytest.mark.asyncio
 async def test_remove_member_emits_member_removed_and_invalidates_cache(chat_repos):
-    from tests.cloud.chat.conftest import make_domain_group
-
     from ee.cloud.chat.group_service import GroupService
+    from tests.cloud.chat.conftest import make_domain_group
 
     _msg_repo, grp_repo = chat_repos
     grp_repo.add(
@@ -342,9 +334,8 @@ async def test_remove_member_emits_member_removed_and_invalidates_cache(chat_rep
 
 @pytest.mark.asyncio
 async def test_set_member_role_emits_member_role_no_invalidation(chat_repos):
-    from tests.cloud.chat.conftest import make_domain_group
-
     from ee.cloud.chat.group_service import GroupService
+    from tests.cloud.chat.conftest import make_domain_group
 
     _msg_repo, grp_repo = chat_repos
     grp_repo.add(
@@ -375,10 +366,9 @@ async def test_set_member_role_emits_member_role_no_invalidation(chat_repos):
 
 @pytest.mark.asyncio
 async def test_add_agent_emits_agent_added(chat_repos):
-    from tests.cloud.chat.conftest import make_domain_group
-
     from ee.cloud.chat.group_service import GroupService
     from ee.cloud.chat.schemas import AddGroupAgentRequest
+    from tests.cloud.chat.conftest import make_domain_group
 
     _msg_repo, grp_repo = chat_repos
     grp_repo.add(make_domain_group(id="g1", owner="u1", agents=[]))
@@ -403,11 +393,10 @@ async def test_add_agent_emits_agent_added(chat_repos):
 
 @pytest.mark.asyncio
 async def test_update_agent_emits_agent_updated(chat_repos):
-    from tests.cloud.chat.conftest import make_domain_group
-
     from ee.cloud.chat.domain import GroupAgent
     from ee.cloud.chat.group_service import GroupService
     from ee.cloud.chat.schemas import UpdateGroupAgentRequest
+    from tests.cloud.chat.conftest import make_domain_group
 
     _msg_repo, grp_repo = chat_repos
     grp_repo.add(
@@ -436,10 +425,9 @@ async def test_update_agent_emits_agent_updated(chat_repos):
 
 @pytest.mark.asyncio
 async def test_remove_agent_emits_agent_removed(chat_repos):
-    from tests.cloud.chat.conftest import make_domain_group
-
     from ee.cloud.chat.domain import GroupAgent
     from ee.cloud.chat.group_service import GroupService
+    from tests.cloud.chat.conftest import make_domain_group
 
     _msg_repo, grp_repo = chat_repos
     grp_repo.add(
@@ -489,9 +477,8 @@ async def test_get_or_create_dm_emits_when_created(chat_repos):
 
 @pytest.mark.asyncio
 async def test_get_or_create_dm_no_emit_when_existing(chat_repos):
-    from tests.cloud.chat.conftest import make_domain_group
-
     from ee.cloud.chat.group_service import GroupService
+    from tests.cloud.chat.conftest import make_domain_group
 
     _msg_repo, grp_repo = chat_repos
     grp_repo.add(
@@ -552,10 +539,9 @@ async def test_get_or_create_agent_dm_emits_when_created(chat_repos):
 
 @pytest.mark.asyncio
 async def test_get_or_create_agent_dm_no_emit_when_existing(chat_repos):
-    from tests.cloud.chat.conftest import make_domain_group
-
     from ee.cloud.chat.domain import GroupAgent
     from ee.cloud.chat.group_service import GroupService
+    from tests.cloud.chat.conftest import make_domain_group
 
     _msg_repo, grp_repo = chat_repos
     grp_repo.add(
@@ -596,9 +582,8 @@ async def test_get_or_create_agent_dm_no_emit_when_existing(chat_repos):
 @pytest.mark.asyncio
 async def test_join_group_allows_channel_type(chat_repos):
     """Channels should be self-joinable just like public groups."""
-    from tests.cloud.chat.conftest import make_domain_group
-
     from ee.cloud.chat.group_service import GroupService
+    from tests.cloud.chat.conftest import make_domain_group
 
     _msg_repo, grp_repo = chat_repos
     grp_repo.add(make_domain_group(id="g1", owner="u1", type="channel", members=["u1"]))
@@ -626,10 +611,9 @@ async def test_join_group_allows_channel_type(chat_repos):
 @pytest.mark.asyncio
 async def test_join_group_still_rejects_private(chat_repos):
     """Private groups must remain invite-only."""
-    from tests.cloud.chat.conftest import make_domain_group
-
     from ee.cloud.chat.group_service import GroupService
     from ee.cloud.shared.errors import Forbidden
+    from tests.cloud.chat.conftest import make_domain_group
 
     _msg_repo, grp_repo = chat_repos
     grp_repo.add(make_domain_group(id="g1", owner="u1", type="private", members=["u1"]))

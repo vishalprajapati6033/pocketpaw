@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from ee.cloud.files.providers.base import BaseFolderProvider
 from ee.cloud.files.dto import (
     FileEntry,
     Page,
@@ -21,6 +20,7 @@ from ee.cloud.files.dto import (
     RequestContext,
     ResolvedMount,
 )
+from ee.cloud.files.providers.base import BaseFolderProvider
 
 _MOUNT = "/My Files"
 _FOLDER_MIME = "application/x-directory"

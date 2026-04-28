@@ -8,7 +8,6 @@ from typing import Any
 
 import pytest
 
-from ee.cloud.files.errors import ProviderUnsupported
 from ee.cloud.files.dto import (
     FileEntry,
     Page,
@@ -16,6 +15,7 @@ from ee.cloud.files.dto import (
     RequestContext,
     ResolvedMount,
 )
+from ee.cloud.files.errors import ProviderUnsupported
 
 
 class FakeProvider:

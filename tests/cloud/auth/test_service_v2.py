@@ -16,7 +16,6 @@ from ee.cloud.auth import service as auth_service
 from ee.cloud.models.user import User as _UserDoc
 from ee.cloud.models.user import WorkspaceMembership
 
-
 pytestmark = pytest.mark.usefixtures("mongo_db")
 
 

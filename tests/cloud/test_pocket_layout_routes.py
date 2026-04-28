@@ -31,13 +31,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from ee.cloud.license import require_license
+from ee.cloud.pockets import service as pockets_service
 from ee.cloud.pockets.layouts import (
     UserTemplateStore,
     get_user_template_store,
     parse_layout_yaml,
     reset_user_template_store,
 )
-from ee.cloud.pockets import service as pockets_service
 from ee.cloud.pockets.router import router
 from ee.cloud.shared.deps import (
     current_user_id,
@@ -45,7 +45,6 @@ from ee.cloud.shared.deps import (
     require_pocket_edit,
     require_pocket_owner,
 )
-
 
 FAKE_WORKSPACE = "ws-alpha"
 FAKE_USER = "user-alice"

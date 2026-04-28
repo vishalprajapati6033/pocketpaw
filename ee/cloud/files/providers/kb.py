@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from ee.cloud.files.providers.base import BaseFolderProvider
 from ee.cloud.files.dto import (
     FileEntry,
     Page,
@@ -26,6 +25,7 @@ from ee.cloud.files.dto import (
     RequestContext,
     ResolvedMount,
 )
+from ee.cloud.files.providers.base import BaseFolderProvider
 
 
 class _KbService(Protocol):

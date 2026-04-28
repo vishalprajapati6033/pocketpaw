@@ -13,15 +13,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from fastapi import File as FastAPIFile
 from starlette.responses import Response
 
+from ee.cloud.agents import service as agents_service
 from ee.cloud.agents.dto import (
     CreateAgentRequest,
     DiscoverRequest,
     ScopeAssignmentRequest,
     ScopeAssignmentResponse,
     UpdateAgentRequest,
+    agent_to_dict,
 )
-from ee.cloud.agents import service as agents_service
-from ee.cloud.agents.dto import agent_to_dict
 from ee.cloud.license import require_license
 from ee.cloud.shared.deps import (
     current_user_id,

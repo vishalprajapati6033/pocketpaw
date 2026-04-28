@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
 
 
@@ -54,10 +52,9 @@ def test_init_realtime_falls_back_to_inprocess_for_unsupported_bus(monkeypatch, 
 async def test_group_list_member_ids_returns_members_field():
     """Phase 10 routes list_member_ids through ``IGroupRepository.get`` so the
     realtime audience lookup avoids a Beanie call from the service layer."""
-    from tests.cloud.chat.conftest import FakeGroupRepo, make_domain_group
-
     from ee.cloud.chat.group_service import GroupService
     from ee.cloud.chat.repositories import set_group_repository
+    from tests.cloud.chat.conftest import FakeGroupRepo, make_domain_group
 
     grp_repo = FakeGroupRepo()
     grp_repo.add(make_domain_group(id="g1", members=["u1", "u2", "u3"]))
@@ -69,10 +66,9 @@ async def test_group_list_member_ids_returns_members_field():
 
 @pytest.mark.asyncio
 async def test_group_list_member_ids_returns_empty_for_missing_group():
-    from tests.cloud.chat.conftest import FakeGroupRepo
-
     from ee.cloud.chat.group_service import GroupService
     from ee.cloud.chat.repositories import set_group_repository
+    from tests.cloud.chat.conftest import FakeGroupRepo
 
     set_group_repository(FakeGroupRepo())  # empty repo → group lookup misses
     ids = await GroupService.list_member_ids("gmissing")

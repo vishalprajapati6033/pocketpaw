@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import secrets
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from beanie import PydanticObjectId
 

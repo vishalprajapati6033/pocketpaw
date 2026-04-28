@@ -8,7 +8,6 @@ DB; no Protocol fakes.
 
 from __future__ import annotations
 
-import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient

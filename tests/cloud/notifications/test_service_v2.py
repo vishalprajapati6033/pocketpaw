@@ -17,7 +17,6 @@ from ee.cloud._core.realtime.events import (
 )
 from ee.cloud.notifications import service as notifications_service
 
-
 pytestmark = pytest.mark.usefixtures("mongo_db")
 
 

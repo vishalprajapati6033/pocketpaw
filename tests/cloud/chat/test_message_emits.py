@@ -95,10 +95,10 @@ async def test_send_message_emits_new_and_sent(chat_repos):
 
 @pytest.mark.asyncio
 async def test_edit_message_emits_edited(chat_repos):
-    from tests.cloud.chat.conftest import make_domain_message
     from ee.cloud.chat.message_service import MessageService
     from ee.cloud.chat.schemas import EditMessageRequest
     from ee.cloud.realtime.events import MessageEdited
+    from tests.cloud.chat.conftest import make_domain_message
 
     msg_repo, _grp_repo = chat_repos
     msg_repo.add(make_domain_message(id="m1", group="g1", sender="u1"))
@@ -129,9 +129,9 @@ async def test_edit_message_emits_edited(chat_repos):
 
 @pytest.mark.asyncio
 async def test_delete_message_emits_deleted(chat_repos):
-    from tests.cloud.chat.conftest import make_domain_message
     from ee.cloud.chat.message_service import MessageService
     from ee.cloud.realtime.events import MessageDeleted
+    from tests.cloud.chat.conftest import make_domain_message
 
     msg_repo, _grp_repo = chat_repos
     msg_repo.add(make_domain_message(id="m1", group="g1", sender="u1"))
@@ -151,9 +151,9 @@ async def test_delete_message_emits_deleted(chat_repos):
 
 @pytest.mark.asyncio
 async def test_toggle_reaction_emits_message_reaction(chat_repos):
-    from tests.cloud.chat.conftest import make_domain_message
     from ee.cloud.chat.message_service import MessageService
     from ee.cloud.realtime.events import MessageReaction
+    from tests.cloud.chat.conftest import make_domain_message
 
     msg_repo, _grp_repo = chat_repos
     msg_repo.add(make_domain_message(id="m1", group="g1", sender="u1"))
@@ -344,9 +344,9 @@ async def test_send_reply_does_not_bump_thread_count(chat_repos):
     """Inline-quoted replies replaced threads: the parent message is
     fetched for preview only — never edited/deleted/reacted as a side
     effect of the reply send."""
-    from tests.cloud.chat.conftest import make_domain_message
     from ee.cloud.chat.message_service import MessageService
     from ee.cloud.chat.schemas import SendMessageRequest
+    from tests.cloud.chat.conftest import make_domain_message
 
     msg_repo, _grp_repo = chat_repos
     parent = make_domain_message(id="parent1", group="g1", sender="u_other", thread_count=0)
@@ -380,10 +380,10 @@ async def test_send_reply_does_not_bump_thread_count(chat_repos):
 async def test_send_reply_emits_message_new_not_thread_reply(chat_repos):
     """Inline replies fan out via MessageNew; no ThreadReply event fires
     because we no longer render a separate thread panel."""
-    from tests.cloud.chat.conftest import make_domain_message
     from ee.cloud.chat.message_service import MessageService
     from ee.cloud.chat.schemas import SendMessageRequest
     from ee.cloud.realtime.events import MessageNew, ThreadReply
+    from tests.cloud.chat.conftest import make_domain_message
 
     msg_repo, _grp_repo = chat_repos
     msg_repo.add(make_domain_message(id="parent1", group="g1", sender="u_other"))

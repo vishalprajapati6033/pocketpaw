@@ -17,12 +17,12 @@ from __future__ import annotations
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends
-
-from ee.cloud._core.errors import CloudError
 from pydantic import BaseModel, Field
 from starlette.responses import Response
 
+from ee.cloud._core.errors import CloudError
 from ee.cloud.license import require_license
+from ee.cloud.pockets import service as pockets_service
 from ee.cloud.pockets.dto import (
     AddCollaboratorRequest,
     AddWidgetRequest,
@@ -39,7 +39,6 @@ from ee.cloud.pockets.layouts import (
     get_user_template_store,
     parse_layout_yaml,
 )
-from ee.cloud.pockets import service as pockets_service
 from ee.cloud.sessions.dto import CreateSessionRequest
 from ee.cloud.shared.deps import (
     current_user_id,

@@ -20,7 +20,6 @@ from ee.cloud._core.realtime.events import (
 from ee.cloud.sessions import service as sessions_service
 from ee.cloud.sessions.dto import CreateSessionRequest, UpdateSessionRequest
 
-
 pytestmark = pytest.mark.usefixtures("mongo_db")
 
 
