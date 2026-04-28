@@ -1,4 +1,8 @@
-"""Tests for the refactored AuthService."""
+"""Tests for the auth service.
+
+Uses the shared ``mongo_db`` fixture so service functions exercise real
+Beanie reads/writes against an isolated mongomock-motor DB.
+"""
 
 from __future__ import annotations
 
@@ -8,54 +12,39 @@ import pytest
 
 from ee.cloud._core.context import RequestContext, ScopeKind
 from ee.cloud._core.errors import NotFound, ValidationError
-from ee.cloud.auth.domain import AuthUser, WorkspaceMembershipRef
-from ee.cloud.auth.service import AuthService
+from ee.cloud.auth import service as auth_service
+from ee.cloud.models.user import User as _UserDoc
+from ee.cloud.models.user import WorkspaceMembership
 
 
-class _Repo:
-    def __init__(self) -> None:
-        self._users: dict[str, AuthUser] = {}
-
-    def seed(self, u: AuthUser) -> None:
-        self._users[u.id] = u
-
-    async def get_by_id(self, user_id: str) -> AuthUser | None:
-        return self._users.get(user_id)
-
-    async def update_profile(
-        self,
-        user_id: str,
-        *,
-        full_name: str | None = None,
-        avatar: str | None = None,
-        status: str | None = None,
-    ) -> AuthUser:
-        from dataclasses import replace
-
-        u = self._users.get(user_id)
-        if u is None:
-            raise NotFound("user", user_id)
-        u = replace(
-            u,
-            full_name=full_name if full_name is not None else u.full_name,
-            avatar=avatar if avatar is not None else u.avatar,
-            status=status if status is not None else u.status,
-        )
-        self._users[user_id] = u
-        return u
-
-    async def set_active_workspace(self, user_id: str, workspace_id: str) -> AuthUser:
-        from dataclasses import replace
-
-        u = self._users.get(user_id)
-        if u is None:
-            raise NotFound("user", user_id)
-        u = replace(u, active_workspace=workspace_id)
-        self._users[user_id] = u
-        return u
+pytestmark = pytest.mark.usefixtures("mongo_db")
 
 
-def _ctx(user_id: str = "u1") -> RequestContext:
+async def _seed_user(
+    *,
+    email: str = "a@b.c",
+    full_name: str = "Alice",
+    workspace_role: str = "member",
+) -> _UserDoc:
+    doc = _UserDoc(
+        email=email,
+        hashed_password="x",
+        is_active=True,
+        is_verified=True,
+        full_name=full_name,
+        workspaces=[
+            WorkspaceMembership(
+                workspace="w1",
+                role=workspace_role,
+                joined_at=datetime(2026, 1, 1, tzinfo=UTC),
+            )
+        ],
+    )
+    await doc.insert()
+    return doc
+
+
+def _ctx(user_id: str) -> RequestContext:
     return RequestContext(
         user_id=user_id,
         workspace_id=None,
@@ -65,74 +54,51 @@ def _ctx(user_id: str = "u1") -> RequestContext:
     )
 
 
-def _user(uid: str = "u1", **overrides) -> AuthUser:
-    base = dict(
-        id=uid,
-        email="a@b.c",
-        full_name="Alice",
-        avatar="",
-        status="offline",
-        active_workspace=None,
-        workspaces=(
-            WorkspaceMembershipRef(
-                workspace="w1",
-                role="member",
-                joined_at=datetime(2026, 1, 1, tzinfo=UTC),
-            ),
-        ),
-        is_verified=True,
-        is_superuser=False,
-    )
-    base.update(overrides)
-    return AuthUser(**base)
-
-
-@pytest.fixture
-def repo() -> _Repo:
-    r = _Repo()
-    r.seed(_user())
-    return r
-
-
-@pytest.fixture
-def service(repo: _Repo) -> AuthService:
-    return AuthService(repo)
-
-
-async def test_get_profile_returns_user(service) -> None:
-    out = await service.get_profile(_ctx())
-    assert out.id == "u1"
+async def test_get_profile_returns_user() -> None:
+    doc = await _seed_user()
+    out = await auth_service.get_profile(_ctx(str(doc.id)))
+    assert out.id == str(doc.id)
     assert out.email == "a@b.c"
 
 
-async def test_get_profile_raises_not_found(service) -> None:
+async def test_get_profile_raises_not_found() -> None:
+    from beanie import PydanticObjectId
+
+    bogus = str(PydanticObjectId())
     with pytest.raises(NotFound):
-        await service.get_profile(_ctx("missing"))
+        await auth_service.get_profile(_ctx(bogus))
 
 
-async def test_update_profile_changes_full_name(service) -> None:
-    out = await service.update_profile(_ctx(), full_name="Bob")
+async def test_update_profile_changes_full_name() -> None:
+    doc = await _seed_user()
+    out = await auth_service.update_profile(_ctx(str(doc.id)), full_name="Bob")
     assert out.full_name == "Bob"
 
 
-async def test_update_profile_partial_only_full_name(service, repo) -> None:
-    await service.update_profile(_ctx(), full_name="Bob")
-    u = await repo.get_by_id("u1")
-    assert u is not None
-    assert u.full_name == "Bob"
-    assert u.avatar == ""  # untouched
+async def test_update_profile_partial_only_full_name() -> None:
+    doc = await _seed_user()
+    await auth_service.update_profile(_ctx(str(doc.id)), full_name="Bob")
+    refreshed = await _UserDoc.get(doc.id)
+    assert refreshed is not None
+    assert refreshed.full_name == "Bob"
+    assert refreshed.avatar == ""  # untouched
 
 
-async def test_set_active_workspace_persists(service) -> None:
-    out = await service.set_active_workspace(_ctx(), "w42")
+async def test_set_active_workspace_persists() -> None:
+    doc = await _seed_user()
+    out = await auth_service.set_active_workspace(_ctx(str(doc.id)), "w42")
     assert out.active_workspace == "w42"
 
 
-async def test_set_active_workspace_empty_raises_validation(service) -> None:
+async def test_set_active_workspace_empty_raises_validation() -> None:
+    doc = await _seed_user()
     with pytest.raises(ValidationError):
-        await service.set_active_workspace(_ctx(), "")
+        await auth_service.set_active_workspace(_ctx(str(doc.id)), "")
 
 
-async def test_set_avatar_path_persists(service) -> None:
-    out = await service.set_avatar_path(_ctx(), "/api/v1/auth/avatar/u1.png")
+async def test_set_avatar_path_persists() -> None:
+    doc = await _seed_user()
+    out = await auth_service.set_avatar_path(
+        _ctx(str(doc.id)), "/api/v1/auth/avatar/u1.png"
+    )
     assert out.avatar == "/api/v1/auth/avatar/u1.png"

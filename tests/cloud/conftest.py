@@ -66,7 +66,6 @@ def _reset_repo_singletons():
     # This will become a no-op once all modules drop their repositories.py;
     # the fixture is removed in the final cleanup commit of Milestone 1.
     from ee.cloud.agents import repositories as agents_repos
-    from ee.cloud.auth import repositories as auth_repos
     from ee.cloud.chat import repositories as chat_repos
     from ee.cloud.pockets import repositories as pockets_repos
     from ee.cloud.sessions import repositories as sessions_repos
@@ -74,7 +73,6 @@ def _reset_repo_singletons():
 
     snapshots: list[tuple[object, str, object]] = [
         (agents_repos, "_default", agents_repos._default),  # type: ignore[attr-defined]
-        (auth_repos, "_default", auth_repos._default),  # type: ignore[attr-defined]
         (chat_repos, "_default_message", chat_repos._default_message),  # type: ignore[attr-defined]
         (chat_repos, "_default_group", chat_repos._default_group),  # type: ignore[attr-defined]
         (pockets_repos, "_default", pockets_repos._default),  # type: ignore[attr-defined]

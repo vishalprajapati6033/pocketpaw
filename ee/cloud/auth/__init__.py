@@ -36,9 +36,3 @@ from ee.cloud.auth.dto import (  # noqa: F401
     SetWorkspaceRequest,
     auth_user_to_profile_out,
 )
-from ee.cloud.auth.repositories import (  # noqa: F401
-    BeanieAuthRepository,
-    IAuthRepository,
-    get_default_repository,
-    set_default_repository,
-)
