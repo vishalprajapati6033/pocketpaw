@@ -15,7 +15,7 @@ import re
 import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -34,9 +34,6 @@ from ee.cloud.chat.agent_service import (
     resolve_scope_context,
     session_key_for,
 )
-
-if TYPE_CHECKING:
-    from ee.cloud.models.message import Message as _MessageDoc
 from ee.cloud.license import require_license
 from ee.cloud.shared.deps import current_user_id, current_workspace_id
 from ee.cloud.shared.errors import CloudError
@@ -276,72 +273,42 @@ async def _ensure_scope_session(ctx: ScopeContext) -> str | None:
 
 
 async def _persist_user_message(ctx: ScopeContext, body: CloudAgentChatRequest) -> str:
-    """Persist the caller's message as a ``Message`` document and return its id.
+    """Persist the caller's message via ``message_service`` and return its id.
 
-    We write directly rather than going through ``MessageService.send_message``
-    to avoid triggering the legacy ``agent_bridge`` auto-response path — the
-    SSE endpoint is the sole driver of the reply for this request.
+    We bypass ``message_service.send_message`` to avoid triggering the
+    legacy ``agent_bridge`` auto-response path — the SSE endpoint is the
+    sole driver of the reply for this request.
     """
-    from ee.cloud.models.message import Message
+    from ee.cloud.chat import message_service
 
-    if ctx.kind in (ScopeKind.POCKET, ScopeKind.SESSION):
-        msg = Message(
-            context_type=ctx.kind.value,
-            session_key=session_key_for(ctx),
-            role="user",
-            sender=ctx.user_id,
-            sender_type="user",
-            content=body.content,
-            attachments=body.attachments,
-            workspace_id=ctx.workspace_id,
-        )
-    else:
-        msg = Message(
-            context_type="group",
-            group=ctx.scope_id,
-            sender=ctx.user_id,
-            sender_type="user",
-            content=body.content,
-            attachments=body.attachments,
-            mentions=body.mentions,
-            reply_to=body.reply_to,
-            workspace_id=ctx.workspace_id,
-        )
-    await msg.insert()
-    return str(msg.id)
+    return await message_service.persist_user_message_for_scope(
+        kind=ctx.kind.value,
+        scope_id=ctx.scope_id,
+        user_id=ctx.user_id,
+        workspace_id=ctx.workspace_id,
+        session_key=session_key_for(ctx),
+        content=body.content,
+        attachments=body.attachments,
+        mentions=body.mentions,
+        reply_to=body.reply_to,
+    )
 
 
 async def _persist_assistant_message(
     ctx: ScopeContext, content: str, attachments: list[dict[str, Any]]
-) -> _MessageDoc:
-    from ee.cloud.models.message import Attachment, Message
+) -> Any:
+    from ee.cloud.chat import message_service
 
-    att_models = [Attachment(**a) if isinstance(a, dict) else a for a in attachments]
-    if ctx.kind in (ScopeKind.POCKET, ScopeKind.SESSION):
-        msg = Message(
-            context_type=ctx.kind.value,
-            session_key=session_key_for(ctx),
-            role="assistant",
-            sender=None,
-            sender_type="agent",
-            agent=ctx.target_agent_id,
-            content=content,
-            attachments=att_models,
-            workspace_id=ctx.workspace_id,
-        )
-    else:
-        msg = Message(
-            context_type="group",
-            group=ctx.scope_id,
-            sender=None,
-            sender_type="agent",
-            agent=ctx.target_agent_id,
-            content=content,
-            attachments=att_models,
-            workspace_id=ctx.workspace_id,
-        )
-    await msg.insert()
-    return msg
+    return await message_service.persist_assistant_message_for_scope(
+        kind=ctx.kind.value,
+        scope_id=ctx.scope_id,
+        user_id=ctx.user_id,
+        workspace_id=ctx.workspace_id,
+        session_key=session_key_for(ctx),
+        target_agent_id=ctx.target_agent_id,
+        content=content,
+        attachments=attachments,
+    )
 
 
 async def _broadcast_message_new(

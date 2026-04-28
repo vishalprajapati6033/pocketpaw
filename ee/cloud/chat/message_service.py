@@ -713,12 +713,113 @@ async def search_workspace_messages(
     return [message_to_wire_dict(m) for m in messages]
 
 
+# ---------------------------------------------------------------------------
+# Agent-stream persist helpers
+#
+# These bypass ``send_message`` (and its ``message.sent`` event_bus emit
+# that drives the legacy agent_bridge auto-response path) — the SSE
+# endpoint is the sole driver of the reply, so we go straight to the
+# ``Message`` Beanie doc. Lives here so the agent router stays out of
+# ``ee.cloud.models.message``.
+# ---------------------------------------------------------------------------
+
+
+async def persist_user_message_for_scope(
+    *,
+    kind: str,
+    scope_id: str,
+    user_id: str,
+    workspace_id: str,
+    session_key: str,
+    content: str,
+    attachments: list[dict] | None = None,
+    mentions: list[dict] | None = None,
+    reply_to: str | None = None,
+) -> str:
+    """Persist the caller's message in an agent-stream context.
+
+    ``kind`` is one of ``"pocket" | "session" | "group" | "dm"``. Pocket
+    and session contexts write the row keyed on ``session_key``; group
+    and dm contexts write the row keyed on the group id.
+    """
+    if kind in ("pocket", "session"):
+        msg = _MessageDoc(
+            context_type=kind,  # type: ignore[arg-type]
+            session_key=session_key,
+            role="user",
+            sender=user_id,
+            sender_type="user",
+            content=content,
+            attachments=attachments or [],
+            workspace_id=workspace_id,
+        )
+    else:
+        msg = _MessageDoc(
+            context_type="group",
+            group=scope_id,
+            sender=user_id,
+            sender_type="user",
+            content=content,
+            attachments=attachments or [],
+            mentions=mentions or [],
+            reply_to=reply_to,
+            workspace_id=workspace_id,
+        )
+    await msg.insert()
+    return str(msg.id)
+
+
+async def persist_assistant_message_for_scope(
+    *,
+    kind: str,
+    scope_id: str,
+    user_id: str,
+    workspace_id: str,
+    session_key: str,
+    target_agent_id: str,
+    content: str,
+    attachments: list[dict] | None = None,
+) -> _MessageDoc:
+    """Persist an agent's reply in an agent-stream context. Returns the
+    Beanie doc so callers can read ``msg.id`` / ``msg.createdAt``."""
+    att_models = [
+        _AttachmentDoc(**a) if isinstance(a, dict) else a for a in (attachments or [])
+    ]
+    if kind in ("pocket", "session"):
+        msg = _MessageDoc(
+            context_type=kind,  # type: ignore[arg-type]
+            session_key=session_key,
+            role="assistant",
+            sender=None,
+            sender_type="agent",
+            agent=target_agent_id,
+            content=content,
+            attachments=att_models,
+            workspace_id=workspace_id,
+        )
+    else:
+        msg = _MessageDoc(
+            context_type="group",
+            group=scope_id,
+            sender=None,
+            sender_type="agent",
+            agent=target_agent_id,
+            content=content,
+            attachments=att_models,
+            workspace_id=workspace_id,
+        )
+    await msg.insert()
+    return msg
+
+
 __all__ = [
     "create_agent_message",
     "delete_message",
     "edit_message",
     "get_messages",
     "get_thread",
+    "persist_assistant_message_for_scope",
+    "persist_user_message_for_scope",
     "pin_message",
     "search_messages",
     "search_workspace_messages",

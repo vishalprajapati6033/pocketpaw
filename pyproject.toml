@@ -502,6 +502,7 @@ type = "forbidden"
 allow_indirect_imports = "true"
 source_modules = [
     "ee.cloud.chat.router",
+    "ee.cloud.chat.agent_router",
     "ee.cloud.chat.dto",
     "ee.cloud.chat.domain",
 ]
