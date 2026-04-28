@@ -18,7 +18,7 @@ from ee.cloud.chat.schemas import (
     UpdateGroupAgentRequest,
     UpdateGroupRequest,
 )
-from ee.cloud.models.group import Group, GroupAgent, MemberRole
+from ee.cloud.models.group import Group, MemberRole
 from ee.cloud.realtime.bus import get_resolver
 from ee.cloud.realtime.emit import emit
 from ee.cloud.realtime.events import (
@@ -231,6 +231,25 @@ def _require_domain_group_member(group, user_id: str) -> None:
         raise Forbidden("group.not_member", "You are not a member of this group")
 
 
+def _require_domain_group_admin(group, user_id: str) -> None:
+    """Raise Forbidden if user is not a group admin or owner.
+
+    Operates on the domain ``Group`` value object. ``member_roles`` is
+    a tuple of (user_id, role) pairs on the domain entity.
+    """
+    if group.owner == user_id:
+        return
+    if dict(group.member_roles).get(user_id) == "admin":
+        return
+    log_denial(
+        actor=user_id,
+        action="group.admin",
+        code="group.not_admin",
+        resource_id=group.id,
+    )
+    raise Forbidden("group.not_admin", "Only group admins can perform this action")
+
+
 async def _populate_lookups_for_domain_groups(
     groups: list,
 ) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]]]:
@@ -301,7 +320,12 @@ class GroupService:
         """Create a group and add the creator as a member.
 
         For DMs: validates exactly 2 member_ids, auto-names as "DM".
+
+        Phase 10: routes through ``IGroupRepository.create``.
         """
+        from ee.cloud.chat.dto import group_to_wire_dict
+        from ee.cloud.chat.repositories import get_group_repository
+
         if body.type == "dm":
             if len(body.member_ids) != 1:
                 raise ValidationError(
@@ -314,21 +338,19 @@ class GroupService:
             members = list({user_id, *body.member_ids})
             name = body.name
 
-        slug = _generate_slug(name)
-
-        group = Group(
-            workspace=workspace_id,
+        group = await get_group_repository().create(
+            workspace_id=workspace_id,
             name=name,
-            slug=slug,
-            description=body.description,
+            slug=_generate_slug(name),
+            owner=user_id,
             type=body.type,
+            members=members,
+            description=body.description,
             icon=body.icon,
             color=body.color,
-            members=members,
-            owner=user_id,
         )
-        await group.insert()
-        resp = await _group_response(group)
+        users_by_id, agents_by_id = await _populate_lookups_for_domain_groups([group])
+        resp = group_to_wire_dict(group, users_by_id=users_by_id, agents_by_id=agents_by_id)
         await emit(GroupCreated(data={**resp, "member_ids": list(group.members)}))
         return resp
 
@@ -378,46 +400,66 @@ class GroupService:
 
     @staticmethod
     async def update_group(group_id: str, user_id: str, body: UpdateGroupRequest) -> dict:
-        """Update group fields. Owner only. Cannot update DMs."""
-        group = await _get_group_or_404(group_id)
+        """Update group fields. Owner only. Cannot update DMs.
 
+        Phase 10: routes through ``IGroupRepository.update_fields``.
+        """
+        from ee.cloud.chat.dto import group_to_wire_dict
+        from ee.cloud.chat.repositories import get_group_repository
+
+        repo = get_group_repository()
+        group = await repo.get(group_id)
+        if group is None:
+            raise NotFound("group", group_id)
         if group.type == "dm":
             raise Forbidden("group.cannot_update_dm", "DM groups cannot be updated")
-        _require_group_admin(group, user_id)
+        _require_domain_group_admin(group, user_id)
 
-        if body.name is not None:
-            group.name = body.name
-            group.slug = _generate_slug(body.name)
-        if body.description is not None:
-            group.description = body.description
-        if body.icon is not None:
-            group.icon = body.icon
-        if body.color is not None:
-            group.color = body.color
-        if body.type is not None and body.type != group.type:
-            # DMs can't change type; enforced above. Switching between
-            # private/public/channel just changes who can read.
-            group.type = body.type
-
-        await group.save()
+        new_slug = _generate_slug(body.name) if body.name is not None else None
+        new_type = body.type if (body.type is not None and body.type != group.type) else None
+        updated = await repo.update_fields(
+            group_id,
+            name=body.name,
+            slug=new_slug,
+            description=body.description,
+            type=new_type,
+            icon=body.icon,
+            color=body.color,
+        )
         patched = body.model_dump(exclude_unset=True)
         await emit(GroupUpdated(data={"group_id": group_id, **patched}))
-        return await _group_response(group)
+        users_by_id, agents_by_id = await _populate_lookups_for_domain_groups([updated])
+        return group_to_wire_dict(updated, users_by_id=users_by_id, agents_by_id=agents_by_id)
 
     @staticmethod
     async def archive_group(group_id: str, user_id: str) -> None:
-        """Archive a group. Owner only."""
-        group = await _get_group_or_404(group_id)
-        _require_group_admin(group, user_id)
-        group.archived = True
-        await group.save()
+        """Archive a group. Owner only.
+
+        Phase 10: routes through ``IGroupRepository.update_fields``.
+        """
+        from ee.cloud.chat.repositories import get_group_repository
+
+        repo = get_group_repository()
+        group = await repo.get(group_id)
+        if group is None:
+            raise NotFound("group", group_id)
+        _require_domain_group_admin(group, user_id)
+        await repo.update_fields(group_id, archived=True)
         await emit(GroupUpdated(data={"group_id": group_id, "archived": True}))
 
     @staticmethod
     async def join_group(group_id: str, user_id: str) -> None:
-        """Join a public group. Adds user to members list."""
-        group = await _get_group_or_404(group_id)
+        """Join a public group. Adds user to members list.
 
+        Phase 10: routes through ``IGroupRepository.add_member``.
+        """
+        from ee.cloud.chat.dto import group_to_wire_dict
+        from ee.cloud.chat.repositories import get_group_repository
+
+        repo = get_group_repository()
+        group = await repo.get(group_id)
+        if group is None:
+            raise NotFound("group", group_id)
         if group.type not in ("public", "channel"):
             raise Forbidden(
                 "group.not_joinable",
@@ -426,33 +468,40 @@ class GroupService:
         if group.archived:
             raise Forbidden("group.archived", "Cannot join an archived group")
 
-        if user_id not in group.members:
-            group.members.append(user_id)
-            await group.save()
-            await emit(
-                GroupMemberAdded(data={"group_id": group_id, "user_id": user_id, "role": "edit"})
-            )
-            # The joining user has no local record of this group yet — a
-            # ``group.joined`` (audience = just them) hydrates the room in their
-            # sidebar so they don't have to refresh to see it.
-            resp = await _group_response(group)
-            await emit(GroupJoined(data={**resp, "member_ids": [user_id]}))
-            get_resolver().invalidate_group(group_id)
+        if user_id in group.members:
+            return
+
+        updated = await repo.add_member(group_id, user_id)
+        await emit(
+            GroupMemberAdded(data={"group_id": group_id, "user_id": user_id, "role": "edit"})
+        )
+        # The joining user has no local record of this group yet — a
+        # ``group.joined`` (audience = just them) hydrates the room in their
+        # sidebar so they don't have to refresh to see it.
+        users_by_id, agents_by_id = await _populate_lookups_for_domain_groups([updated])
+        resp = group_to_wire_dict(updated, users_by_id=users_by_id, agents_by_id=agents_by_id)
+        await emit(GroupJoined(data={**resp, "member_ids": [user_id]}))
+        get_resolver().invalidate_group(group_id)
 
     @staticmethod
     async def leave_group(group_id: str, user_id: str) -> None:
-        """Leave a group. Owner cannot leave (must transfer ownership first)."""
-        group = await _get_group_or_404(group_id)
-        _require_group_member(group, user_id)
+        """Leave a group. Owner cannot leave (must transfer ownership first).
 
+        Phase 10: routes through ``IGroupRepository.remove_member``.
+        """
+        from ee.cloud.chat.repositories import get_group_repository
+
+        repo = get_group_repository()
+        group = await repo.get(group_id)
+        if group is None:
+            raise NotFound("group", group_id)
+        _require_domain_group_member(group, user_id)
         if group.owner == user_id:
             raise Forbidden(
                 "group.owner_cannot_leave",
                 "The group owner cannot leave. Transfer ownership first.",
             )
-
-        group.members.remove(user_id)
-        await group.save()
+        await repo.remove_member(group_id, user_id)
         await emit(GroupMemberRemoved(data={"group_id": group_id, "user_id": user_id}))
         get_resolver().invalidate_group(group_id)
 
@@ -467,27 +516,22 @@ class GroupService:
 
         Returns the list of user IDs that were newly added (skipping duplicates).
         Role "edit" is the default (no role entry is written to keep the dict
-        small); "view" writes an explicit entry per added member.
-        """
-        group = await _get_group_or_404(group_id)
-        _require_group_admin(group, user_id)
+        small); "view" / "admin" writes an explicit entry per added member.
 
+        Phase 10: routes through ``IGroupRepository.add_members``.
+        """
+        from ee.cloud.chat.dto import group_to_wire_dict
+        from ee.cloud.chat.repositories import get_group_repository
+
+        repo = get_group_repository()
+        group = await repo.get(group_id)
+        if group is None:
+            raise NotFound("group", group_id)
+        _require_domain_group_admin(group, user_id)
         if group.archived:
             raise Forbidden("group.archived", "Cannot modify an archived group")
 
-        newly_added: list[str] = []
-        for mid in member_ids:
-            if mid not in group.members:
-                group.members.append(mid)
-                newly_added.append(mid)
-            if role in ("admin", "view"):
-                group.member_roles[mid] = role
-            elif mid in group.member_roles and role == "edit":
-                # Explicit edit removes any lingering admin/view entry
-                group.member_roles.pop(mid, None)
-
-        if newly_added or role in ("admin", "view"):
-            await group.save()
+        updated, newly_added = await repo.add_members(group_id, member_ids, role=role)
 
         for added_user_id in newly_added:
             await emit(
@@ -499,7 +543,8 @@ class GroupService:
             # Newly-added members have no local record of this group yet — a
             # ``group.joined`` (audience = just the new ids) hydrates the room
             # in their sidebars so they don't have to refresh to see it.
-            resp = await _group_response(group)
+            users_by_id, agents_by_id = await _populate_lookups_for_domain_groups([updated])
+            resp = group_to_wire_dict(updated, users_by_id=users_by_id, agents_by_id=agents_by_id)
             await emit(GroupJoined(data={**resp, "member_ids": newly_added}))
             get_resolver().invalidate_group(group_id)
 
@@ -507,19 +552,22 @@ class GroupService:
 
     @staticmethod
     async def remove_member(group_id: str, user_id: str, target_user_id: str) -> None:
-        """Remove a member from a group. Owner only. Cannot remove the owner."""
-        group = await _get_group_or_404(group_id)
-        _require_group_admin(group, user_id)
+        """Remove a member from a group. Owner only. Cannot remove the owner.
 
+        Phase 10: routes through ``IGroupRepository.remove_member``.
+        """
+        from ee.cloud.chat.repositories import get_group_repository
+
+        repo = get_group_repository()
+        group = await repo.get(group_id)
+        if group is None:
+            raise NotFound("group", group_id)
+        _require_domain_group_admin(group, user_id)
         if target_user_id == group.owner:
             raise Forbidden("group.cannot_remove_owner", "Cannot remove the group owner")
-
         if target_user_id not in group.members:
             raise NotFound("member", target_user_id)
-
-        group.members.remove(target_user_id)
-        group.member_roles.pop(target_user_id, None)
-        await group.save()
+        await repo.remove_member(group_id, target_user_id)
         await emit(GroupMemberRemoved(data={"group_id": group_id, "user_id": target_user_id}))
         get_resolver().invalidate_group(group_id)
 
@@ -527,32 +575,32 @@ class GroupService:
     async def set_member_role(
         group_id: str, user_id: str, target_user_id: str, role: MemberRole
     ) -> MemberRole:
-        """Set a member's role to "edit" or "view". Owner only.
+        """Set a member's role to "edit" / "view" / "admin". Owner only.
 
         Cannot change the owner's role. Raises NotFound if target is not a member.
         Returns the new role on success.
+
+        Phase 10: routes through ``IGroupRepository.set_member_role``.
         """
+        from ee.cloud.chat.repositories import get_group_repository
+
         if role not in ("admin", "edit", "view"):
             raise ValidationError(
                 "group.invalid_role",
                 f"Role must be one of 'admin', 'edit', 'view'; got {role!r}",
             )
 
-        group = await _get_group_or_404(group_id)
-        _require_group_admin(group, user_id)
-
+        repo = get_group_repository()
+        group = await repo.get(group_id)
+        if group is None:
+            raise NotFound("group", group_id)
+        _require_domain_group_admin(group, user_id)
         if target_user_id == group.owner:
             raise Forbidden("group.cannot_change_owner_role", "Cannot change the owner's role")
-
         if target_user_id not in group.members:
             raise NotFound("member", target_user_id)
 
-        if role == "edit":
-            group.member_roles.pop(target_user_id, None)
-        else:
-            group.member_roles[target_user_id] = role
-
-        await group.save()
+        await repo.set_member_role(group_id, target_user_id, role)
         await emit(
             GroupMemberRole(data={"group_id": group_id, "user_id": target_user_id, "role": role})
         )
@@ -560,26 +608,28 @@ class GroupService:
 
     @staticmethod
     async def add_agent(group_id: str, user_id: str, body: AddGroupAgentRequest) -> None:
-        """Add an agent to a group. Owner only."""
-        group = await _get_group_or_404(group_id)
-        _require_group_admin(group, user_id)
+        """Add an agent to a group. Owner only.
 
-        # Check if agent is already in the group
+        Phase 10: routes through ``IGroupRepository.add_group_agent``.
+        """
+        from ee.cloud.chat.repositories import get_group_repository
+
+        repo = get_group_repository()
+        group = await repo.get(group_id)
+        if group is None:
+            raise NotFound("group", group_id)
+        _require_domain_group_admin(group, user_id)
+
         for existing in group.agents:
-            if existing.agent == body.agent_id:
+            if existing.agent_id == body.agent_id:
                 raise ValidationError(
                     "group.agent_already_added",
                     f"Agent '{body.agent_id}' is already in this group",
                 )
 
-        group.agents.append(
-            GroupAgent(
-                agent=body.agent_id,
-                role=body.role,
-                respond_mode=body.respond_mode,
-            )
+        await repo.add_group_agent(
+            group_id, body.agent_id, role=body.role, respond_mode=body.respond_mode
         )
-        await group.save()
         await emit(
             GroupAgentAdded(
                 data={
@@ -594,39 +644,48 @@ class GroupService:
     async def update_agent(
         group_id: str, user_id: str, agent_id: str, body: UpdateGroupAgentRequest
     ) -> None:
-        """Update an agent's respond_mode in a group. Owner only."""
-        group = await _get_group_or_404(group_id)
-        _require_group_admin(group, user_id)
+        """Update an agent's respond_mode in a group. Owner only.
 
-        for agent in group.agents:
-            if agent.agent == agent_id:
-                agent.respond_mode = body.respond_mode
-                await group.save()
-                await emit(
-                    GroupAgentUpdated(
-                        data={
-                            "group_id": group_id,
-                            "agent_id": agent_id,
-                            "respond_mode": body.respond_mode,
-                        }
-                    )
-                )
-                return
+        Phase 10: routes through ``IGroupRepository.update_group_agent_respond_mode``.
+        """
+        from ee.cloud.chat.repositories import get_group_repository
 
-        raise NotFound("agent", agent_id)
+        repo = get_group_repository()
+        group = await repo.get(group_id)
+        if group is None:
+            raise NotFound("group", group_id)
+        _require_domain_group_admin(group, user_id)
+
+        result = await repo.update_group_agent_respond_mode(group_id, agent_id, body.respond_mode)
+        if result is None:
+            raise NotFound("agent", agent_id)
+        await emit(
+            GroupAgentUpdated(
+                data={
+                    "group_id": group_id,
+                    "agent_id": agent_id,
+                    "respond_mode": body.respond_mode,
+                }
+            )
+        )
 
     @staticmethod
     async def remove_agent(group_id: str, user_id: str, agent_id: str) -> None:
-        """Remove an agent from a group. Owner only."""
-        group = await _get_group_or_404(group_id)
-        _require_group_admin(group, user_id)
+        """Remove an agent from a group. Owner only.
 
-        original_len = len(group.agents)
-        group.agents = [a for a in group.agents if a.agent != agent_id]
-        if len(group.agents) == original_len:
+        Phase 10: routes through ``IGroupRepository.remove_group_agent``.
+        """
+        from ee.cloud.chat.repositories import get_group_repository
+
+        repo = get_group_repository()
+        group = await repo.get(group_id)
+        if group is None:
+            raise NotFound("group", group_id)
+        _require_domain_group_admin(group, user_id)
+
+        result = await repo.remove_group_agent(group_id, agent_id)
+        if result is None:
             raise NotFound("agent", agent_id)
-
-        await group.save()
         await emit(GroupAgentRemoved(data={"group_id": group_id, "agent_id": agent_id}))
 
     @staticmethod
@@ -634,29 +693,31 @@ class GroupService:
         """Find an existing DM between two users, or create one.
 
         DM groups have type="dm", sorted members, and name="DM".
+
+        Phase 10: routes through ``IGroupRepository.find_dm_between_users``
+        + ``create``.
         """
+        from ee.cloud.chat.dto import group_to_wire_dict
+        from ee.cloud.chat.repositories import get_group_repository
+
+        repo = get_group_repository()
         members = sorted([user_id, target_user_id])
 
-        existing = await Group.find_one(
-            {
-                "workspace": workspace_id,
-                "type": "dm",
-                "members": {"$all": members, "$size": len(members)},
-            }
-        )
-        if existing:
-            return await _group_response(existing)
+        existing = await repo.find_dm_between_users(workspace_id, members)
+        if existing is not None:
+            users_by_id, agents_by_id = await _populate_lookups_for_domain_groups([existing])
+            return group_to_wire_dict(existing, users_by_id=users_by_id, agents_by_id=agents_by_id)
 
-        group = Group(
-            workspace=workspace_id,
+        group = await repo.create(
+            workspace_id=workspace_id,
             name="DM",
             slug=_generate_slug("dm"),
+            owner=user_id,
             type="dm",
             members=members,
-            owner=user_id,
         )
-        await group.insert()
-        resp = await _group_response(group)
+        users_by_id, agents_by_id = await _populate_lookups_for_domain_groups([group])
+        resp = group_to_wire_dict(group, users_by_id=users_by_id, agents_by_id=agents_by_id)
         await emit(GroupCreated(data={**resp, "member_ids": list(group.members)}))
         return resp
 
@@ -667,10 +728,15 @@ class GroupService:
         Stored as a type="dm" group with ``members=[user_id]`` and a single
         ``GroupAgent`` (respond_mode="auto" so the agent replies by default).
         Verifies the user can see the agent (owner | workspace-visible | public).
+
+        Phase 10: routes through ``IGroupRepository.find_user_agent_dm`` +
+        ``create``. Agent visibility check still queries the AgentModel
+        directly until the agents module gets an analogous repository.
         """
+        from ee.cloud.chat.dto import group_to_wire_dict
+        from ee.cloud.chat.repositories import get_group_repository
         from ee.cloud.models.agent import Agent as AgentModel
 
-        # Resolve the agent and verify access
         try:
             agent_oid = PydanticObjectId(agent_id)
         except Exception as exc:  # noqa: BLE001 - surface as NotFound
@@ -688,29 +754,23 @@ class GroupService:
         if not visible:
             raise NotFound("agent", agent_id)
 
-        # Idempotent lookup: a DM in this workspace with exactly this user and this agent
-        existing = await Group.find_one(
-            {
-                "workspace": workspace_id,
-                "type": "dm",
-                "members": [user_id],
-                "agents.agent": agent_id,
-            }
-        )
-        if existing:
-            return await _group_response(existing)
+        repo = get_group_repository()
+        existing = await repo.find_user_agent_dm(workspace_id, user_id, agent_id)
+        if existing is not None:
+            users_by_id, agents_by_id = await _populate_lookups_for_domain_groups([existing])
+            return group_to_wire_dict(existing, users_by_id=users_by_id, agents_by_id=agents_by_id)
 
-        group = Group(
-            workspace=workspace_id,
+        group = await repo.create(
+            workspace_id=workspace_id,
             name="DM",
             slug=_generate_slug("dm"),
+            owner=user_id,
             type="dm",
             members=[user_id],
-            agents=[GroupAgent(agent=agent_id, role="assistant", respond_mode="auto")],
-            owner=user_id,
+            agents=[(agent_id, "assistant", "auto")],
         )
-        await group.insert()
-        resp = await _group_response(group)
+        users_by_id, agents_by_id = await _populate_lookups_for_domain_groups([group])
+        resp = group_to_wire_dict(group, users_by_id=users_by_id, agents_by_id=agents_by_id)
         await emit(GroupCreated(data={**resp, "member_ids": list(group.members)}))
         return resp
 
@@ -729,6 +789,12 @@ class GroupService:
 
     @staticmethod
     async def list_member_ids(group_id: str) -> list[str]:
-        """Return the user_ids that are members of the group. Empty if missing."""
-        group = await GroupService._fetch_group(group_id)
+        """Return the user_ids that are members of the group. Empty if missing.
+
+        Phase 10: routes through ``IGroupRepository.get`` so the realtime
+        audience lookup avoids a Beanie call from the service layer.
+        """
+        from ee.cloud.chat.repositories import get_group_repository
+
+        group = await get_group_repository().get(group_id)
         return list(group.members) if group else []

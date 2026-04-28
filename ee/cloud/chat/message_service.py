@@ -22,7 +22,6 @@ from beanie import PydanticObjectId
 from ee.cloud.chat.group_service import (
     _get_group_or_404,
     _require_can_post,
-    _require_group_admin,
     _require_group_member,
 )
 from ee.cloud.chat.schemas import (
@@ -30,7 +29,7 @@ from ee.cloud.chat.schemas import (
     SendMessageRequest,
 )
 from ee.cloud.chat.unread_service import UnreadService
-from ee.cloud.models.message import Attachment, Mention, Message, Reaction
+from ee.cloud.models.message import Attachment, Message
 from ee.cloud.models.notification import NotificationSource
 from ee.cloud.notifications.service import NotificationService
 from ee.cloud.realtime.emit import emit
@@ -118,6 +117,18 @@ async def _get_group_message_or_404(message_id: str) -> Message:
     return msg
 
 
+async def _get_group_message_domain_or_404(message_id: str):
+    """Same as ``_get_group_message_or_404`` but returns the domain
+    ``Message`` value object via the repository. Use this for new code
+    paths that just need to read fields (not mutate)."""
+    from ee.cloud.chat.repositories import get_message_repository
+
+    msg = await get_message_repository().get(message_id)
+    if not msg or msg.deleted or msg.context_type != "group" or not msg.group:
+        raise NotFound("message", message_id)
+    return msg
+
+
 # ---------------------------------------------------------------------------
 # MessageService
 # ---------------------------------------------------------------------------
@@ -133,32 +144,35 @@ class MessageService:
         Verifies membership, checks group is not archived, creates the
         Message document, emits a ``message.sent`` event, and updates
         the group's last_message_at / message_count.
+
+        Phase 10: routes through ``IMessageRepository.create_group_message``
+        + ``IGroupRepository.bump_message_stats``. The membership check
+        still loads the Beanie group via ``_get_group_or_404`` because
+        the helper is shared with non-migrated paths.
         """
+        from ee.cloud.chat.dto import message_to_wire_dict
+        from ee.cloud.chat.repositories import get_group_repository, get_message_repository
+
         group = await _get_group_or_404(group_id)
         _require_can_post(group, user_id)
 
         if group.archived:
             raise Forbidden("group.archived", "Cannot send messages to an archived group")
 
-        mentions = [Mention(**m) for m in body.mentions]
-        attachments = [Attachment(**a) for a in body.attachments]
-
-        msg = Message(
-            context_type="group",
-            group=group_id,
+        msg_repo = get_message_repository()
+        domain_msg = await msg_repo.create_group_message(
+            group_id=group_id,
             sender=user_id,
             sender_type="user",
             content=body.content,
-            mentions=mentions,
+            mentions=body.mentions,
+            attachments=body.attachments,
             reply_to=body.reply_to,
-            attachments=attachments,
         )
-        await msg.insert()
 
-        # Update group stats
-        group.last_message_at = msg.createdAt
-        group.message_count += 1
-        await group.save()
+        # Atomic last_message_at / message_count bump via the group repo.
+        bumped_at = domain_msg.created_at or datetime.now(UTC)
+        await get_group_repository().bump_message_stats(group_id, last_message_at=bumped_at)
 
         # Resolve the reply parent once so we can both embed a preview in
         # the response and keep replies rendering inline in the main feed.
@@ -167,17 +181,11 @@ class MessageService:
         # quoted replies (Telegram-style), so neither is needed: the
         # parent's counter isn't displayed anywhere and the reply fans out
         # via ``MessageNew`` like any other message.
-        parent: Message | None = None
-        if body.reply_to:
-            try:
-                parent_id = PydanticObjectId(body.reply_to)
-                parent = await Message.find_one({"_id": parent_id, "context_type": "group"})
-            except Exception:
-                # Bad reply_to — the reply still sends; FE will render it
-                # without a quote bubble.
-                parent = None
+        parent_domain = await msg_repo.get(body.reply_to) if body.reply_to else None
+        if parent_domain is not None and parent_domain.context_type != "group":
+            parent_domain = None
 
-        response = _message_response(msg, parent=parent)
+        response = message_to_wire_dict(domain_msg, parent=parent_domain)
 
         # Thread reply-target metadata into the event so the agent bridge can
         # decide whether an ``auto``-mode agent should respond. A reply aimed
@@ -187,15 +195,15 @@ class MessageService:
         reply_meta: dict = {}
         if body.reply_to:
             reply_meta["reply_to"] = body.reply_to
-            if parent is not None:
-                reply_meta["reply_to_sender_type"] = parent.sender_type
-                reply_meta["reply_to_agent_id"] = parent.agent
+            if parent_domain is not None:
+                reply_meta["reply_to_sender_type"] = parent_domain.sender_type
+                reply_meta["reply_to_agent_id"] = parent_domain.agent
 
         await event_bus.emit(
             "message.sent",
             {
                 "group_id": group_id,
-                "message_id": str(msg.id),
+                "message_id": domain_msg.id,
                 "sender_id": user_id,
                 "sender_type": "user",
                 "content": body.content,
@@ -263,7 +271,7 @@ class MessageService:
                 body=body.content[:200],
                 source=NotificationSource(
                     type="message",
-                    id=str(msg.id),
+                    id=domain_msg.id,
                     pocket_id=None,
                 ),
             )
@@ -284,31 +292,45 @@ class MessageService:
         """Create a message from an agent in a group.
 
         Used by agent_bridge to persist agent responses instead of creating
-        Message documents directly. Returns the persisted Message document.
+        Message documents directly. Returns the persisted Beanie Message
+        document for legacy callers; new code should consume the domain
+        ``Message`` value object instead.
+
+        Phase 10: routes through ``IMessageRepository.create_group_message``
+        + ``IGroupRepository.bump_message_stats``. The Beanie doc is
+        re-fetched to satisfy the legacy return type.
         """
-        msg = Message(
-            context_type="group",
-            group=group_id,
+        from ee.cloud.chat.repositories import get_group_repository, get_message_repository
+
+        attachment_dicts = (
+            [a.model_dump() if hasattr(a, "model_dump") else dict(a) for a in attachments or []]
+            if attachments
+            else None
+        )
+        domain_msg = await get_message_repository().create_group_message(
+            group_id=group_id,
             sender=None,
             sender_type="agent",
             agent=agent_id,
             content=content,
-            attachments=attachments or [],
+            attachments=attachment_dicts,
         )
-        await msg.insert()
-
-        # Update group stats
-        group = await _get_group_or_404(group_id)
-        group.last_message_at = msg.createdAt
-        group.message_count += 1
-        await group.save()
-
-        return msg
+        bumped_at = domain_msg.created_at or datetime.now(UTC)
+        await get_group_repository().bump_message_stats(group_id, last_message_at=bumped_at)
+        return await Message.get(PydanticObjectId(domain_msg.id))
 
     @staticmethod
     async def edit_message(message_id: str, user_id: str, body: EditMessageRequest) -> dict:
-        """Edit a message. Author only, and the author must still be able to post."""
-        msg = await _get_group_message_or_404(message_id)
+        """Edit a message. Author only, and the author must still be able to post.
+
+        Phase 10: routes through ``IMessageRepository.edit_content``.
+        Author + can-post check still goes through the legacy Beanie
+        helpers because they are shared with non-migrated paths.
+        """
+        from ee.cloud.chat.dto import message_to_wire_dict
+        from ee.cloud.chat.repositories import get_message_repository
+
+        msg = await _get_group_message_domain_or_404(message_id)
 
         if msg.sender != user_id:
             raise Forbidden("message.not_author", "Only the message author can edit it")
@@ -318,31 +340,34 @@ class MessageService:
         group = await _get_group_or_404(cast(str, msg.group))
         _require_can_post(group, user_id)
 
-        msg.content = body.content
-        msg.edited = True
-        msg.edited_at = datetime.now(UTC)
-        await msg.save()
+        edited_at = datetime.now(UTC)
+        domain_msg = await get_message_repository().edit_content(
+            message_id, body.content, edited_at=edited_at
+        )
 
         await emit(
             MessageEdited(
                 data={
-                    "message_id": str(msg.id),
-                    "group_id": cast(str, msg.group),
-                    "content": msg.content,
-                    "edited_at": str(msg.edited_at),
+                    "message_id": domain_msg.id,
+                    "group_id": cast(str, domain_msg.group),
+                    "content": domain_msg.content,
+                    "edited_at": str(domain_msg.edited_at),
                 }
             )
         )
-
-        return _message_response(msg)
+        return message_to_wire_dict(domain_msg)
 
     @staticmethod
     async def delete_message(message_id: str, user_id: str) -> None:
-        """Soft-delete a message. Author or group owner can delete."""
-        msg = await _get_group_message_or_404(message_id)
+        """Soft-delete a message. Author or group owner can delete.
+
+        Phase 10: routes through ``IMessageRepository.soft_delete``.
+        """
+        from ee.cloud.chat.repositories import get_message_repository
+
+        msg = await _get_group_message_domain_or_404(message_id)
 
         if msg.sender != user_id:
-            # Check if user is the group owner
             group = await _get_group_or_404(cast(str, msg.group))
             if group.owner != user_id:
                 raise Forbidden(
@@ -350,13 +375,12 @@ class MessageService:
                     "Only the author or group owner can delete this message",
                 )
 
-        msg.deleted = True
-        await msg.save()
+        await get_message_repository().soft_delete(message_id)
 
         await emit(
             MessageDeleted(
                 data={
-                    "message_id": str(msg.id),
+                    "message_id": msg.id,
                     "group_id": cast(str, msg.group),
                 }
             )
@@ -369,41 +393,27 @@ class MessageService:
         If the user already reacted with the given emoji, remove their
         reaction. Otherwise, add it. If the emoji reaction has no users
         left, remove the entire reaction entry.
+
+        Phase 10: routes through ``IMessageRepository.toggle_reaction``.
         """
-        msg = await _get_group_message_or_404(message_id)
+        from ee.cloud.chat.dto import message_to_wire_dict
+        from ee.cloud.chat.repositories import get_message_repository
+
+        msg = await _get_group_message_domain_or_404(message_id)
 
         # View-only members cannot react
         group = await _get_group_or_404(cast(str, msg.group))
         _require_can_post(group, user_id)
 
-        # Find existing reaction for this emoji
-        existing: Reaction | None = None
-        for r in msg.reactions:
-            if r.emoji == emoji:
-                existing = r
-                break
-
-        added = True
-        if existing is not None:
-            if user_id in existing.users:
-                # Remove user from this reaction
-                existing.users.remove(user_id)
-                # Remove the reaction entry entirely if no users left
-                if not existing.users:
-                    msg.reactions.remove(existing)
-                added = False
-            else:
-                existing.users.append(user_id)
-        else:
-            msg.reactions.append(Reaction(emoji=emoji, users=[user_id]))
-
-        await msg.save()
+        domain_msg, added = await get_message_repository().toggle_reaction(
+            message_id, user_id, emoji
+        )
 
         await emit(
             MessageReaction(
                 data={
-                    "message_id": str(msg.id),
-                    "group_id": cast(str, msg.group),
+                    "message_id": domain_msg.id,
+                    "group_id": cast(str, domain_msg.group),
                     "emoji": emoji,
                     "user_id": user_id,
                 }
@@ -412,17 +422,17 @@ class MessageService:
 
         # Derive reaction notification: only on ADD, and only if the reactor
         # is not the original sender of the message.
-        if added and msg.sender and msg.sender != user_id:
+        if added and domain_msg.sender and domain_msg.sender != user_id:
             await NotificationService.create_default(
                 workspace_id=str(group.workspace),
-                recipient=msg.sender,
+                recipient=domain_msg.sender,
                 kind="reaction",
                 title=f"{emoji} on your message",
-                body=(msg.content or "")[:200],
-                source=NotificationSource(type="message", id=str(msg.id)),
+                body=(domain_msg.content or "")[:200],
+                source=NotificationSource(type="message", id=domain_msg.id),
             )
 
-        return _message_response(msg)
+        return message_to_wire_dict(domain_msg)
 
     @staticmethod
     async def get_messages(
@@ -501,40 +511,55 @@ class MessageService:
         from ee.cloud.chat.dto import message_to_wire_dict
         from ee.cloud.chat.repositories import get_message_repository
 
-        msg = await _get_group_message_or_404(message_id)
+        msg = await _get_group_message_domain_or_404(message_id)
         group = await _get_group_or_404(cast(str, msg.group))
         if group.type in ("private", "dm"):
             _require_group_member(group, user_id)
 
-        replies = await get_message_repository().list_replies(str(msg.id))
+        replies = await get_message_repository().list_replies(msg.id)
         return [message_to_wire_dict(r) for r in replies]
 
     @staticmethod
     async def pin_message(group_id: str, user_id: str, message_id: str) -> None:
-        """Pin a message in a group. Owner only."""
-        group = await _get_group_or_404(group_id)
-        _require_group_admin(group, user_id)
+        """Pin a message in a group. Owner only.
 
-        # Verify message belongs to this group
-        msg = await _get_group_message_or_404(message_id)
-        if msg.group != group_id:
+        Phase 10: routes through ``IGroupRepository.pin_message`` after
+        verifying the message belongs to the group via the message
+        repository.
+        """
+        from ee.cloud.chat.group_service import _require_domain_group_admin
+        from ee.cloud.chat.repositories import get_group_repository, get_message_repository
+
+        group_repo = get_group_repository()
+        group = await group_repo.get(group_id)
+        if group is None:
+            raise NotFound("group", group_id)
+        _require_domain_group_admin(group, user_id)
+
+        msg = await get_message_repository().get(message_id)
+        if msg is None or msg.group != group_id:
             raise NotFound("message", message_id)
 
-        if message_id not in group.pinned_messages:
-            group.pinned_messages.append(message_id)
-            await group.save()
+        await group_repo.pin_message(group_id, message_id)
 
     @staticmethod
     async def unpin_message(group_id: str, user_id: str, message_id: str) -> None:
-        """Unpin a message from a group. Owner only."""
-        group = await _get_group_or_404(group_id)
-        _require_group_admin(group, user_id)
+        """Unpin a message from a group. Owner only.
 
-        if message_id not in group.pinned_messages:
+        Phase 10: routes through ``IGroupRepository.unpin_message``.
+        """
+        from ee.cloud.chat.group_service import _require_domain_group_admin
+        from ee.cloud.chat.repositories import get_group_repository
+
+        group_repo = get_group_repository()
+        group = await group_repo.get(group_id)
+        if group is None:
+            raise NotFound("group", group_id)
+        _require_domain_group_admin(group, user_id)
+
+        result = await group_repo.unpin_message(group_id, message_id)
+        if result is None:
             raise NotFound("pinned_message", message_id)
-
-        group.pinned_messages.remove(message_id)
-        await group.save()
 
     @staticmethod
     async def search_messages(group_id: str, user_id: str, query: str) -> list[dict]:
@@ -577,7 +602,8 @@ class MessageService:
         the user's own agent conversations.
 
         Phase 10: routes through ``IGroupRepository.list_visible_in_workspace``
-        + ``IMessageRepository.search_in_groups``. Capped at 100 results.
+        + ``IMessageRepository.search_in_groups``. The query is escaped
+        inside the repo, not here. Capped at 100 results.
         """
         from ee.cloud.chat.dto import message_to_wire_dict
         from ee.cloud.chat.repositories import get_group_repository, get_message_repository
