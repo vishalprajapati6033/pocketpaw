@@ -30,7 +30,10 @@ async def create_session(
     workspace_id: str = Depends(current_workspace_id),
     user_id: str = Depends(current_user_id),
 ) -> dict:
-    return await SessionService.create(workspace_id, user_id, body)
+    # Phase 9 made the instance methods take ``ctx`` first; routers call
+    # the classmethod ``*_default`` facades that build a legacy ctx and
+    # serialize the domain return value to a wire dict.
+    return await SessionService.create_default(workspace_id, user_id, body)
 
 
 @router.get("", dependencies=[Depends(require_action_any_workspace("session.read_own"))])
@@ -42,8 +45,8 @@ async def list_sessions(
     """List the user's sessions. ``?agent_id=X`` filters to DM sessions for
     that agent (used by the frontend to resolve the DM room)."""
     if agent_id:
-        return await SessionService.list_by_agent(workspace_id, user_id, agent_id)
-    return await SessionService.list_sessions(workspace_id, user_id)
+        return await SessionService.list_by_agent_default(workspace_id, user_id, agent_id)
+    return await SessionService.list_sessions_default(workspace_id, user_id)
 
 
 @router.get("/runtime")
@@ -90,7 +93,7 @@ async def get_session(
     session_id: str,
     user_id: str = Depends(current_user_id),
 ) -> dict:
-    return await SessionService.get(session_id, user_id)
+    return await SessionService.get_default(session_id, user_id)
 
 
 @router.patch("/{session_id}")
@@ -99,7 +102,7 @@ async def update_session(
     body: UpdateSessionRequest,
     user_id: str = Depends(current_user_id),
 ) -> dict:
-    return await SessionService.update(session_id, user_id, body)
+    return await SessionService.update_default(session_id, user_id, body)
 
 
 @router.delete("/{session_id}", status_code=204)
@@ -107,7 +110,7 @@ async def delete_session(
     session_id: str,
     user_id: str = Depends(current_user_id),
 ) -> Response:
-    await SessionService.delete(session_id, user_id)
+    await SessionService.delete_default(session_id, user_id)
     return Response(status_code=204)
 
 

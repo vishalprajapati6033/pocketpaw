@@ -300,7 +300,7 @@ class TestListByAgent:
         for s in (s_match, s_other, s_no_agent):
             await s.insert()
 
-        found = await SessionService.list_by_agent("ws-1", "user-1", "agent-A")
+        found = await SessionService.list_by_agent_default("ws-1", "user-1", "agent-A")
         assert len(found) == 1
         assert found[0]["sessionId"] == "s1"
         assert found[0]["agent"] == "agent-A"
@@ -322,5 +322,5 @@ class TestListByAgent:
         )
         await deleted.insert()
 
-        found = await SessionService.list_by_agent("ws-1", "user-1", "agent-A")
+        found = await SessionService.list_by_agent_default("ws-1", "user-1", "agent-A")
         assert found == []
