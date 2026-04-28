@@ -438,12 +438,12 @@ async def _run_agent_response(
     except Exception:
         pass
 
-    # Auto-create pocket from ripple spec (delegated to PocketService)
+    # Auto-create pocket from ripple spec
     pocket_id = None
     if ripple_spec:
-        from ee.cloud.pockets.service import PocketService
+        from ee.cloud.pockets import service as pockets_service
 
-        pocket_id = await PocketService.create_from_ripple_spec(
+        pocket_id = await pockets_service.create_from_ripple_spec(
             workspace_id=workspace_id,
             owner_id=group_members[0] if group_members else "",
             ripple_spec=ripple_spec,

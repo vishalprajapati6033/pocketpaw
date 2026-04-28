@@ -1,7 +1,18 @@
 """Pockets domain — business logic service.
 
-Changes: Added create_from_ripple_spec() static method to PocketService for
-auto-creating pockets from agent-generated ripple specs (moved from agent_bridge.py).
+Sole owner of writes to the ``Pocket`` Beanie document. Module-level
+``async def`` API. The doc → domain mapping helpers (formerly in
+``repositories.py``) live alongside the public API as private helpers.
+
+Public API (returns wire dicts for legacy router compatibility):
+- ``create``, ``list_pockets``, ``get``, ``update``, ``delete``
+- ``create_from_ripple_spec`` — agent-generated pockets
+- ``add_widget``, ``update_widget``, ``remove_widget``, ``reorder_widgets``
+- ``generate_share_link``, ``revoke_share_link``, ``update_share_link``,
+  ``access_via_share_link``
+- ``add_collaborator``, ``remove_collaborator``
+- ``add_team_member``, ``remove_team_member``
+- ``add_agent``, ``remove_agent``
 """
 
 from __future__ import annotations
@@ -9,26 +20,84 @@ from __future__ import annotations
 import logging
 import secrets
 
+from beanie import PydanticObjectId
+
+from ee.cloud.models.pocket import Pocket as _PocketDoc
+from ee.cloud.models.pocket import Widget as _WidgetDoc
+from ee.cloud.pockets.domain import Pocket, Widget, WidgetPosition
 from ee.cloud.pockets.dto import (
     AddCollaboratorRequest,
     AddWidgetRequest,
     CreatePocketRequest,
     UpdatePocketRequest,
     UpdateWidgetRequest,
+    pocket_to_wire_dict,
 )
 from ee.cloud.ripple_normalizer import normalize_ripple_spec
-from ee.cloud.shared.errors import Forbidden, NotFound
+from ee.cloud.shared.errors import Forbidden, NotFound, ValidationError
 from ee.cloud.shared.events import event_bus
 
 logger = logging.getLogger(__name__)
 
 
-def _check_domain_owner(domain_pocket, user_id: str) -> None:
-    """Raise Forbidden if user is not the pocket owner.
+# ---------------------------------------------------------------------------
+# Private mapping + access helpers
+# ---------------------------------------------------------------------------
 
-    Operates on the domain ``Pocket`` value object returned by the
-    repository.
-    """
+
+def _widget_to_domain(w: _WidgetDoc) -> Widget:
+    return Widget(
+        id=w.id,
+        name=w.name,
+        type=w.type,
+        icon=w.icon,
+        color=w.color,
+        span=w.span,
+        data_source_type=w.dataSourceType,
+        config=tuple(w.config.items()),
+        props=tuple(w.props.items()),
+        data=w.data,
+        assigned_agent=w.assignedAgent,
+        position=WidgetPosition(row=w.position.row, col=w.position.col),
+    )
+
+
+def _pocket_to_domain(doc: _PocketDoc) -> Pocket:
+    return Pocket(
+        id=str(doc.id),
+        workspace_id=doc.workspace,
+        name=doc.name,
+        description=doc.description,
+        type=doc.type,
+        icon=doc.icon,
+        color=doc.color,
+        owner=doc.owner,
+        visibility=doc.visibility,
+        team=tuple(str(t) for t in doc.team),
+        agents=tuple(str(a) for a in doc.agents),
+        widgets=tuple(_widget_to_domain(w) for w in doc.widgets),
+        ripple_spec=doc.rippleSpec,
+        share_link_token=doc.share_link_token,
+        share_link_access=doc.share_link_access,
+        shared_with=tuple(doc.shared_with),
+        tool_specs=tuple(doc.tool_specs),
+        created_at=getattr(doc, "createdAt", None),
+        updated_at=getattr(doc, "updatedAt", None),
+    )
+
+
+async def _fetch_pocket(pocket_id: str) -> _PocketDoc:
+    """Fetch a pocket doc by id; raise NotFound if missing."""
+    try:
+        doc = await _PocketDoc.get(PydanticObjectId(pocket_id))
+    except Exception:
+        doc = None
+    if doc is None:
+        raise NotFound("pocket", pocket_id)
+    return doc
+
+
+def _check_domain_owner(domain_pocket: Pocket, user_id: str) -> None:
     if domain_pocket.owner != user_id:
         from pocketpaw.ee.guards.audit import log_denial
 
@@ -41,10 +110,7 @@ def _check_domain_owner(domain_pocket, user_id: str) -> None:
         raise Forbidden("pocket.not_owner", "Only the pocket owner can perform this action")
 
 
-def _check_domain_edit_access(domain_pocket, user_id: str) -> None:
-    """Raise Forbidden if user has no edit access (owner / shared_with /
-    workspace-visible). Operates on the domain ``Pocket`` value object.
-    """
+def _check_domain_edit_access(domain_pocket: Pocket, user_id: str) -> None:
     if domain_pocket.owner == user_id:
         return
     if user_id in domain_pocket.shared_with:
@@ -62,531 +128,425 @@ def _check_domain_edit_access(domain_pocket, user_id: str) -> None:
     raise Forbidden("pocket.access_denied", "You do not have edit access to this pocket")
 
 
-class PocketService:
-    """Stateless service encapsulating pocket business logic."""
+def _build_widget_doc(payload: dict) -> _WidgetDoc:
+    return _WidgetDoc(
+        name=payload.get("name", "Widget"),
+        type=payload.get("type", "custom"),
+        icon=payload.get("icon", ""),
+        color=payload.get("color", ""),
+        span=payload.get("span", "col-span-1"),
+        dataSourceType=payload.get(
+            "dataSourceType", payload.get("data_source_type", "static")
+        ),
+        config=payload.get("config", {}),
+        props=payload.get("props", {}),
+        data=payload.get("data"),
+        assignedAgent=payload.get("assignedAgent", payload.get("assigned_agent")),
+    )
 
-    # -----------------------------------------------------------------
-    # CRUD
-    # -----------------------------------------------------------------
 
-    @staticmethod
-    async def create(workspace_id: str, user_id: str, body: CreatePocketRequest) -> dict:
-        """Create a pocket with optional agents, widgets, and rippleSpec.
+async def _mutate_list_field(
+    pocket_id: str, field: str, value: str, action: str
+) -> Pocket:
+    """Append/remove a string value on shared_with / team / agents.
+    Idempotent in both directions."""
+    doc = await _fetch_pocket(pocket_id)
+    current: list[str] = list(getattr(doc, field))
+    if action == "add":
+        if value not in current:
+            current.append(value)
+            setattr(doc, field, current)
+            await doc.save()
+    else:
+        if value in current:
+            current.remove(value)
+            setattr(doc, field, current)
+            await doc.save()
+    return _pocket_to_domain(doc)
 
-        Phase 8: routes through ``IPocketRepository.create``. Session
-        linking still uses the session repository directly.
-        """
-        from ee.cloud.pockets.dto import pocket_to_wire_dict
-        from ee.cloud.pockets.repositories import get_default_repository
-        from ee.cloud.sessions import service as sessions_service
 
-        normalized_spec = normalize_ripple_spec(body.ripple_spec) if body.ripple_spec else None
-        pocket = await get_default_repository().create(
-            workspace_id=workspace_id,
-            name=body.name,
-            owner=user_id,
-            description=body.description,
-            type=body.type,
-            icon=body.icon,
-            color=body.color,
-            visibility=body.visibility,
-            agents=body.agents,
-            widgets=body.widgets,
-            ripple_spec=normalized_spec,
+# ---------------------------------------------------------------------------
+# CRUD
+# ---------------------------------------------------------------------------
+
+
+async def create(workspace_id: str, user_id: str, body: CreatePocketRequest) -> dict:
+    """Create a pocket with optional agents, widgets, and rippleSpec."""
+    from ee.cloud.sessions import service as sessions_service
+
+    normalized_spec = normalize_ripple_spec(body.ripple_spec) if body.ripple_spec else None
+    widget_docs = [_build_widget_doc(w) for w in (body.widgets or [])]
+
+    doc = _PocketDoc(
+        workspace=workspace_id,
+        name=body.name,
+        description=body.description,
+        type=body.type,
+        icon=body.icon,
+        color=body.color,
+        owner=user_id,
+        visibility=body.visibility,
+        agents=list(body.agents or []),
+        widgets=widget_docs,
+        rippleSpec=normalized_spec,
+    )
+    await doc.insert()
+    pocket = _pocket_to_domain(doc)
+
+    if body.session_id:
+        await sessions_service.link_pocket(workspace_id, body.session_id, pocket.id)
+
+    return pocket_to_wire_dict(pocket)
+
+
+async def list_pockets(workspace_id: str, user_id: str) -> list[dict]:
+    """List pockets visible to the user (owned, shared_with, or workspace-visible)."""
+    docs = await _PocketDoc.find(
+        {
+            "workspace": workspace_id,
+            "$or": [
+                {"owner": user_id},
+                {"shared_with": user_id},
+                {"visibility": "workspace"},
+            ],
+        }
+    ).to_list()
+    return [pocket_to_wire_dict(_pocket_to_domain(d)) for d in docs]
+
+
+async def get(pocket_id: str, user_id: str) -> dict:
+    """Get a single pocket. Access check: owner, shared_with, or workspace-visible."""
+    doc = await _fetch_pocket(pocket_id)
+    pocket = _pocket_to_domain(doc)
+    if (
+        pocket.owner != user_id
+        and user_id not in pocket.shared_with
+        and pocket.visibility == "private"
+    ):
+        raise Forbidden("pocket.access_denied", "You do not have access to this pocket")
+    return pocket_to_wire_dict(pocket)
+
+
+async def update(pocket_id: str, user_id: str, body: UpdatePocketRequest) -> dict:
+    """Update pocket fields. Edit-access required; visibility changes require ownership."""
+    doc = await _fetch_pocket(pocket_id)
+    pocket = _pocket_to_domain(doc)
+
+    _check_domain_edit_access(pocket, user_id)
+    if body.visibility is not None:
+        _check_domain_owner(pocket, user_id)
+
+    normalized_spec = normalize_ripple_spec(body.ripple_spec) if body.ripple_spec else None
+
+    if body.name is not None:
+        doc.name = body.name
+    if body.description is not None:
+        doc.description = body.description
+    if body.type is not None:
+        doc.type = body.type
+    if body.icon is not None:
+        doc.icon = body.icon
+    if body.color is not None:
+        doc.color = body.color
+    if body.visibility is not None:
+        doc.visibility = body.visibility
+    if normalized_spec is not None:
+        doc.rippleSpec = normalized_spec
+    await doc.save()
+    return pocket_to_wire_dict(_pocket_to_domain(doc))
+
+
+async def delete(pocket_id: str, user_id: str) -> None:
+    """Hard-delete a pocket. Owner only."""
+    doc = await _fetch_pocket(pocket_id)
+    if doc.owner != user_id:
+        from pocketpaw.ee.guards.audit import log_denial
+
+        log_denial(
+            actor=user_id,
+            action="pocket.share",
+            code="pocket.not_owner",
+            resource_id=str(doc.id),
         )
+        raise Forbidden("pocket.not_owner", "Only the pocket owner can perform this action")
+    await doc.delete()
 
-        if body.session_id:
-            await sessions_service.link_pocket(workspace_id, body.session_id, pocket.id)
 
-        return pocket_to_wire_dict(pocket)
+# ---------------------------------------------------------------------------
+# Agent-generated pockets
+# ---------------------------------------------------------------------------
 
-    @staticmethod
-    async def list_pockets(workspace_id: str, user_id: str) -> list[dict]:
-        """List pockets visible to the user.
 
-        Includes: owned by user, shared with user, or workspace-visible.
-
-        Phase 8: routes through ``IPocketRepository.list_visible_in_workspace``
-        + the domain → wire mapper. Wire shape unchanged.
-        """
-        from ee.cloud.pockets.dto import pocket_to_wire_dict
-        from ee.cloud.pockets.repositories import get_default_repository
-
-        pockets = await get_default_repository().list_visible_in_workspace(workspace_id, user_id)
-        return [pocket_to_wire_dict(p) for p in pockets]
-
-    @staticmethod
-    async def get(pocket_id: str, user_id: str) -> dict:
-        """Get a single pocket. Checks access.
-
-        Phase 8: routes through ``IPocketRepository.get`` and the
-        domain → wire mapper. The remaining 14 PocketService methods
-        still call Beanie directly; they will migrate incrementally.
-        """
-        from ee.cloud.pockets.dto import pocket_to_wire_dict
-        from ee.cloud.pockets.repositories import get_default_repository
-
-        pocket = await get_default_repository().get(pocket_id)
-        if pocket is None:
-            raise NotFound("pocket", pocket_id)
-
-        # Access check: owner, shared_with, or workspace-visible
-        if (
-            pocket.owner != user_id
-            and user_id not in pocket.shared_with
-            and pocket.visibility == "private"
-        ):
-            raise Forbidden("pocket.access_denied", "You do not have access to this pocket")
-
-        return pocket_to_wire_dict(pocket)
-
-    @staticmethod
-    async def update(pocket_id: str, user_id: str, body: UpdatePocketRequest) -> dict:
-        """Update pocket fields. Owner or edit-access users.
-
-        Phase 8: routes through ``IPocketRepository``.
-        """
-        from ee.cloud.pockets.dto import pocket_to_wire_dict
-        from ee.cloud.pockets.repositories import get_default_repository
-
-        repo = get_default_repository()
-        pocket = await repo.get(pocket_id)
-        if pocket is None:
-            raise NotFound("pocket", pocket_id)
-
-        # Edit-access check covers non-visibility fields. Visibility changes
-        # additionally require ownership — the helper raises pocket.share /
-        # pocket.not_owner with the matching audit entry.
-        _check_domain_edit_access(pocket, user_id)
-        if body.visibility is not None:
-            _check_domain_owner(pocket, user_id)
-
-        normalized_spec = normalize_ripple_spec(body.ripple_spec) if body.ripple_spec else None
-        updated = await repo.update_fields(
-            pocket_id,
-            name=body.name,
-            description=body.description,
-            type=body.type,
-            icon=body.icon,
-            color=body.color,
-            visibility=body.visibility,
-            ripple_spec=normalized_spec,
-        )
-        return pocket_to_wire_dict(updated)
-
-    @staticmethod
-    async def delete(pocket_id: str, user_id: str) -> None:
-        """Hard-delete a pocket. Owner only.
-
-        Phase 8: routes through ``IPocketRepository``.
-        """
-        from ee.cloud.pockets.repositories import get_default_repository
-
-        repo = get_default_repository()
-        pocket = await repo.get(pocket_id)
-        if pocket is None:
-            raise NotFound("pocket", pocket_id)
-        if pocket.owner != user_id:
-            from pocketpaw.ee.guards.audit import log_denial
-
-            log_denial(
-                actor=user_id,
-                action="pocket.share",
-                code="pocket.not_owner",
-                resource_id=pocket.id,
-            )
-            raise Forbidden("pocket.not_owner", "Only the pocket owner can perform this action")
-        await repo.delete(pocket_id)
-
-    # -----------------------------------------------------------------
-    # Agent-generated pockets
-    # -----------------------------------------------------------------
-
-    @staticmethod
-    async def create_from_ripple_spec(
-        workspace_id: str,
-        owner_id: str,
-        ripple_spec: dict,
-        description: str = "",
-    ) -> str | None:
-        """Auto-create a pocket from an agent-generated ripple spec.
-
-        Returns the pocket ID on success, None on failure.
-
-        Phase 8: routes through ``IPocketRepository.create``.
-        """
-        from ee.cloud.pockets.repositories import get_default_repository
-
-        try:
-            normalized = normalize_ripple_spec(ripple_spec)
-            if not normalized:
-                return None
-
-            name = (
-                normalized.get("lifecycle", {}).get("name")
-                or normalized.get("name")
-                or normalized.get("title")
-                or "Agent-generated Pocket"
-            )
-
-            pocket = await get_default_repository().create(
-                workspace_id=workspace_id,
-                name=name,
-                owner=owner_id,
-                description=description,
-                type="ai-generated",
-                visibility="workspace",
-                ripple_spec=normalized,
-            )
-            logger.info("Auto-created pocket %s from ripple spec", pocket.id)
-            return pocket.id
-        except Exception:
-            logger.warning("Failed to auto-create pocket from ripple spec", exc_info=True)
+async def create_from_ripple_spec(
+    workspace_id: str,
+    owner_id: str,
+    ripple_spec: dict,
+    description: str = "",
+) -> str | None:
+    """Auto-create a pocket from an agent-generated ripple spec.
+    Returns the pocket id on success, None on failure."""
+    try:
+        normalized = normalize_ripple_spec(ripple_spec)
+        if not normalized:
             return None
 
-    # -----------------------------------------------------------------
-    # Widgets
-    # -----------------------------------------------------------------
-
-    @staticmethod
-    async def add_widget(pocket_id: str, user_id: str, body: AddWidgetRequest) -> dict:
-        """Add a widget to the pocket.
-
-        Phase 8: routes through ``IPocketRepository.add_widget``.
-        """
-        from ee.cloud.pockets.dto import pocket_to_wire_dict
-        from ee.cloud.pockets.repositories import get_default_repository
-
-        repo = get_default_repository()
-        pocket = await repo.get(pocket_id)
-        if pocket is None:
-            raise NotFound("pocket", pocket_id)
-        _check_domain_edit_access(pocket, user_id)
-
-        updated = await repo.add_widget(
-            pocket_id,
-            {
-                "name": body.name,
-                "type": body.type,
-                "icon": body.icon,
-                "color": body.color,
-                "span": body.span,
-                "dataSourceType": body.data_source_type,
-                "config": body.config,
-                "props": body.props,
-                "assignedAgent": body.assigned_agent,
-            },
+        name = (
+            normalized.get("lifecycle", {}).get("name")
+            or normalized.get("name")
+            or normalized.get("title")
+            or "Agent-generated Pocket"
         )
-        return pocket_to_wire_dict(updated)
 
-    @staticmethod
-    async def update_widget(
-        pocket_id: str, widget_id: str, user_id: str, body: UpdateWidgetRequest
-    ) -> dict:
-        """Update a specific widget inside the pocket.
-
-        Phase 8: routes through ``IPocketRepository.update_widget_fields``.
-        """
-        from ee.cloud.pockets.dto import pocket_to_wire_dict
-        from ee.cloud.pockets.repositories import get_default_repository
-
-        repo = get_default_repository()
-        pocket = await repo.get(pocket_id)
-        if pocket is None:
-            raise NotFound("pocket", pocket_id)
-        _check_domain_edit_access(pocket, user_id)
-
-        updated = await repo.update_widget_fields(
-            pocket_id,
-            widget_id,
-            name=body.name,
-            type=body.type,
-            icon=body.icon,
-            config=body.config,
-            props=body.props,
-            data=body.data,
-            assigned_agent=body.assigned_agent,
+        doc = _PocketDoc(
+            workspace=workspace_id,
+            name=name,
+            description=description,
+            type="ai-generated",
+            owner=owner_id,
+            visibility="workspace",
+            rippleSpec=normalized,
         )
-        return pocket_to_wire_dict(updated)
+        await doc.insert()
+        pocket_id = str(doc.id)
+        logger.info("Auto-created pocket %s from ripple spec", pocket_id)
+        return pocket_id
+    except Exception:
+        logger.warning("Failed to auto-create pocket from ripple spec", exc_info=True)
+        return None
 
-    @staticmethod
-    async def remove_widget(pocket_id: str, widget_id: str, user_id: str) -> dict:
-        """Remove a widget from the pocket.
 
-        Phase 8: routes through ``IPocketRepository.remove_widget``.
-        """
-        from ee.cloud.pockets.dto import pocket_to_wire_dict
-        from ee.cloud.pockets.repositories import get_default_repository
+# ---------------------------------------------------------------------------
+# Widgets
+# ---------------------------------------------------------------------------
 
-        repo = get_default_repository()
-        pocket = await repo.get(pocket_id)
-        if pocket is None:
-            raise NotFound("pocket", pocket_id)
-        _check_domain_edit_access(pocket, user_id)
 
-        updated = await repo.remove_widget(pocket_id, widget_id)
-        return pocket_to_wire_dict(updated)
+async def add_widget(pocket_id: str, user_id: str, body: AddWidgetRequest) -> dict:
+    doc = await _fetch_pocket(pocket_id)
+    _check_domain_edit_access(_pocket_to_domain(doc), user_id)
 
-    @staticmethod
-    async def reorder_widgets(pocket_id: str, user_id: str, widget_ids: list[str]) -> dict:
-        """Reorder widgets by the given ordered list of widget IDs.
-
-        Phase 8: routes through ``IPocketRepository.reorder_widgets``.
-        Note: legacy behavior tolerated unknown ids by appending leftovers
-        at the end. The repository now strictly requires the id set to
-        match — callers must include every existing widget id exactly
-        once.
-        """
-        from ee.cloud.pockets.dto import pocket_to_wire_dict
-        from ee.cloud.pockets.repositories import get_default_repository
-
-        repo = get_default_repository()
-        pocket = await repo.get(pocket_id)
-        if pocket is None:
-            raise NotFound("pocket", pocket_id)
-        _check_domain_edit_access(pocket, user_id)
-
-        # Preserve the legacy tolerance: missing ids in widget_ids get
-        # appended; unknown ids are dropped. Achieve this by computing
-        # the full reorder list before calling the strict repo method.
-        existing_ids = {w.id for w in pocket.widgets}
-        seen: set[str] = set()
-        ordered: list[str] = []
-        for wid in widget_ids:
-            if wid in existing_ids and wid not in seen:
-                ordered.append(wid)
-                seen.add(wid)
-        for w in pocket.widgets:
-            if w.id not in seen:
-                ordered.append(w.id)
-                seen.add(w.id)
-
-        updated = await repo.reorder_widgets(pocket_id, ordered)
-        return pocket_to_wire_dict(updated)
-
-    # -----------------------------------------------------------------
-    # Sharing — Share links
-    # -----------------------------------------------------------------
-
-    @staticmethod
-    async def generate_share_link(pocket_id: str, user_id: str, access: str) -> dict:
-        """Generate a share link token. Owner only.
-
-        Phase 8: routes through ``IPocketRepository.update_fields``.
-        """
-        from ee.cloud.pockets.repositories import get_default_repository
-
-        repo = get_default_repository()
-        pocket = await repo.get(pocket_id)
-        if pocket is None:
-            raise NotFound("pocket", pocket_id)
-        if pocket.owner != user_id:
-            from pocketpaw.ee.guards.audit import log_denial
-
-            log_denial(
-                actor=user_id,
-                action="pocket.share",
-                code="pocket.not_owner",
-                resource_id=pocket.id,
-            )
-            raise Forbidden("pocket.not_owner", "Only the pocket owner can perform this action")
-
-        token = secrets.token_urlsafe(32)
-        await repo.update_fields(pocket_id, share_link_token=token, share_link_access=access)
-        return {"token": token, "access": access, "url": f"/shared/{token}"}
-
-    @staticmethod
-    async def revoke_share_link(pocket_id: str, user_id: str) -> None:
-        """Revoke the share link. Owner only.
-
-        Phase 8: routes through ``IPocketRepository.clear_share_link``.
-        """
-        from ee.cloud.pockets.repositories import get_default_repository
-
-        repo = get_default_repository()
-        pocket = await repo.get(pocket_id)
-        if pocket is None:
-            raise NotFound("pocket", pocket_id)
-        if pocket.owner != user_id:
-            from pocketpaw.ee.guards.audit import log_denial
-
-            log_denial(
-                actor=user_id,
-                action="pocket.share",
-                code="pocket.not_owner",
-                resource_id=pocket.id,
-            )
-            raise Forbidden("pocket.not_owner", "Only the pocket owner can perform this action")
-        await repo.clear_share_link(pocket_id)
-
-    @staticmethod
-    async def update_share_link(pocket_id: str, user_id: str, access: str) -> dict:
-        """Update the share link access level. Owner only.
-
-        Phase 8: routes through ``IPocketRepository.update_fields``.
-        """
-        from ee.cloud.pockets.repositories import get_default_repository
-
-        repo = get_default_repository()
-        pocket = await repo.get(pocket_id)
-        if pocket is None:
-            raise NotFound("pocket", pocket_id)
-        if pocket.owner != user_id:
-            from pocketpaw.ee.guards.audit import log_denial
-
-            log_denial(
-                actor=user_id,
-                action="pocket.share",
-                code="pocket.not_owner",
-                resource_id=pocket.id,
-            )
-            raise Forbidden("pocket.not_owner", "Only the pocket owner can perform this action")
-        if not pocket.share_link_token:
-            raise NotFound("share_link", pocket_id)
-
-        await repo.update_fields(pocket_id, share_link_access=access)
-        return {
-            "token": pocket.share_link_token,
-            "access": access,
-            "url": f"/shared/{pocket.share_link_token}",
+    widget = _build_widget_doc(
+        {
+            "name": body.name,
+            "type": body.type,
+            "icon": body.icon,
+            "color": body.color,
+            "span": body.span,
+            "dataSourceType": body.data_source_type,
+            "config": body.config,
+            "props": body.props,
+            "assignedAgent": body.assigned_agent,
         }
+    )
+    doc.widgets.append(widget)
+    await doc.save()
+    return pocket_to_wire_dict(_pocket_to_domain(doc))
 
-    @staticmethod
-    async def access_via_share_link(token: str) -> dict:
-        """Access a pocket via share link token.
 
-        Phase 8: routes through ``IPocketRepository.find_by_share_link_token``.
-        """
-        from ee.cloud.pockets.dto import pocket_to_wire_dict
-        from ee.cloud.pockets.repositories import get_default_repository
+async def update_widget(
+    pocket_id: str, widget_id: str, user_id: str, body: UpdateWidgetRequest
+) -> dict:
+    doc = await _fetch_pocket(pocket_id)
+    _check_domain_edit_access(_pocket_to_domain(doc), user_id)
 
-        pocket = await get_default_repository().find_by_share_link_token(token)
-        if pocket is None:
-            raise NotFound("pocket", "shared link")
-        return pocket_to_wire_dict(pocket)
+    widget = next((w for w in doc.widgets if w.id == widget_id), None)
+    if widget is None:
+        raise NotFound("widget", widget_id)
+    if body.name is not None:
+        widget.name = body.name
+    if body.type is not None:
+        widget.type = body.type
+    if body.icon is not None:
+        widget.icon = body.icon
+    if body.config is not None:
+        widget.config = body.config
+    if body.props is not None:
+        widget.props = body.props
+    if body.data is not None:
+        widget.data = body.data
+    if body.assigned_agent is not None:
+        widget.assignedAgent = body.assigned_agent
+    await doc.save()
+    return pocket_to_wire_dict(_pocket_to_domain(doc))
 
-    # -----------------------------------------------------------------
-    # Collaborators
-    # -----------------------------------------------------------------
 
-    @staticmethod
-    async def add_collaborator(pocket_id: str, user_id: str, body: AddCollaboratorRequest) -> None:
-        """Add a collaborator to the pocket. Owner only.
+async def remove_widget(pocket_id: str, widget_id: str, user_id: str) -> dict:
+    doc = await _fetch_pocket(pocket_id)
+    _check_domain_edit_access(_pocket_to_domain(doc), user_id)
 
-        Phase 8: routes through ``IPocketRepository.add_collaborator``.
-        """
-        from ee.cloud.pockets.repositories import get_default_repository
+    before = len(doc.widgets)
+    doc.widgets = [w for w in doc.widgets if w.id != widget_id]
+    if len(doc.widgets) == before:
+        raise NotFound("widget", widget_id)
+    await doc.save()
+    return pocket_to_wire_dict(_pocket_to_domain(doc))
 
-        repo = get_default_repository()
-        pocket = await repo.get(pocket_id)
-        if pocket is None:
-            raise NotFound("pocket", pocket_id)
-        _check_domain_owner(pocket, user_id)
 
-        await repo.add_collaborator(pocket_id, body.user_id)
+async def reorder_widgets(pocket_id: str, user_id: str, widget_ids: list[str]) -> dict:
+    """Reorder widgets. Tolerates legacy callers that may omit ids
+    (missing ids appended at the end) or include unknown ids (dropped)."""
+    doc = await _fetch_pocket(pocket_id)
+    _check_domain_edit_access(_pocket_to_domain(doc), user_id)
 
-        await event_bus.emit(
-            "pocket.shared",
-            {
-                "pocket_id": pocket.id,
-                "owner_id": user_id,
-                "collaborator_id": body.user_id,
-                "access": body.access,
-            },
+    existing_ids = {w.id for w in doc.widgets}
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for wid in widget_ids:
+        if wid in existing_ids and wid not in seen:
+            ordered.append(wid)
+            seen.add(wid)
+    for w in doc.widgets:
+        if w.id not in seen:
+            ordered.append(w.id)
+            seen.add(w.id)
+
+    if set(ordered) != existing_ids:
+        # Defensive: should be impossible after the fill above
+        raise ValidationError(
+            "widget.reorder_mismatch",
+            "widget_ids must match the current set exactly",
         )
+    widgets_by_id = {w.id: w for w in doc.widgets}
+    doc.widgets = [widgets_by_id[wid] for wid in ordered]
+    await doc.save()
+    return pocket_to_wire_dict(_pocket_to_domain(doc))
 
-    @staticmethod
-    async def remove_collaborator(pocket_id: str, user_id: str, target_user_id: str) -> None:
-        """Remove a collaborator from the pocket. Owner only.
 
-        Phase 8: routes through ``IPocketRepository.remove_collaborator``.
-        """
-        from ee.cloud.pockets.repositories import get_default_repository
+# ---------------------------------------------------------------------------
+# Sharing — Share links
+# ---------------------------------------------------------------------------
 
-        repo = get_default_repository()
-        pocket = await repo.get(pocket_id)
-        if pocket is None:
-            raise NotFound("pocket", pocket_id)
-        _check_domain_owner(pocket, user_id)
 
-        await repo.remove_collaborator(pocket_id, target_user_id)
+async def generate_share_link(pocket_id: str, user_id: str, access: str) -> dict:
+    doc = await _fetch_pocket(pocket_id)
+    _check_domain_owner(_pocket_to_domain(doc), user_id)
 
-    # -----------------------------------------------------------------
-    # Team
-    # -----------------------------------------------------------------
+    token = secrets.token_urlsafe(32)
+    doc.share_link_token = token
+    doc.share_link_access = access
+    await doc.save()
+    return {"token": token, "access": access, "url": f"/shared/{token}"}
 
-    @staticmethod
-    async def add_team_member(pocket_id: str, user_id: str, member_id: str) -> dict:
-        """Add a team member to the pocket. Owner or edit access.
 
-        Phase 8: routes through ``IPocketRepository.add_team_member``.
-        """
-        from ee.cloud.pockets.dto import pocket_to_wire_dict
-        from ee.cloud.pockets.repositories import get_default_repository
+async def revoke_share_link(pocket_id: str, user_id: str) -> None:
+    doc = await _fetch_pocket(pocket_id)
+    _check_domain_owner(_pocket_to_domain(doc), user_id)
 
-        repo = get_default_repository()
-        pocket = await repo.get(pocket_id)
-        if pocket is None:
-            raise NotFound("pocket", pocket_id)
-        _check_domain_edit_access(pocket, user_id)
+    doc.share_link_token = None
+    doc.share_link_access = "view"
+    await doc.save()
 
-        updated = await repo.add_team_member(pocket_id, member_id)
-        return pocket_to_wire_dict(updated)
 
-    @staticmethod
-    async def remove_team_member(pocket_id: str, user_id: str, member_id: str) -> dict:
-        """Remove a team member from the pocket. Owner or edit access.
+async def update_share_link(pocket_id: str, user_id: str, access: str) -> dict:
+    doc = await _fetch_pocket(pocket_id)
+    _check_domain_owner(_pocket_to_domain(doc), user_id)
 
-        Phase 8: routes through ``IPocketRepository.remove_team_member``.
-        """
-        from ee.cloud.pockets.dto import pocket_to_wire_dict
-        from ee.cloud.pockets.repositories import get_default_repository
+    if not doc.share_link_token:
+        raise NotFound("share_link", pocket_id)
 
-        repo = get_default_repository()
-        pocket = await repo.get(pocket_id)
-        if pocket is None:
-            raise NotFound("pocket", pocket_id)
-        _check_domain_edit_access(pocket, user_id)
+    doc.share_link_access = access
+    await doc.save()
+    return {
+        "token": doc.share_link_token,
+        "access": access,
+        "url": f"/shared/{doc.share_link_token}",
+    }
 
-        updated = await repo.remove_team_member(pocket_id, member_id)
-        return pocket_to_wire_dict(updated)
 
-    # -----------------------------------------------------------------
-    # Agents
-    # -----------------------------------------------------------------
+async def access_via_share_link(token: str) -> dict:
+    doc = await _PocketDoc.find_one(_PocketDoc.share_link_token == token)
+    if doc is None:
+        raise NotFound("pocket", "shared link")
+    return pocket_to_wire_dict(_pocket_to_domain(doc))
 
-    @staticmethod
-    async def add_agent(pocket_id: str, user_id: str, agent_id: str) -> dict:
-        """Add an agent to the pocket. Owner or edit access.
 
-        Phase 8: routes through ``IPocketRepository.add_agent``.
-        """
-        from ee.cloud.pockets.dto import pocket_to_wire_dict
-        from ee.cloud.pockets.repositories import get_default_repository
+# ---------------------------------------------------------------------------
+# Collaborators
+# ---------------------------------------------------------------------------
 
-        repo = get_default_repository()
-        pocket = await repo.get(pocket_id)
-        if pocket is None:
-            raise NotFound("pocket", pocket_id)
-        _check_domain_edit_access(pocket, user_id)
 
-        updated = await repo.add_agent(pocket_id, agent_id)
-        return pocket_to_wire_dict(updated)
+async def add_collaborator(
+    pocket_id: str, user_id: str, body: AddCollaboratorRequest
+) -> None:
+    doc = await _fetch_pocket(pocket_id)
+    pocket = _pocket_to_domain(doc)
+    _check_domain_owner(pocket, user_id)
 
-    @staticmethod
-    async def remove_agent(pocket_id: str, user_id: str, agent_id: str) -> dict:
-        """Remove an agent from the pocket. Owner or edit access.
+    await _mutate_list_field(pocket_id, "shared_with", body.user_id, "add")
 
-        Phase 8: routes through ``IPocketRepository.remove_agent``.
-        """
-        from ee.cloud.pockets.dto import pocket_to_wire_dict
-        from ee.cloud.pockets.repositories import get_default_repository
+    await event_bus.emit(
+        "pocket.shared",
+        {
+            "pocket_id": pocket.id,
+            "owner_id": user_id,
+            "collaborator_id": body.user_id,
+            "access": body.access,
+        },
+    )
 
-        repo = get_default_repository()
-        pocket = await repo.get(pocket_id)
-        if pocket is None:
-            raise NotFound("pocket", pocket_id)
-        _check_domain_edit_access(pocket, user_id)
 
-        updated = await repo.remove_agent(pocket_id, agent_id)
-        return pocket_to_wire_dict(updated)
+async def remove_collaborator(pocket_id: str, user_id: str, target_user_id: str) -> None:
+    doc = await _fetch_pocket(pocket_id)
+    _check_domain_owner(_pocket_to_domain(doc), user_id)
+    await _mutate_list_field(pocket_id, "shared_with", target_user_id, "remove")
+
+
+# ---------------------------------------------------------------------------
+# Team
+# ---------------------------------------------------------------------------
+
+
+async def add_team_member(pocket_id: str, user_id: str, member_id: str) -> dict:
+    doc = await _fetch_pocket(pocket_id)
+    _check_domain_edit_access(_pocket_to_domain(doc), user_id)
+    updated = await _mutate_list_field(pocket_id, "team", member_id, "add")
+    return pocket_to_wire_dict(updated)
+
+
+async def remove_team_member(pocket_id: str, user_id: str, member_id: str) -> dict:
+    doc = await _fetch_pocket(pocket_id)
+    _check_domain_edit_access(_pocket_to_domain(doc), user_id)
+    updated = await _mutate_list_field(pocket_id, "team", member_id, "remove")
+    return pocket_to_wire_dict(updated)
+
+
+# ---------------------------------------------------------------------------
+# Agents
+# ---------------------------------------------------------------------------
+
+
+async def add_agent(pocket_id: str, user_id: str, agent_id: str) -> dict:
+    doc = await _fetch_pocket(pocket_id)
+    _check_domain_edit_access(_pocket_to_domain(doc), user_id)
+    updated = await _mutate_list_field(pocket_id, "agents", agent_id, "add")
+    return pocket_to_wire_dict(updated)
+
+
+async def remove_agent(pocket_id: str, user_id: str, agent_id: str) -> dict:
+    doc = await _fetch_pocket(pocket_id)
+    _check_domain_edit_access(_pocket_to_domain(doc), user_id)
+    updated = await _mutate_list_field(pocket_id, "agents", agent_id, "remove")
+    return pocket_to_wire_dict(updated)
+
+
+__all__ = [
+    "create",
+    "list_pockets",
+    "get",
+    "update",
+    "delete",
+    "create_from_ripple_spec",
+    "add_widget",
+    "update_widget",
+    "remove_widget",
+    "reorder_widgets",
+    "generate_share_link",
+    "revoke_share_link",
+    "update_share_link",
+    "access_via_share_link",
+    "add_collaborator",
+    "remove_collaborator",
+    "add_team_member",
+    "remove_team_member",
+    "add_agent",
+    "remove_agent",
+]

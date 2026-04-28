@@ -37,8 +37,8 @@ from ee.cloud.pockets.layouts import (
     parse_layout_yaml,
     reset_user_template_store,
 )
+from ee.cloud.pockets import service as pockets_service
 from ee.cloud.pockets.router import router
-from ee.cloud.pockets.service import PocketService
 from ee.cloud.shared.deps import (
     current_user_id,
     current_workspace_id,
@@ -88,7 +88,7 @@ def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     async def _fake_get(pocket_id: str, user_id: str) -> dict:
         return dict(POCKET_FIXTURE, _id=pocket_id)
 
-    monkeypatch.setattr(PocketService, "get", staticmethod(_fake_get))
+    monkeypatch.setattr(pockets_service, "get", _fake_get)
 
     # Skip the license/auth guards entirely for the integration tests —
     # the point here is the new surface, not the guard wiring.
