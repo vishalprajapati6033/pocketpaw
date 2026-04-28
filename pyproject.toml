@@ -332,6 +332,7 @@ dev = [
     "pytest-playwright>=0.4.0",
     "ruff>=0.4.0",
     "mypy>=1.8.0",
+    "import-linter>=2.0",
 ]
 
 [project.scripts]
@@ -410,4 +411,36 @@ testpaths = ["tests"]
 addopts = "--ignore=tests/cloud --ignore=tests/e2e"
 markers = [
     "enforce_scope: opt a test out of the global _TESTING_FULL_ACCESS bypass so require_scope fails closed as in production",
+]
+
+# ---------------------------------------------------------------------------
+# import-linter: chokepoint contract for ee/cloud/
+# ---------------------------------------------------------------------------
+# Rules:
+#   1. Beanie document classes (ee.cloud.models.*) may only be imported
+#      from <entity>/service.py.
+#   2. router.py / dto.py / domain.py within an entity are forbidden from
+#      importing the matching Beanie doc.
+#   3. api / channels / tools / agents may not touch ee.cloud.models at all.
+#
+# Pockets is the canonical reference and ships in failing mode. Other
+# entities are added one at a time at touch-time per the touch-time
+# migration rule in CLAUDE.md.
+[tool.importlinter]
+root_packages = ["ee", "pocketpaw"]
+
+[[tool.importlinter.contracts]]
+name = "Beanie writes only from ee/cloud/<entity>/service.py — pockets pilot"
+type = "forbidden"
+allow_indirect_imports = "true"
+source_modules = [
+    # Per-entity: only service.py may directly import the Beanie doc.
+    # router / dto / domain are forbidden. Add other entities here as
+    # they tighten to failing mode at touch-time.
+    "ee.cloud.pockets.router",
+    "ee.cloud.pockets.dto",
+    "ee.cloud.pockets.domain",
+]
+forbidden_modules = [
+    "ee.cloud.models.pocket",
 ]
