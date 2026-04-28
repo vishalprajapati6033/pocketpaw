@@ -25,15 +25,15 @@ def init_realtime() -> None:
     from ee.cloud.chat.ws import manager as _conn_manager
     from ee.cloud.realtime.audience import AudienceResolver
     from ee.cloud.realtime.bus import InProcessBus, set_bus, set_resolver
-    from ee.cloud.workspace.service import WorkspaceService
+    from ee.cloud.workspace import service as workspace_service
 
     logger = logging.getLogger(__name__)
 
     resolver = AudienceResolver(
         group_members=GroupService.list_member_ids,
-        workspace_members=WorkspaceService.list_member_ids,
-        workspace_admins=WorkspaceService.list_admin_ids,
-        workspace_peers=WorkspaceService.list_peer_ids,
+        workspace_members=workspace_service.list_member_ids,
+        workspace_admins=workspace_service.list_admin_ids,
+        workspace_peers=workspace_service.list_peer_ids,
     )
 
     mode = os.environ.get("POCKETPAW_REALTIME_BUS", "inprocess").lower()

@@ -56,7 +56,7 @@ from ee.cloud.shared.deps import (
     require_group_action,
 )
 from ee.cloud.shared.errors import Forbidden as CloudForbidden
-from ee.cloud.workspace.service import WorkspaceService
+from ee.cloud.workspace import service as workspace_service
 from pocketpaw.ee.guards.deps import check_workspace_action
 from pocketpaw.ee.guards.rbac import Forbidden as GuardForbidden
 
@@ -515,7 +515,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
     # connection only. Without it, a late joiner sees only their own dot until
     # someone else flaps online/offline.
     try:
-        peer_ids = await WorkspaceService.list_peer_ids(user_id)
+        peer_ids = await workspace_service.list_peer_ids(user_id)
         for peer_id in peer_ids:
             if manager.is_online(peer_id):
                 await websocket.send_json({"type": "presence.online", "data": {"user_id": peer_id}})

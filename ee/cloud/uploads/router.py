@@ -69,9 +69,9 @@ async def _is_chat_member(chat_id: str, user_id: str, _workspace: str) -> bool:
 
 async def _is_workspace_admin(user_id: str, workspace: str) -> bool:
     """Return True if ``user_id`` is an owner/admin of ``workspace``."""
-    from ee.cloud.workspace.service import WorkspaceService
+    from ee.cloud.workspace import service as workspace_service
 
-    admins = await WorkspaceService.list_admin_ids(workspace)
+    admins = await workspace_service.list_admin_ids(workspace)
     return user_id in admins
 
 
