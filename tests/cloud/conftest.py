@@ -58,24 +58,6 @@ def recording_bus():
     bus_mod._bus = prev  # type: ignore[attr-defined]
 
 
-@pytest.fixture(autouse=True)
-def _reset_repo_singletons():
-    # Snapshot and restore each repositories module's lazy singleton.
-    # Tests that swap in a fake via `set_*_repository(...)` (or poke the
-    # global directly) would otherwise leak the fake into later tests.
-    # This will become a no-op once all modules drop their repositories.py;
-    # the fixture is removed in the final cleanup commit of Milestone 1.
-    from ee.cloud.chat import repositories as chat_repos
-
-    snapshots: list[tuple[object, str, object]] = [
-        (chat_repos, "_default_message", chat_repos._default_message),  # type: ignore[attr-defined]
-        (chat_repos, "_default_group", chat_repos._default_group),  # type: ignore[attr-defined]
-    ]
-    yield
-    for module, attr, prev in snapshots:
-        setattr(module, attr, prev)
-
-
 @pytest_asyncio.fixture
 async def mongo_db() -> Any:
     """Initialize Beanie against an isolated in-memory mongomock-motor DB.

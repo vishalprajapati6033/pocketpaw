@@ -1,72 +1,61 @@
 """Derivation tests: mention / reaction / invite → notifications_service.create.
 
 Each emit site is exercised through its owning service; the spy on
-``notifications_service.create`` proves the derivation fires with
-the right arguments (and does NOT fire for self-targeted events).
+``notifications_service.create`` proves the derivation fires with the
+right arguments (and does NOT fire for self-targeted events).
 
-Phase 10 routed chat mutations through ``IMessageRepository`` /
-``IGroupRepository``; these tests install in-memory fakes from
-``tests.cloud.chat.conftest`` instead of patching the Beanie ctor seam.
-The autouse ``_reset_repo_singletons`` fixture restores the real
-singletons after every test.
+Tests run against a real Beanie in-memory database (``mongo_db`` fixture)
+and assert via spies on ``notifications_service.create`` and
+``unread_service.bump_mention``.
 """
 
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
-from ee.cloud.chat.repositories import (
-    set_group_repository,
-    set_message_repository,
-)
-from tests.cloud.chat.conftest import (
-    FakeGroupRepo,
-    FakeMessageRepo,
-    make_domain_message,
-)
-
-# ---------------------------------------------------------------------------
-# Shared helpers
-# ---------------------------------------------------------------------------
+from ee.cloud.chat import message_service
+from ee.cloud.chat.schemas import SendMessageRequest
+from ee.cloud.models.group import Group as _GroupDoc
+from ee.cloud.models.message import Message as _MessageDoc
 
 
-def _fake_group(
+async def _make_group(
     *,
-    group_id: str = "g1",
-    owner: str = "u1",
     workspace: str = "w1",
+    owner: str = "u1",
+    members: list[str] | None = None,
     name: str = "general",
-) -> SimpleNamespace:
-    """Beanie-shape stand-in for the legacy ``_get_group_or_404`` seam.
-
-    The membership / can-post check still loads the Beanie ``Group`` doc
-    via the legacy helper because mutation paths share it with
-    non-migrated reads.
-    """
-    return SimpleNamespace(
-        id=group_id,
+) -> _GroupDoc:
+    if members is None:
+        members = [owner]
+    doc = _GroupDoc(
         workspace=workspace,
-        owner=owner,
         name=name,
-        members=[owner],
+        slug="general",
+        type="private",
+        members=members,
         member_roles={owner: "admin"},
-        archived=False,
-        type="group",
-        last_message_at=None,
-        message_count=0,
-        save=AsyncMock(),
+        owner=owner,
     )
+    await doc.insert()
+    return doc
 
 
-def _install_chat_fakes() -> tuple[FakeMessageRepo, FakeGroupRepo]:
-    msg_repo = FakeMessageRepo()
-    grp_repo = FakeGroupRepo()
-    set_message_repository(msg_repo)
-    set_group_repository(grp_repo)
-    return msg_repo, grp_repo
+async def _make_message(
+    *, group_id: str, sender: str, content: str = "hey"
+) -> _MessageDoc:
+    doc = _MessageDoc(
+        context_type="group",
+        group=group_id,
+        sender=sender,
+        sender_type="user",
+        content=content,
+    )
+    await doc.insert()
+    return doc
 
 
 # ---------------------------------------------------------------------------
@@ -75,36 +64,27 @@ def _install_chat_fakes() -> tuple[FakeMessageRepo, FakeGroupRepo]:
 
 
 @pytest.mark.asyncio
-async def test_send_message_with_mention_creates_notification_for_target():
-    from ee.cloud.chat.schemas import SendMessageRequest
-
-    msg_repo, _grp_repo = _install_chat_fakes()
-    msg_repo.next_id = "m1"
-    group = _fake_group()
+async def test_send_message_with_mention_creates_notification_for_target(
+    mongo_db, monkeypatch
+):
+    group = await _make_group(workspace="w1", owner="u1", members=["u1", "u2"])
 
     spy = AsyncMock()
+    monkeypatch.setattr(
+        "ee.cloud.chat.message_service.notifications_service.create", spy
+    )
+    monkeypatch.setattr(
+        "ee.cloud.chat.message_service.unread_service.bump_mention", AsyncMock()
+    )
 
-    with (
-        patch("ee.cloud.chat.message_service.emit", new=AsyncMock()),
-        patch("ee.cloud.chat.message_service.event_bus.emit", new=AsyncMock()),
-        patch(
-            "ee.cloud.chat.message_service._get_group_or_404",
-            new=AsyncMock(return_value=group),
+    response = await message_service.send_message(
+        str(group.id),
+        "u1",
+        SendMessageRequest(
+            content="hello @alice",
+            mentions=[{"type": "user", "id": "u2", "display_name": "alice"}],
         ),
-        patch("ee.cloud.chat.message_service._require_can_post"),
-        patch("ee.cloud.chat.message_service.notifications_service.create", new=spy),
-        patch("ee.cloud.chat.message_service.UnreadService.bump_mention", new=AsyncMock()),
-    ):
-        from ee.cloud.chat.message_service import MessageService
-
-        await MessageService.send_message(
-            "g1",
-            "u1",
-            SendMessageRequest(
-                content="hello @alice",
-                mentions=[{"type": "user", "id": "u2", "display_name": "alice"}],
-            ),
-        )
+    )
 
     spy.assert_awaited_once()
     kwargs = spy.await_args.kwargs
@@ -114,39 +94,29 @@ async def test_send_message_with_mention_creates_notification_for_target():
     assert kwargs["body"] == "hello @alice"
     assert "#general" in kwargs["title"]
     assert kwargs["source"].type == "message"
-    assert kwargs["source"].id == "m1"
+    assert kwargs["source"].id == response["_id"]
 
 
 @pytest.mark.asyncio
-async def test_send_message_self_mention_does_not_notify():
-    from ee.cloud.chat.schemas import SendMessageRequest
-
-    _msg_repo, _grp_repo = _install_chat_fakes()
-    group = _fake_group()
+async def test_send_message_self_mention_does_not_notify(mongo_db, monkeypatch):
+    group = await _make_group(workspace="w1", owner="u1")
 
     spy = AsyncMock()
+    monkeypatch.setattr(
+        "ee.cloud.chat.message_service.notifications_service.create", spy
+    )
+    monkeypatch.setattr(
+        "ee.cloud.chat.message_service.unread_service.bump_mention", AsyncMock()
+    )
 
-    with (
-        patch("ee.cloud.chat.message_service.emit", new=AsyncMock()),
-        patch("ee.cloud.chat.message_service.event_bus.emit", new=AsyncMock()),
-        patch(
-            "ee.cloud.chat.message_service._get_group_or_404",
-            new=AsyncMock(return_value=group),
+    await message_service.send_message(
+        str(group.id),
+        "u1",
+        SendMessageRequest(
+            content="me me me",
+            mentions=[{"type": "user", "id": "u1", "display_name": "self"}],
         ),
-        patch("ee.cloud.chat.message_service._require_can_post"),
-        patch("ee.cloud.chat.message_service.notifications_service.create", new=spy),
-        patch("ee.cloud.chat.message_service.UnreadService.bump_mention", new=AsyncMock()),
-    ):
-        from ee.cloud.chat.message_service import MessageService
-
-        await MessageService.send_message(
-            "g1",
-            "u1",
-            SendMessageRequest(
-                content="me me me",
-                mentions=[{"type": "user", "id": "u1", "display_name": "self"}],
-            ),
-        )
+    )
 
     spy.assert_not_awaited()
 
@@ -157,27 +127,17 @@ async def test_send_message_self_mention_does_not_notify():
 
 
 @pytest.mark.asyncio
-async def test_toggle_reaction_adding_notifies_original_sender():
-    msg_repo, _grp_repo = _install_chat_fakes()
-    # msg sender is u1, reactor is u2 → should notify u1.
-    msg_repo.add(make_domain_message(id="m1", group="g1", sender="u1", content="hey"))
-    group = _fake_group(owner="u1", workspace="w1")
+async def test_toggle_reaction_adding_notifies_original_sender(mongo_db, monkeypatch):
+    """Reactor ≠ sender: notify the original sender."""
+    group = await _make_group(workspace="w1", owner="u1", members=["u1", "u2"])
+    msg = await _make_message(group_id=str(group.id), sender="u1", content="hey")
 
     spy = AsyncMock()
+    monkeypatch.setattr(
+        "ee.cloud.chat.message_service.notifications_service.create", spy
+    )
 
-    with (
-        patch("ee.cloud.chat.message_service.emit", new=AsyncMock()),
-        patch(
-            "ee.cloud.chat.message_service._get_group_or_404",
-            new=AsyncMock(return_value=group),
-        ),
-        patch("ee.cloud.chat.message_service._require_can_post"),
-        patch("ee.cloud.chat.message_service.notifications_service.create", new=spy),
-        patch("ee.cloud.chat.message_service.UnreadService.bump_mention", new=AsyncMock()),
-    ):
-        from ee.cloud.chat.message_service import MessageService
-
-        await MessageService.toggle_reaction("m1", "u2", "\U0001f44d")
+    await message_service.toggle_reaction(str(msg.id), "u2", "\U0001f44d")
 
     spy.assert_awaited_once()
     kwargs = spy.await_args.kwargs
@@ -187,66 +147,46 @@ async def test_toggle_reaction_adding_notifies_original_sender():
     assert "\U0001f44d" in kwargs["title"]
     assert kwargs["body"] == "hey"
     assert kwargs["source"].type == "message"
-    assert kwargs["source"].id == "m1"
+    assert kwargs["source"].id == str(msg.id)
 
 
 @pytest.mark.asyncio
-async def test_toggle_reaction_self_reaction_does_not_notify():
-    msg_repo, _grp_repo = _install_chat_fakes()
-    # msg sender and reactor are both u1 → no notification.
-    msg_repo.add(make_domain_message(id="m1", group="g1", sender="u1", content="hey"))
-    group = _fake_group(owner="u1", workspace="w1")
+async def test_toggle_reaction_self_reaction_does_not_notify(mongo_db, monkeypatch):
+    """Reactor == sender: skip notification."""
+    group = await _make_group(workspace="w1", owner="u1")
+    msg = await _make_message(group_id=str(group.id), sender="u1", content="hey")
 
     spy = AsyncMock()
+    monkeypatch.setattr(
+        "ee.cloud.chat.message_service.notifications_service.create", spy
+    )
 
-    with (
-        patch("ee.cloud.chat.message_service.emit", new=AsyncMock()),
-        patch(
-            "ee.cloud.chat.message_service._get_group_or_404",
-            new=AsyncMock(return_value=group),
-        ),
-        patch("ee.cloud.chat.message_service._require_can_post"),
-        patch("ee.cloud.chat.message_service.notifications_service.create", new=spy),
-        patch("ee.cloud.chat.message_service.UnreadService.bump_mention", new=AsyncMock()),
-    ):
-        from ee.cloud.chat.message_service import MessageService
-
-        await MessageService.toggle_reaction("m1", "u1", "\U0001f44d")
+    await message_service.toggle_reaction(str(msg.id), "u1", "\U0001f44d")
 
     spy.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_toggle_reaction_removing_does_not_notify():
-    msg_repo, _grp_repo = _install_chat_fakes()
-    # u2 already reacted — toggling removes and should NOT notify (the
-    # ``toggle_added=False`` knob mimics the repo's "user removed
-    # reaction" return path).
-    msg_repo.add(make_domain_message(id="m1", group="g1", sender="u1", content="hey"))
-    msg_repo.toggle_added = False
-    group = _fake_group(owner="u1", workspace="w1")
+async def test_toggle_reaction_removing_does_not_notify(mongo_db, monkeypatch):
+    """Toggle off (remove existing reaction) must not fire a notification."""
+    group = await _make_group(workspace="w1", owner="u1", members=["u1", "u2"])
+    msg = await _make_message(group_id=str(group.id), sender="u1", content="hey")
+
+    # Pre-seed a reaction so the next toggle removes it.
+    await message_service.toggle_reaction(str(msg.id), "u2", "\U0001f44d")
 
     spy = AsyncMock()
+    monkeypatch.setattr(
+        "ee.cloud.chat.message_service.notifications_service.create", spy
+    )
 
-    with (
-        patch("ee.cloud.chat.message_service.emit", new=AsyncMock()),
-        patch(
-            "ee.cloud.chat.message_service._get_group_or_404",
-            new=AsyncMock(return_value=group),
-        ),
-        patch("ee.cloud.chat.message_service._require_can_post"),
-        patch("ee.cloud.chat.message_service.notifications_service.create", new=spy),
-        patch("ee.cloud.chat.message_service.UnreadService.bump_mention", new=AsyncMock()),
-    ):
-        from ee.cloud.chat.message_service import MessageService
-
-        await MessageService.toggle_reaction("m1", "u2", "\U0001f44d")
+    await message_service.toggle_reaction(str(msg.id), "u2", "\U0001f44d")
 
     spy.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
-# Invite derivation
+# Invite derivation helpers (unchanged shape; preserved for downstream tests)
 # ---------------------------------------------------------------------------
 
 

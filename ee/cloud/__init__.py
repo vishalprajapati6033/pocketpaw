@@ -21,7 +21,7 @@ def init_realtime() -> None:
     import logging
     import os
 
-    from ee.cloud.chat.group_service import GroupService
+    from ee.cloud.chat import group_service
     from ee.cloud.chat.ws import manager as _conn_manager
     from ee.cloud.realtime.audience import AudienceResolver
     from ee.cloud.realtime.bus import InProcessBus, set_bus, set_resolver
@@ -30,7 +30,7 @@ def init_realtime() -> None:
     logger = logging.getLogger(__name__)
 
     resolver = AudienceResolver(
-        group_members=GroupService.list_member_ids,
+        group_members=group_service.list_member_ids,
         workspace_members=workspace_service.list_member_ids,
         workspace_admins=workspace_service.list_admin_ids,
         workspace_peers=workspace_service.list_peer_ids,
