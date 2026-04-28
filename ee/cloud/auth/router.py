@@ -9,6 +9,7 @@ endpoints stay here unchanged in behavior.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
@@ -28,7 +29,6 @@ from ee.cloud.auth.dto import (
     SetWorkspaceRequest,
     auth_user_to_profile_out,
 )
-from ee.cloud.models.user import User
 
 router = APIRouter(tags=["Auth"])
 
@@ -101,7 +101,7 @@ async def set_active_workspace(
 @router.post("/auth/avatar", response_model=ProfileOut)
 async def upload_avatar(
     file: UploadFile = File(...),
-    user: User = Depends(current_active_user),
+    user: Any = Depends(current_active_user),
     ctx: RequestContext = Depends(request_context),
 ) -> ProfileOut:
     """Upload a profile picture. Returns the updated profile with the avatar URL."""
