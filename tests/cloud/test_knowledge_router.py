@@ -64,7 +64,10 @@ def client(monkeypatch):
     async def fake_current_active_user():
         return fake_user
 
+    from ee.cloud._core.http import add_error_handler
+
     app = FastAPI()
+    add_error_handler(app)
     app.dependency_overrides[require_license] = lambda: None
     app.dependency_overrides[current_active_user] = fake_current_active_user
     app.include_router(knowledge_router_module.router, prefix="/api/v1")
@@ -102,7 +105,9 @@ def test_filter_by_agent_id(client: TestClient) -> None:
 def test_cross_workspace_id_rejected(client: TestClient) -> None:
     response = client.get("/api/v1/knowledge/articles?workspace_id=ws-beta")
     assert response.status_code == 403
-    assert "must match" in response.json()["detail"]
+    body = response.json()
+    assert body["error"]["code"] == "knowledge.workspace_mismatch"
+    assert "must match" in body["error"]["message"]
 
 
 def test_unknown_agent_returns_empty_not_leak(client: TestClient) -> None:

@@ -120,11 +120,13 @@ def _no_op_license() -> None:
 
 @pytest_asyncio.fixture
 async def cloud_app_client() -> AsyncClient:
+    from ee.cloud._core.http import add_error_handler
     from ee.cloud.chat.agent_router import router as agent_router
     from ee.cloud.license import require_license
     from ee.cloud.shared.deps import current_user_id, current_workspace_id
 
     app = FastAPI()
+    add_error_handler(app)
     app.include_router(agent_router)
     app.dependency_overrides[current_user_id] = _fixed_user
     app.dependency_overrides[current_workspace_id] = _fixed_workspace

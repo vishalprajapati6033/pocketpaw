@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from ee.cloud.chat.agent_schemas import CloudAgentChatRequest
@@ -77,12 +77,9 @@ async def post_agent_chat(
         # when the user is in pocket-creation mode.
         ctx.intent = body.intent
     except InvalidScope:
-        raise HTTPException(status_code=400, detail={"code": "scope.invalid"})
-    except CloudError as e:
-        raise HTTPException(
-            status_code=getattr(e, "status_code", 400),
-            detail={"code": e.code, "message": str(e)},
-        )
+        raise CloudError(400, "scope.invalid", "Invalid scope") from None
+    except CloudError:
+        raise
 
     # Signal any prior in-flight run for the same (scope, scope_id, user_id)
     # to stop. We don't wait on it — each generator cleans its own slot in
@@ -104,14 +101,11 @@ async def post_agent_chat(
 
     try:
         user_message_id = await _persist_user_message(ctx, body)
-    except CloudError as e:
+    except CloudError:
         # Clean up our slot on failure so we don't leak a cancel event.
         if _active_runs.get(key) is cancel_event:
             _active_runs.pop(key, None)
-        raise HTTPException(
-            status_code=getattr(e, "status_code", 400),
-            detail={"code": e.code, "message": str(e)},
-        )
+        raise
     except Exception:
         # Any other failure (Mongo error, Pydantic validation, …) must also
         # clear the slot so subsequent requests for this (scope, scope_id,
@@ -173,7 +167,9 @@ async def post_agent_chat_stop(
     key = (scope, scope_id, user_id)
     ev = _active_runs.get(key)
     if ev is None:
-        raise HTTPException(status_code=404, detail={"code": "no_active_run"})
+        from ee.cloud._core.errors import NotFound
+
+        raise NotFound("active_run", f"{scope}:{scope_id}")
     ev.set()
     return {"status": "ok"}
 

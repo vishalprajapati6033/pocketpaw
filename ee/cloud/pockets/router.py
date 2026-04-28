@@ -16,7 +16,9 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
+
+from ee.cloud._core.errors import CloudError
 from pydantic import BaseModel, Field
 from starlette.responses import Response
 
@@ -145,7 +147,7 @@ async def create_user_template(
     try:
         spec = parse_layout_yaml(body.yaml_source)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from None
+        raise CloudError(400, "layout.invalid_yaml", str(exc)) from None
 
     row = store.save(
         UserPocketTemplate(

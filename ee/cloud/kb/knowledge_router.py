@@ -24,8 +24,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 
+from ee.cloud._core.errors import Forbidden
 from ee.cloud.kb.workspace_aggregator import aggregate_workspace_articles
 from ee.cloud.license import require_license
 from ee.cloud.shared.deps import (
@@ -86,9 +87,9 @@ async def list_workspace_articles(
       otherwise restricts to one agent's KB.
     """
     if workspace_id_q is not None and workspace_id_q != active_workspace_id:
-        raise HTTPException(
-            status_code=403,
-            detail="workspace_id must match the caller's active workspace",
+        raise Forbidden(
+            "knowledge.workspace_mismatch",
+            "workspace_id must match the caller's active workspace",
         )
 
     agent_ids = await _list_workspace_agent_ids(active_workspace_id)

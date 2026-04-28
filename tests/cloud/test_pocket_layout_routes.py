@@ -82,7 +82,10 @@ def _reset_store():
 
 @pytest.fixture
 def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
+    from ee.cloud._core.http import add_error_handler
+
     a = FastAPI()
+    add_error_handler(a)
     a.include_router(router)
 
     async def _fake_get(pocket_id: str, user_id: str) -> dict:
@@ -229,7 +232,9 @@ class TestMalformedYaml:
             },
         )
         assert res.status_code == 400
-        assert "spec" in res.json()["detail"]
+        body = res.json()
+        assert body["error"]["code"] == "layout.invalid_yaml"
+        assert "spec" in body["error"]["message"]
 
 
 # ---------------------------------------------------------------------------

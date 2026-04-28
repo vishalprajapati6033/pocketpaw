@@ -403,6 +403,7 @@ dev = [
     "mongomock-motor>=0.0.36",
     "moto[s3]>=5.0.0",
     "types-aiofiles>=25.1.0.20260409",
+    "import-linter>=2.11",
 ]
 
 [tool.pytest.ini_options]
