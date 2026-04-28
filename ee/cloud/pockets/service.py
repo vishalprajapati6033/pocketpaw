@@ -78,9 +78,7 @@ class PocketService:
         """
         from ee.cloud.pockets.dto import pocket_to_wire_dict
         from ee.cloud.pockets.repositories import get_default_repository
-        from ee.cloud.sessions.repositories import (
-            get_default_repository as get_session_repo,
-        )
+        from ee.cloud.sessions import service as sessions_service
 
         normalized_spec = normalize_ripple_spec(body.ripple_spec) if body.ripple_spec else None
         pocket = await get_default_repository().create(
@@ -98,10 +96,7 @@ class PocketService:
         )
 
         if body.session_id:
-            session_repo = get_session_repo()
-            session = await session_repo.get_by_session_id(body.session_id)
-            if session and session.workspace == workspace_id:
-                await session_repo.update(session.id, pocket=pocket.id)
+            await sessions_service.link_pocket(workspace_id, body.session_id, pocket.id)
 
         return pocket_to_wire_dict(pocket)
 

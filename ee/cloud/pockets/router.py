@@ -393,9 +393,19 @@ async def create_pocket_session(
     workspace_id: str = Depends(current_workspace_id),
     user_id: str = Depends(current_user_id),
 ) -> dict:
-    from ee.cloud.sessions.service import SessionService
+    from ee.cloud.sessions import service as sessions_service
+    from ee.cloud.sessions.dto import session_to_wire_dict
 
-    return await SessionService.create_for_pocket_default(workspace_id, user_id, pocket_id, body)
+    body_with_pocket = CreateSessionRequest(
+        title=body.title,
+        pocket_id=pocket_id,
+        group_id=body.group_id,
+        agent_id=body.agent_id,
+        session_id=body.session_id,
+    )
+    ctx = sessions_service.legacy_ctx(user_id, workspace_id)
+    session = await sessions_service.create(ctx, workspace_id, body_with_pocket)
+    return session_to_wire_dict(session)
 
 
 @router.get("/{pocket_id}/sessions")
@@ -403,6 +413,9 @@ async def list_pocket_sessions(
     pocket_id: str,
     user_id: str = Depends(current_user_id),
 ) -> list[dict]:
-    from ee.cloud.sessions.service import SessionService
+    from ee.cloud.sessions import service as sessions_service
+    from ee.cloud.sessions.dto import session_to_wire_dict
 
-    return await SessionService.list_for_pocket_default(pocket_id, user_id)
+    ctx = sessions_service.legacy_ctx(user_id)
+    items = await sessions_service.list_for_pocket(ctx, pocket_id)
+    return [session_to_wire_dict(s) for s in items]

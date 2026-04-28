@@ -6,11 +6,12 @@ from fastapi import APIRouter, Depends
 from starlette.responses import Response
 
 from ee.cloud.license import require_license
+from ee.cloud.sessions import service as sessions_service
 from ee.cloud.sessions.dto import (
     CreateSessionRequest,
     UpdateSessionRequest,
+    session_to_wire_dict,
 )
-from ee.cloud.sessions.service import SessionService
 from ee.cloud.shared.deps import (
     current_user_id,
     current_workspace_id,
@@ -30,10 +31,9 @@ async def create_session(
     workspace_id: str = Depends(current_workspace_id),
     user_id: str = Depends(current_user_id),
 ) -> dict:
-    # Phase 9 made the instance methods take ``ctx`` first; routers call
-    # the classmethod ``*_default`` facades that build a legacy ctx and
-    # serialize the domain return value to a wire dict.
-    return await SessionService.create_default(workspace_id, user_id, body)
+    ctx = sessions_service.legacy_ctx(user_id, workspace_id)
+    session = await sessions_service.create(ctx, workspace_id, body)
+    return session_to_wire_dict(session)
 
 
 @router.get("", dependencies=[Depends(require_action_any_workspace("session.read_own"))])
@@ -44,9 +44,12 @@ async def list_sessions(
 ) -> list[dict]:
     """List the user's sessions. ``?agent_id=X`` filters to DM sessions for
     that agent (used by the frontend to resolve the DM room)."""
+    ctx = sessions_service.legacy_ctx(user_id, workspace_id)
     if agent_id:
-        return await SessionService.list_by_agent_default(workspace_id, user_id, agent_id)
-    return await SessionService.list_sessions_default(workspace_id, user_id)
+        items = await sessions_service.list_by_agent(ctx, workspace_id, agent_id)
+    else:
+        items = await sessions_service.list_for_owner(ctx, workspace_id)
+    return [session_to_wire_dict(s) for s in items]
 
 
 @router.get("/runtime")
@@ -93,7 +96,8 @@ async def get_session(
     session_id: str,
     user_id: str = Depends(current_user_id),
 ) -> dict:
-    return await SessionService.get_default(session_id, user_id)
+    ctx = sessions_service.legacy_ctx(user_id)
+    return session_to_wire_dict(await sessions_service.get(ctx, session_id))
 
 
 @router.patch("/{session_id}")
@@ -102,7 +106,8 @@ async def update_session(
     body: UpdateSessionRequest,
     user_id: str = Depends(current_user_id),
 ) -> dict:
-    return await SessionService.update_default(session_id, user_id, body)
+    ctx = sessions_service.legacy_ctx(user_id)
+    return session_to_wire_dict(await sessions_service.update(ctx, session_id, body))
 
 
 @router.delete("/{session_id}", status_code=204)
@@ -110,7 +115,8 @@ async def delete_session(
     session_id: str,
     user_id: str = Depends(current_user_id),
 ) -> Response:
-    await SessionService.delete_default(session_id, user_id)
+    ctx = sessions_service.legacy_ctx(user_id)
+    await sessions_service.delete(ctx, session_id)
     return Response(status_code=204)
 
 
@@ -129,12 +135,12 @@ async def get_session_history(
     from ee.cloud.shared.errors import NotFound
 
     try:
-        return await SessionService.get_history(session_id, user_id, limit=limit)
+        return await sessions_service.get_history(session_id, user_id, limit=limit)
     except NotFound:
         return {"messages": []}
 
 
 @router.post("/{session_id}/touch", status_code=204)
 async def touch_session(session_id: str) -> Response:
-    await SessionService.touch(session_id)
+    await sessions_service.touch(session_id)
     return Response(status_code=204)
