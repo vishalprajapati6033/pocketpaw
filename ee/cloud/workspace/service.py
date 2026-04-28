@@ -29,7 +29,7 @@ from ee.cloud._core.errors import (
     SeatLimitError,
 )
 from ee.cloud.models.notification import NotificationSource
-from ee.cloud.notifications.service import NotificationService
+from ee.cloud.notifications import service as notifications_service
 from ee.cloud.realtime.bus import get_resolver
 from ee.cloud.realtime.emit import emit
 from ee.cloud.realtime.events import (
@@ -279,7 +279,7 @@ class WorkspaceService:
         await emit(WorkspaceInviteCreated(data=event_data))
 
         if invited_user_id:
-            await NotificationService.create_default(
+            await notifications_service.create(
                 workspace_id=workspace_id,
                 recipient=invited_user_id,
                 kind="invite",

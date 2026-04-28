@@ -68,7 +68,6 @@ def _reset_repo_singletons():
     from ee.cloud.agents import repositories as agents_repos
     from ee.cloud.auth import repositories as auth_repos
     from ee.cloud.chat import repositories as chat_repos
-    from ee.cloud.notifications import repositories as notifications_repos
     from ee.cloud.pockets import repositories as pockets_repos
     from ee.cloud.sessions import repositories as sessions_repos
     from ee.cloud.workspace import repositories as workspace_repos
@@ -78,7 +77,6 @@ def _reset_repo_singletons():
         (auth_repos, "_default", auth_repos._default),  # type: ignore[attr-defined]
         (chat_repos, "_default_message", chat_repos._default_message),  # type: ignore[attr-defined]
         (chat_repos, "_default_group", chat_repos._default_group),  # type: ignore[attr-defined]
-        (notifications_repos, "_default", notifications_repos._default),  # type: ignore[attr-defined]
         (pockets_repos, "_default", pockets_repos._default),  # type: ignore[attr-defined]
         (sessions_repos, "_default", sessions_repos._default),  # type: ignore[attr-defined]
         (

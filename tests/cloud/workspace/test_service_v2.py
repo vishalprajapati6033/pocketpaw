@@ -472,7 +472,7 @@ async def test_create_invite_emits_invite_created(
     service, repos, captured_events, monkeypatch
 ) -> None:
     monkeypatch.setattr(
-        "ee.cloud.workspace.service.NotificationService.create_default",
+        "ee.cloud.workspace.service.notifications_service.create",
         _async_noop,
     )
     ws_repo, _ = repos
@@ -492,7 +492,7 @@ async def test_create_invite_to_existing_user_includes_user_id_and_notifies(
         notifications.append(kwargs)
 
     monkeypatch.setattr(
-        "ee.cloud.workspace.service.NotificationService.create_default",
+        "ee.cloud.workspace.service.notifications_service.create",
         fake_notify,
     )
     ws_repo, _ = repos
@@ -512,7 +512,7 @@ async def test_accept_invite_adds_member_and_emits(
     service, repos, captured_events, monkeypatch, resolver_mock
 ) -> None:
     monkeypatch.setattr(
-        "ee.cloud.workspace.service.NotificationService.create_default",
+        "ee.cloud.workspace.service.notifications_service.create",
         _async_noop,
     )
     ws_repo, invite_repo = repos

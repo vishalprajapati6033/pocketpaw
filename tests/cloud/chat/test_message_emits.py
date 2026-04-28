@@ -240,7 +240,7 @@ async def test_send_message_fans_out_everyone_mention_to_all_members(chat_repos)
             new=AsyncMock(),
         ),
         patch(
-            "ee.cloud.chat.message_service.NotificationService.create_default",
+            "ee.cloud.chat.message_service.notifications_service.create",
             new=fake_notif,
         ),
         patch(
@@ -287,7 +287,7 @@ async def test_send_message_user_and_broadcast_mention_dedupes(chat_repos):
         patch("ee.cloud.chat.message_service._require_can_post", new=MagicMock()),
         patch("ee.cloud.chat.message_service.event_bus.emit", new=AsyncMock()),
         patch(
-            "ee.cloud.chat.message_service.NotificationService.create_default",
+            "ee.cloud.chat.message_service.notifications_service.create",
             new=fake_notif,
         ),
         patch(

@@ -31,7 +31,7 @@ from ee.cloud.chat.schemas import (
 from ee.cloud.chat.unread_service import UnreadService
 from ee.cloud.models.message import Attachment, Message
 from ee.cloud.models.notification import NotificationSource
-from ee.cloud.notifications.service import NotificationService
+from ee.cloud.notifications import service as notifications_service
 from ee.cloud.realtime.emit import emit
 from ee.cloud.realtime.events import (
     MessageDeleted,
@@ -261,7 +261,7 @@ class MessageService:
             # "agent" and "channel_ref" skip — not a user notification trigger.
 
         async def _fan_out_mention(target: str) -> None:
-            await NotificationService.create_default(
+            await notifications_service.create(
                 workspace_id=str(group.workspace),
                 recipient=target,
                 kind="mention",
@@ -423,7 +423,7 @@ class MessageService:
         # Derive reaction notification: only on ADD, and only if the reactor
         # is not the original sender of the message.
         if added and domain_msg.sender and domain_msg.sender != user_id:
-            await NotificationService.create_default(
+            await notifications_service.create(
                 workspace_id=str(group.workspace),
                 recipient=domain_msg.sender,
                 kind="reaction",
