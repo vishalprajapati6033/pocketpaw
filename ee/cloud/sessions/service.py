@@ -423,6 +423,139 @@ async def get_history(session_id: str, user_id: str, limit: int = 100) -> dict:
     }
 
 
+async def ensure_for_agent_scope(
+    *,
+    kind: str,
+    scope_id: str,
+    workspace_id: str,
+    user_id: str,
+    target_agent_id: str | None,
+) -> str | None:
+    """Find-or-create the ``Session`` row that the sidebar uses to surface a
+    ``(scope, agent)`` agent-chat pair. Returns its ``sessionId`` or ``None``.
+
+    Only applies to pocket and agent-DM scopes; plain group chats don't
+    show Session rows in the sidebar (the group itself is the entry).
+    For ``session`` scope we look up by ``_id`` and backfill ``Session.agent``
+    when the session was created without one (e.g. ``createPocketSession``).
+    """
+    if kind == "pocket":
+        existing = (
+            await _SessionDoc.find(
+                _SessionDoc.pocket == scope_id,
+                _SessionDoc.agent == target_agent_id,
+                _SessionDoc.owner == user_id,
+                _SessionDoc.deleted_at == None,  # noqa: E711
+            )
+            .sort(-_SessionDoc.lastActivity)
+            .limit(1)
+            .to_list()
+        )
+        if existing:
+            return existing[0].sessionId
+        doc = _SessionDoc(
+            sessionId=f"websocket_{uuid.uuid4().hex[:12]}",
+            context_type="pocket",
+            workspace=workspace_id,
+            owner=user_id,
+            title="New Chat",
+            pocket=scope_id,
+            agent=target_agent_id,
+        )
+        await doc.insert()
+        return doc.sessionId
+
+    if kind == "dm":
+        # Agent-DM: one Session per (agent, user). Plain human DMs have no
+        # agent and surface as rooms, not sessions — skip those.
+        if not target_agent_id:
+            return None
+        existing = (
+            await _SessionDoc.find(
+                _SessionDoc.agent == target_agent_id,
+                _SessionDoc.owner == user_id,
+                _SessionDoc.deleted_at == None,  # noqa: E711
+            )
+            .sort(-_SessionDoc.lastActivity)
+            .limit(1)
+            .to_list()
+        )
+        if existing:
+            return existing[0].sessionId
+        doc = _SessionDoc(
+            sessionId=f"websocket_{uuid.uuid4().hex[:12]}",
+            context_type="group",
+            workspace=workspace_id,
+            owner=user_id,
+            title="New Chat",
+            group=scope_id,
+            agent=target_agent_id,
+        )
+        await doc.insert()
+        return doc.sessionId
+
+    if kind == "session":
+        try:
+            doc = await _SessionDoc.get(PydanticObjectId(scope_id))
+        except Exception:
+            return None
+        if doc is None:
+            return None
+        # Backfill Session.agent when the session was created without one
+        # so the read-side ``cloud:session:{sid}:{agent}`` history key
+        # matches the write side.
+        if not getattr(doc, "agent", None) and target_agent_id:
+            doc.agent = target_agent_id
+            try:
+                await doc.save()
+            except Exception:
+                logger.debug(
+                    "Session.agent backfill failed for %s",
+                    doc.sessionId,
+                    exc_info=True,
+                )
+        return doc.sessionId
+
+    return None
+
+
+async def set_title(session_id: str, title: str) -> bool:
+    """Write ``title`` to ``Session.title`` and broadcast ``SessionUpdated``.
+
+    Returns ``True`` on a successful write. Best-effort — Mongo lookup or
+    save failures log and return ``False`` so the caller can continue
+    with the SSE-only path.
+    """
+    try:
+        doc = await _SessionDoc.find_one(_SessionDoc.sessionId == session_id)
+    except Exception:
+        logger.warning("session lookup failed for %s", session_id, exc_info=True)
+        return False
+    if doc is None:
+        return False
+
+    doc.title = title
+    try:
+        await doc.save()
+    except Exception:
+        logger.warning("session title save failed for %s", session_id, exc_info=True)
+        return False
+
+    try:
+        await emit(
+            SessionUpdated(
+                data={
+                    "session_id": str(doc.id),
+                    "user_id": doc.owner,
+                    "title": title,
+                }
+            )
+        )
+    except Exception:
+        logger.debug("SessionUpdated emit failed for %s", session_id, exc_info=True)
+    return True
+
+
 async def touch(session_id: str) -> None:
     """Update lastActivity and increment messageCount.
 
@@ -449,15 +582,17 @@ async def touch(session_id: str) -> None:
 
 
 __all__ = [
-    "legacy_ctx",
     "create",
-    "list_for_owner",
-    "list_by_agent",
-    "list_for_pocket",
-    "get",
-    "update",
     "delete",
-    "link_pocket",
+    "ensure_for_agent_scope",
+    "get",
     "get_history",
+    "legacy_ctx",
+    "link_pocket",
+    "list_by_agent",
+    "list_for_owner",
+    "list_for_pocket",
+    "set_title",
     "touch",
+    "update",
 ]

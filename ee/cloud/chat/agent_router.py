@@ -186,90 +186,18 @@ async def _ensure_scope_session(ctx: ScopeContext) -> str | None:
     then upserts the thread into the sidebar *before* the stream completes,
     which lets a mid-stream refresh still find the chat.
 
-    Only applies to pocket and agent-DM scopes; plain group chats don't show
-    Session rows in the sidebar (the group itself is the entry).
+    Delegates to :func:`sessions.service.ensure_for_agent_scope` so the
+    Session Beanie writes stay inside the sessions entity.
     """
-    from ee.cloud.models.session import Session
+    from ee.cloud.sessions import service as sessions_service
 
-    if ctx.kind is ScopeKind.POCKET:
-        existing = (
-            await Session.find(
-                Session.pocket == ctx.scope_id,
-                Session.agent == ctx.target_agent_id,
-                Session.owner == ctx.user_id,
-                Session.deleted_at == None,  # noqa: E711
-            )
-            .sort(-Session.lastActivity)
-            .limit(1)
-            .to_list()
-        )
-        if existing:
-            return existing[0].sessionId
-        session = Session(
-            sessionId=f"websocket_{uuid.uuid4().hex[:12]}",
-            context_type="pocket",
-            workspace=ctx.workspace_id,
-            owner=ctx.user_id,
-            title="New Chat",
-            pocket=ctx.scope_id,
-            agent=ctx.target_agent_id,
-        )
-        await session.insert()
-        return session.sessionId
-
-    if ctx.kind is ScopeKind.DM:
-        # Agent-DM: one Session per (agent, user) pair. Plain human DMs have
-        # no agent and are surfaced as rooms, not sessions — skip those.
-        if not ctx.target_agent_id:
-            return None
-        existing = (
-            await Session.find(
-                Session.agent == ctx.target_agent_id,
-                Session.owner == ctx.user_id,
-                Session.deleted_at == None,  # noqa: E711
-            )
-            .sort(-Session.lastActivity)
-            .limit(1)
-            .to_list()
-        )
-        if existing:
-            return existing[0].sessionId
-        session = Session(
-            sessionId=f"websocket_{uuid.uuid4().hex[:12]}",
-            context_type="group",
-            workspace=ctx.workspace_id,
-            owner=ctx.user_id,
-            title="New Chat",
-            group=ctx.scope_id,
-            agent=ctx.target_agent_id,
-        )
-        await session.insert()
-        return session.sessionId
-
-    if ctx.kind is ScopeKind.SESSION:
-        from beanie import PydanticObjectId
-
-        session_doc = await Session.get(PydanticObjectId(ctx.scope_id))
-        if session_doc is None:
-            return None
-        # Backfill ``Session.agent`` if it was created without one (e.g.
-        # ``createPocketSession`` / ``createSession`` from the frontend
-        # don't set it). The resolver fell back to the workspace-default
-        # agent and Messages are already being written with that id in
-        # their ``session_key``; if we leave ``Session.agent`` null, the
-        # ``get_history`` query produces ``cloud:session:{sid}:None`` and
-        # finds zero rows. Sync once so the read side matches the write.
-        if not getattr(session_doc, "agent", None) and ctx.target_agent_id:
-            session_doc.agent = ctx.target_agent_id
-            try:
-                await session_doc.save()
-            except Exception:
-                logger.debug(
-                    "Session.agent backfill failed for %s",
-                    session_doc.sessionId,
-                    exc_info=True,
-                )
-        return session_doc.sessionId
+    return await sessions_service.ensure_for_agent_scope(
+        kind=ctx.kind.value,
+        scope_id=ctx.scope_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user_id,
+        target_agent_id=ctx.target_agent_id,
+    )
 
 
 async def _persist_user_message(ctx: ScopeContext, body: CloudAgentChatRequest) -> str:
@@ -579,48 +507,14 @@ def _truncate_for_title(message: str) -> str:
 
 
 async def _set_session_title_in_mongo(session_id: str, title: str) -> bool:
-    """Write ``title`` to ``Session.title`` and broadcast ``SessionUpdated``.
+    """Persist a title via :func:`sessions.service.set_title`.
 
-    Returns ``True`` on a successful write. Best-effort — Mongo lookup
-    or save failures log and return ``False`` so the caller can continue
-    with the SSE-only path.
+    Best-effort — failures inside the service log and return ``False`` so
+    the caller can continue with the SSE-only path.
     """
-    try:
-        from ee.cloud.models.session import Session
-        from ee.cloud.realtime.emit import emit
-        from ee.cloud.realtime.events import SessionUpdated
-    except Exception:
-        logger.debug("ee.cloud session models unavailable", exc_info=True)
-        return False
+    from ee.cloud.sessions import service as sessions_service
 
-    try:
-        session = await Session.find_one(Session.sessionId == session_id)
-    except Exception:
-        logger.warning("session lookup failed for %s", session_id, exc_info=True)
-        return False
-    if session is None:
-        return False
-
-    session.title = title
-    try:
-        await session.save()
-    except Exception:
-        logger.warning("session title save failed for %s", session_id, exc_info=True)
-        return False
-
-    try:
-        await emit(
-            SessionUpdated(
-                data={
-                    "session_id": str(session.id),
-                    "user_id": session.owner,
-                    "title": title,
-                }
-            )
-        )
-    except Exception:
-        logger.debug("SessionUpdated emit failed for %s", session_id, exc_info=True)
-    return True
+    return await sessions_service.set_title(session_id, title)
 
 
 async def _generate_session_title(ctx: ScopeContext, first_message: str) -> None:
