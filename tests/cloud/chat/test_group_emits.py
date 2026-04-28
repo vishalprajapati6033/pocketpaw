@@ -1,9 +1,12 @@
 """Tests that GroupService emits realtime events via the bus.
 
 Each public GroupService mutation must fire the appropriate Event class
-through ``emit()`` and, when membership shifts, invalidate the
-AudienceResolver group cache. We patch the DB/permission layer at its
-seams so we exercise emit behavior in isolation.
+through ``emit()`` and, when membership/admin shifts, invalidate the
+AudienceResolver cache. We install fake group + message repositories
+(Phase 10 routed mutations through ``IGroupRepository`` /
+``IMessageRepository``) and stub ``_populate_lookups_for_domain_groups``
+because it touches Beanie User / Agent docs that aren't initialised in
+unit tests.
 """
 
 from __future__ import annotations
@@ -35,46 +38,11 @@ def _capture_emits():
     return recorded, fake_emit
 
 
-def _fake_group(
-    *,
-    group_id: str = "g1",
-    owner: str = "u1",
-    members: list[str] | None = None,
-    gtype: str = "private",
-    member_roles: dict | None = None,
-    agents: list | None = None,
-    archived: bool = False,
-) -> SimpleNamespace:
-    return SimpleNamespace(
-        id=group_id,
-        workspace="w1",
-        name="G",
-        slug="g",
-        description="",
-        type=gtype,
-        icon="",
-        color="",
-        owner=owner,
-        members=list(members) if members is not None else [owner],
-        member_roles=dict(member_roles) if member_roles is not None else {},
-        agents=list(agents) if agents is not None else [],
-        pinned_messages=[],
-        archived=archived,
-        last_message_at=None,
-        message_count=0,
-        createdAt=None,
-        save=AsyncMock(),
-    )
-
-
-async def _fake_group_response(grp) -> dict:
-    return {
-        "_id": str(grp.id),
-        "workspace": grp.workspace,
-        "name": grp.name,
-        "type": grp.type,
-        "members": [{"_id": m} for m in grp.members],
-    }
+async def _empty_lookups(_groups):
+    """Stub for ``_populate_lookups_for_domain_groups`` — bypasses
+    Beanie queries on User/Agent that the unit-test environment can't
+    serve."""
+    return {}, {}
 
 
 # ---------------------------------------------------------------------------
@@ -83,38 +51,31 @@ async def _fake_group_response(grp) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_create_group_emits_group_created():
+async def test_create_group_emits_group_created(chat_repos):
     from ee.cloud.chat.group_service import GroupService
     from ee.cloud.chat.schemas import CreateGroupRequest
 
+    _msg_repo, grp_repo = chat_repos
     recorded, fake_emit = _capture_emits()
-
-    constructed: list = []
-
-    def fake_group_ctor(**kwargs):
-        obj = _fake_group(
-            group_id="g_new",
-            owner=kwargs.get("owner", "u1"),
-            members=kwargs.get("members", []),
-            gtype=kwargs.get("type", "private"),
-        )
-        obj.insert = AsyncMock(return_value=obj)
-        constructed.append(obj)
-        return obj
 
     with (
         patch("ee.cloud.chat.group_service.emit", new=fake_emit),
-        patch("ee.cloud.chat.group_service._group_response", new=_fake_group_response),
-        patch("ee.cloud.chat.group_service.Group", new=fake_group_ctor),
+        patch(
+            "ee.cloud.chat.group_service._populate_lookups_for_domain_groups",
+            new=_empty_lookups,
+        ),
     ):
         await GroupService.create_group(
             "w1", "u1", CreateGroupRequest(name="Test", member_ids=["u2"])
         )
 
+    # The repo recorded a create call with both members.
+    assert len(grp_repo.created) == 1
+    assert set(grp_repo.created[0]["members"]) == {"u1", "u2"}
+
     created = [e for e in recorded if isinstance(e, GroupCreated)]
     assert len(created) == 1
-    ev = created[0]
-    assert set(ev.data.get("member_ids", [])) == {"u1", "u2"}
+    assert set(created[0].data.get("member_ids", [])) == {"u1", "u2"}
 
 
 # ---------------------------------------------------------------------------
@@ -123,20 +84,23 @@ async def test_create_group_emits_group_created():
 
 
 @pytest.mark.asyncio
-async def test_update_group_emits_group_updated():
+async def test_update_group_emits_group_updated(chat_repos):
+    from tests.cloud.chat.conftest import make_domain_group
+
     from ee.cloud.chat.group_service import GroupService
     from ee.cloud.chat.schemas import UpdateGroupRequest
 
+    _msg_repo, grp_repo = chat_repos
+    grp_repo.add(make_domain_group(id="g1", owner="u1"))
+
     recorded, fake_emit = _capture_emits()
-    group = _fake_group()
 
     with (
         patch("ee.cloud.chat.group_service.emit", new=fake_emit),
         patch(
-            "ee.cloud.chat.group_service._get_group_or_404",
-            new=AsyncMock(return_value=group),
+            "ee.cloud.chat.group_service._populate_lookups_for_domain_groups",
+            new=_empty_lookups,
         ),
-        patch("ee.cloud.chat.group_service._group_response", new=_fake_group_response),
     ):
         await GroupService.update_group("g1", "u1", UpdateGroupRequest(name="NewName"))
 
@@ -152,19 +116,17 @@ async def test_update_group_emits_group_updated():
 
 
 @pytest.mark.asyncio
-async def test_archive_group_emits_group_updated_archived():
+async def test_archive_group_emits_group_updated_archived(chat_repos):
+    from tests.cloud.chat.conftest import make_domain_group
+
     from ee.cloud.chat.group_service import GroupService
 
-    recorded, fake_emit = _capture_emits()
-    group = _fake_group()
+    _msg_repo, grp_repo = chat_repos
+    grp_repo.add(make_domain_group(id="g1", owner="u1"))
 
-    with (
-        patch("ee.cloud.chat.group_service.emit", new=fake_emit),
-        patch(
-            "ee.cloud.chat.group_service._get_group_or_404",
-            new=AsyncMock(return_value=group),
-        ),
-    ):
+    recorded, fake_emit = _capture_emits()
+
+    with patch("ee.cloud.chat.group_service.emit", new=fake_emit):
         await GroupService.archive_group("g1", "u1")
 
     events = [e for e in recorded if isinstance(e, GroupUpdated)]
@@ -178,19 +140,22 @@ async def test_archive_group_emits_group_updated_archived():
 
 
 @pytest.mark.asyncio
-async def test_join_group_emits_member_added_and_invalidates_cache():
+async def test_join_group_emits_member_added_and_invalidates_cache(chat_repos):
+    from tests.cloud.chat.conftest import make_domain_group
+
     from ee.cloud.chat.group_service import GroupService
 
+    _msg_repo, grp_repo = chat_repos
+    grp_repo.add(make_domain_group(id="g1", owner="u1", type="public", members=["u1"]))
+
     recorded, fake_emit = _capture_emits()
-    group = _fake_group(gtype="public", members=["u1"])
     resolver_mock = MagicMock()
 
     with (
         patch("ee.cloud.chat.group_service.emit", new=fake_emit),
-        patch("ee.cloud.chat.group_service._group_response", new=_fake_group_response),
         patch(
-            "ee.cloud.chat.group_service._get_group_or_404",
-            new=AsyncMock(return_value=group),
+            "ee.cloud.chat.group_service._populate_lookups_for_domain_groups",
+            new=_empty_lookups,
         ),
         patch("ee.cloud.chat.group_service.get_resolver", lambda: resolver_mock),
     ):
@@ -209,19 +174,21 @@ async def test_join_group_emits_member_added_and_invalidates_cache():
 
 
 @pytest.mark.asyncio
-async def test_join_group_no_emit_when_already_member():
+async def test_join_group_no_emit_when_already_member(chat_repos):
+    from tests.cloud.chat.conftest import make_domain_group
+
     from ee.cloud.chat.group_service import GroupService
 
+    _msg_repo, grp_repo = chat_repos
+    grp_repo.add(
+        make_domain_group(id="g1", owner="u1", type="public", members=["u1", "u2"])
+    )
+
     recorded, fake_emit = _capture_emits()
-    group = _fake_group(gtype="public", members=["u1", "u2"])
     resolver_mock = MagicMock()
 
     with (
         patch("ee.cloud.chat.group_service.emit", new=fake_emit),
-        patch(
-            "ee.cloud.chat.group_service._get_group_or_404",
-            new=AsyncMock(return_value=group),
-        ),
         patch("ee.cloud.chat.group_service.get_resolver", lambda: resolver_mock),
     ):
         await GroupService.join_group("g1", "u2")
@@ -236,19 +203,19 @@ async def test_join_group_no_emit_when_already_member():
 
 
 @pytest.mark.asyncio
-async def test_leave_group_emits_member_removed_and_invalidates_cache():
+async def test_leave_group_emits_member_removed_and_invalidates_cache(chat_repos):
+    from tests.cloud.chat.conftest import make_domain_group
+
     from ee.cloud.chat.group_service import GroupService
 
+    _msg_repo, grp_repo = chat_repos
+    grp_repo.add(make_domain_group(id="g1", owner="u1", members=["u1", "u2"]))
+
     recorded, fake_emit = _capture_emits()
-    group = _fake_group(owner="u1", members=["u1", "u2"])
     resolver_mock = MagicMock()
 
     with (
         patch("ee.cloud.chat.group_service.emit", new=fake_emit),
-        patch(
-            "ee.cloud.chat.group_service._get_group_or_404",
-            new=AsyncMock(return_value=group),
-        ),
         patch("ee.cloud.chat.group_service.get_resolver", lambda: resolver_mock),
     ):
         await GroupService.leave_group("g1", "u2")
@@ -265,19 +232,26 @@ async def test_leave_group_emits_member_removed_and_invalidates_cache():
 
 
 @pytest.mark.asyncio
-async def test_add_members_emits_one_event_per_newly_added_user():
+async def test_add_members_emits_one_event_per_newly_added_user(chat_repos):
+    from tests.cloud.chat.conftest import make_domain_group
+
     from ee.cloud.chat.group_service import GroupService
 
+    _msg_repo, grp_repo = chat_repos
+    grp_repo.add(
+        make_domain_group(
+            id="g1", owner="u1", members=["u1"], member_roles={"u1": "admin"}
+        )
+    )
+
     recorded, fake_emit = _capture_emits()
-    group = _fake_group(owner="u1", members=["u1"], member_roles={"u1": "admin"})
     resolver_mock = MagicMock()
 
     with (
         patch("ee.cloud.chat.group_service.emit", new=fake_emit),
-        patch("ee.cloud.chat.group_service._group_response", new=_fake_group_response),
         patch(
-            "ee.cloud.chat.group_service._get_group_or_404",
-            new=AsyncMock(return_value=group),
+            "ee.cloud.chat.group_service._populate_lookups_for_domain_groups",
+            new=_empty_lookups,
         ),
         patch("ee.cloud.chat.group_service.get_resolver", lambda: resolver_mock),
     ):
@@ -300,19 +274,25 @@ async def test_add_members_emits_one_event_per_newly_added_user():
 
 
 @pytest.mark.asyncio
-async def test_add_members_skips_duplicates_and_does_not_invalidate_when_none_added():
+async def test_add_members_skips_duplicates_and_does_not_invalidate_when_none_added(
+    chat_repos,
+):
+    from tests.cloud.chat.conftest import make_domain_group
+
     from ee.cloud.chat.group_service import GroupService
 
+    _msg_repo, grp_repo = chat_repos
+    grp_repo.add(
+        make_domain_group(
+            id="g1", owner="u1", members=["u1", "u2"], member_roles={"u1": "admin"}
+        )
+    )
+
     recorded, fake_emit = _capture_emits()
-    group = _fake_group(owner="u1", members=["u1", "u2"], member_roles={"u1": "admin"})
     resolver_mock = MagicMock()
 
     with (
         patch("ee.cloud.chat.group_service.emit", new=fake_emit),
-        patch(
-            "ee.cloud.chat.group_service._get_group_or_404",
-            new=AsyncMock(return_value=group),
-        ),
         patch("ee.cloud.chat.group_service.get_resolver", lambda: resolver_mock),
     ):
         added = await GroupService.add_members("g1", "u1", ["u2"])
@@ -328,19 +308,23 @@ async def test_add_members_skips_duplicates_and_does_not_invalidate_when_none_ad
 
 
 @pytest.mark.asyncio
-async def test_remove_member_emits_member_removed_and_invalidates_cache():
+async def test_remove_member_emits_member_removed_and_invalidates_cache(chat_repos):
+    from tests.cloud.chat.conftest import make_domain_group
+
     from ee.cloud.chat.group_service import GroupService
 
+    _msg_repo, grp_repo = chat_repos
+    grp_repo.add(
+        make_domain_group(
+            id="g1", owner="u1", members=["u1", "u2"], member_roles={"u1": "admin"}
+        )
+    )
+
     recorded, fake_emit = _capture_emits()
-    group = _fake_group(owner="u1", members=["u1", "u2"], member_roles={"u1": "admin"})
     resolver_mock = MagicMock()
 
     with (
         patch("ee.cloud.chat.group_service.emit", new=fake_emit),
-        patch(
-            "ee.cloud.chat.group_service._get_group_or_404",
-            new=AsyncMock(return_value=group),
-        ),
         patch("ee.cloud.chat.group_service.get_resolver", lambda: resolver_mock),
     ):
         await GroupService.remove_member("g1", "u1", "u2")
@@ -357,19 +341,23 @@ async def test_remove_member_emits_member_removed_and_invalidates_cache():
 
 
 @pytest.mark.asyncio
-async def test_set_member_role_emits_member_role_no_invalidation():
+async def test_set_member_role_emits_member_role_no_invalidation(chat_repos):
+    from tests.cloud.chat.conftest import make_domain_group
+
     from ee.cloud.chat.group_service import GroupService
 
+    _msg_repo, grp_repo = chat_repos
+    grp_repo.add(
+        make_domain_group(
+            id="g1", owner="u1", members=["u1", "u2"], member_roles={"u1": "admin"}
+        )
+    )
+
     recorded, fake_emit = _capture_emits()
-    group = _fake_group(owner="u1", members=["u1", "u2"], member_roles={"u1": "admin"})
     resolver_mock = MagicMock()
 
     with (
         patch("ee.cloud.chat.group_service.emit", new=fake_emit),
-        patch(
-            "ee.cloud.chat.group_service._get_group_or_404",
-            new=AsyncMock(return_value=group),
-        ),
         patch("ee.cloud.chat.group_service.get_resolver", lambda: resolver_mock),
     ):
         await GroupService.set_member_role("g1", "u1", "u2", "admin")
@@ -386,20 +374,18 @@ async def test_set_member_role_emits_member_role_no_invalidation():
 
 
 @pytest.mark.asyncio
-async def test_add_agent_emits_agent_added():
+async def test_add_agent_emits_agent_added(chat_repos):
+    from tests.cloud.chat.conftest import make_domain_group
+
     from ee.cloud.chat.group_service import GroupService
     from ee.cloud.chat.schemas import AddGroupAgentRequest
 
-    recorded, fake_emit = _capture_emits()
-    group = _fake_group(owner="u1", agents=[])
+    _msg_repo, grp_repo = chat_repos
+    grp_repo.add(make_domain_group(id="g1", owner="u1", agents=[]))
 
-    with (
-        patch("ee.cloud.chat.group_service.emit", new=fake_emit),
-        patch(
-            "ee.cloud.chat.group_service._get_group_or_404",
-            new=AsyncMock(return_value=group),
-        ),
-    ):
+    recorded, fake_emit = _capture_emits()
+
+    with patch("ee.cloud.chat.group_service.emit", new=fake_emit):
         await GroupService.add_agent(
             "g1",
             "u1",
@@ -416,21 +402,25 @@ async def test_add_agent_emits_agent_added():
 
 
 @pytest.mark.asyncio
-async def test_update_agent_emits_agent_updated():
+async def test_update_agent_emits_agent_updated(chat_repos):
+    from tests.cloud.chat.conftest import make_domain_group
+
+    from ee.cloud.chat.domain import GroupAgent
     from ee.cloud.chat.group_service import GroupService
     from ee.cloud.chat.schemas import UpdateGroupAgentRequest
 
-    recorded, fake_emit = _capture_emits()
-    existing_agent = SimpleNamespace(agent="a1", role="assistant", respond_mode="auto")
-    group = _fake_group(owner="u1", agents=[existing_agent])
+    _msg_repo, grp_repo = chat_repos
+    grp_repo.add(
+        make_domain_group(
+            id="g1",
+            owner="u1",
+            agents=[GroupAgent(agent_id="a1", role="assistant", respond_mode="auto")],
+        )
+    )
 
-    with (
-        patch("ee.cloud.chat.group_service.emit", new=fake_emit),
-        patch(
-            "ee.cloud.chat.group_service._get_group_or_404",
-            new=AsyncMock(return_value=group),
-        ),
-    ):
+    recorded, fake_emit = _capture_emits()
+
+    with patch("ee.cloud.chat.group_service.emit", new=fake_emit):
         await GroupService.update_agent(
             "g1", "u1", "a1", UpdateGroupAgentRequest(respond_mode="mention")
         )
@@ -445,20 +435,24 @@ async def test_update_agent_emits_agent_updated():
 
 
 @pytest.mark.asyncio
-async def test_remove_agent_emits_agent_removed():
+async def test_remove_agent_emits_agent_removed(chat_repos):
+    from tests.cloud.chat.conftest import make_domain_group
+
+    from ee.cloud.chat.domain import GroupAgent
     from ee.cloud.chat.group_service import GroupService
 
-    recorded, fake_emit = _capture_emits()
-    existing_agent = SimpleNamespace(agent="a1", role="assistant", respond_mode="auto")
-    group = _fake_group(owner="u1", agents=[existing_agent])
+    _msg_repo, grp_repo = chat_repos
+    grp_repo.add(
+        make_domain_group(
+            id="g1",
+            owner="u1",
+            agents=[GroupAgent(agent_id="a1", role="assistant", respond_mode="auto")],
+        )
+    )
 
-    with (
-        patch("ee.cloud.chat.group_service.emit", new=fake_emit),
-        patch(
-            "ee.cloud.chat.group_service._get_group_or_404",
-            new=AsyncMock(return_value=group),
-        ),
-    ):
+    recorded, fake_emit = _capture_emits()
+
+    with patch("ee.cloud.chat.group_service.emit", new=fake_emit):
         await GroupService.remove_agent("g1", "u1", "a1")
 
     events = [e for e in recorded if isinstance(e, GroupAgentRemoved)]
@@ -472,27 +466,19 @@ async def test_remove_agent_emits_agent_removed():
 
 
 @pytest.mark.asyncio
-async def test_get_or_create_dm_emits_when_created():
+async def test_get_or_create_dm_emits_when_created(chat_repos):
     from ee.cloud.chat.group_service import GroupService
+
+    _msg_repo, _grp_repo = chat_repos  # empty repo → will create
 
     recorded, fake_emit = _capture_emits()
 
-    def fake_group_ctor(**kwargs):
-        obj = _fake_group(
-            group_id="dm_new",
-            owner=kwargs.get("owner", "u1"),
-            members=kwargs.get("members", []),
-            gtype="dm",
-        )
-        obj.insert = AsyncMock(return_value=obj)
-        return obj
-
-    fake_group_ctor.find_one = AsyncMock(return_value=None)
-
     with (
         patch("ee.cloud.chat.group_service.emit", new=fake_emit),
-        patch("ee.cloud.chat.group_service.Group", new=fake_group_ctor),
-        patch("ee.cloud.chat.group_service._group_response", new=_fake_group_response),
+        patch(
+            "ee.cloud.chat.group_service._populate_lookups_for_domain_groups",
+            new=_empty_lookups,
+        ),
     ):
         await GroupService.get_or_create_dm("w1", "u1", "u2")
 
@@ -502,19 +488,24 @@ async def test_get_or_create_dm_emits_when_created():
 
 
 @pytest.mark.asyncio
-async def test_get_or_create_dm_no_emit_when_existing():
+async def test_get_or_create_dm_no_emit_when_existing(chat_repos):
+    from tests.cloud.chat.conftest import make_domain_group
+
     from ee.cloud.chat.group_service import GroupService
 
-    recorded, fake_emit = _capture_emits()
-    existing = _fake_group(gtype="dm", members=["u1", "u2"])
+    _msg_repo, grp_repo = chat_repos
+    grp_repo.add(
+        make_domain_group(id="dm1", workspace_id="w1", type="dm", members=["u1", "u2"])
+    )
 
-    fake_group_ctor = MagicMock()
-    fake_group_ctor.find_one = AsyncMock(return_value=existing)
+    recorded, fake_emit = _capture_emits()
 
     with (
         patch("ee.cloud.chat.group_service.emit", new=fake_emit),
-        patch("ee.cloud.chat.group_service.Group", new=fake_group_ctor),
-        patch("ee.cloud.chat.group_service._group_response", new=_fake_group_response),
+        patch(
+            "ee.cloud.chat.group_service._populate_lookups_for_domain_groups",
+            new=_empty_lookups,
+        ),
     ):
         await GroupService.get_or_create_dm("w1", "u1", "u2")
 
@@ -527,8 +518,10 @@ async def test_get_or_create_dm_no_emit_when_existing():
 
 
 @pytest.mark.asyncio
-async def test_get_or_create_agent_dm_emits_when_created():
+async def test_get_or_create_agent_dm_emits_when_created(chat_repos):
     from ee.cloud.chat.group_service import GroupService
+
+    _msg_repo, _grp_repo = chat_repos  # empty → will create
 
     recorded, fake_emit = _capture_emits()
 
@@ -538,19 +531,6 @@ async def test_get_or_create_agent_dm_emits_when_created():
         owner="u1",
         visibility="workspace",
     )
-
-    def fake_group_ctor(**kwargs):
-        obj = _fake_group(
-            group_id="dm_new",
-            owner=kwargs.get("owner", "u1"),
-            members=kwargs.get("members", []),
-            gtype="dm",
-        )
-        obj.insert = AsyncMock(return_value=obj)
-        return obj
-
-    fake_group_ctor.find_one = AsyncMock(return_value=None)
-
     fake_agent_cls = MagicMock()
     fake_agent_cls.get = AsyncMock(return_value=fake_agent_doc)
 
@@ -558,8 +538,10 @@ async def test_get_or_create_agent_dm_emits_when_created():
         patch("ee.cloud.chat.group_service.emit", new=fake_emit),
         patch("ee.cloud.chat.group_service.PydanticObjectId", new=lambda x: x),
         patch("ee.cloud.models.agent.Agent", new=fake_agent_cls),
-        patch("ee.cloud.chat.group_service.Group", new=fake_group_ctor),
-        patch("ee.cloud.chat.group_service._group_response", new=_fake_group_response),
+        patch(
+            "ee.cloud.chat.group_service._populate_lookups_for_domain_groups",
+            new=_empty_lookups,
+        ),
     ):
         await GroupService.get_or_create_agent_dm("w1", "u1", "a1")
 
@@ -569,8 +551,22 @@ async def test_get_or_create_agent_dm_emits_when_created():
 
 
 @pytest.mark.asyncio
-async def test_get_or_create_agent_dm_no_emit_when_existing():
+async def test_get_or_create_agent_dm_no_emit_when_existing(chat_repos):
+    from tests.cloud.chat.conftest import make_domain_group
+
+    from ee.cloud.chat.domain import GroupAgent
     from ee.cloud.chat.group_service import GroupService
+
+    _msg_repo, grp_repo = chat_repos
+    grp_repo.add(
+        make_domain_group(
+            id="dm_a1",
+            workspace_id="w1",
+            type="dm",
+            members=["u1"],
+            agents=[GroupAgent(agent_id="a1", role="assistant", respond_mode="auto")],
+        )
+    )
 
     recorded, fake_emit = _capture_emits()
 
@@ -580,11 +576,6 @@ async def test_get_or_create_agent_dm_no_emit_when_existing():
         owner="u1",
         visibility="workspace",
     )
-    existing = _fake_group(gtype="dm", members=["u1"])
-
-    fake_group_ctor = MagicMock()
-    fake_group_ctor.find_one = AsyncMock(return_value=existing)
-
     fake_agent_cls = MagicMock()
     fake_agent_cls.get = AsyncMock(return_value=fake_agent_doc)
 
@@ -592,8 +583,10 @@ async def test_get_or_create_agent_dm_no_emit_when_existing():
         patch("ee.cloud.chat.group_service.emit", new=fake_emit),
         patch("ee.cloud.chat.group_service.PydanticObjectId", new=lambda x: x),
         patch("ee.cloud.models.agent.Agent", new=fake_agent_cls),
-        patch("ee.cloud.chat.group_service.Group", new=fake_group_ctor),
-        patch("ee.cloud.chat.group_service._group_response", new=_fake_group_response),
+        patch(
+            "ee.cloud.chat.group_service._populate_lookups_for_domain_groups",
+            new=_empty_lookups,
+        ),
     ):
         await GroupService.get_or_create_agent_dm("w1", "u1", "a1")
 
@@ -601,44 +594,45 @@ async def test_get_or_create_agent_dm_no_emit_when_existing():
 
 
 @pytest.mark.asyncio
-async def test_join_group_allows_channel_type():
+async def test_join_group_allows_channel_type(chat_repos):
     """Channels should be self-joinable just like public groups."""
+    from tests.cloud.chat.conftest import make_domain_group
+
     from ee.cloud.chat.group_service import GroupService
 
+    _msg_repo, grp_repo = chat_repos
+    grp_repo.add(make_domain_group(id="g1", owner="u1", type="channel", members=["u1"]))
+
     recorded, fake_emit = _capture_emits()
-    group = _fake_group(gtype="channel", members=["u1"])
     resolver_mock = MagicMock()
 
     with (
         patch("ee.cloud.chat.group_service.emit", new=fake_emit),
-        patch("ee.cloud.chat.group_service._group_response", new=_fake_group_response),
         patch(
-            "ee.cloud.chat.group_service._get_group_or_404",
-            new=AsyncMock(return_value=group),
+            "ee.cloud.chat.group_service._populate_lookups_for_domain_groups",
+            new=_empty_lookups,
         ),
         patch("ee.cloud.chat.group_service.get_resolver", lambda: resolver_mock),
     ):
         await GroupService.join_group("g1", "u2")
 
-    assert "u2" in group.members
+    # Repo should have recorded the add_member call.
+    assert grp_repo.member_added == [{"group_id": "g1", "user_id": "u2", "role": None}]
     events = [e for e in recorded if isinstance(e, GroupMemberAdded)]
     assert len(events) == 1
     resolver_mock.invalidate_group.assert_called_once_with("g1")
 
 
 @pytest.mark.asyncio
-async def test_join_group_still_rejects_private():
+async def test_join_group_still_rejects_private(chat_repos):
     """Private groups must remain invite-only."""
+    from tests.cloud.chat.conftest import make_domain_group
+
     from ee.cloud.chat.group_service import GroupService
     from ee.cloud.shared.errors import Forbidden
 
-    group = _fake_group(gtype="private", members=["u1"])
+    _msg_repo, grp_repo = chat_repos
+    grp_repo.add(make_domain_group(id="g1", owner="u1", type="private", members=["u1"]))
 
-    with (
-        patch(
-            "ee.cloud.chat.group_service._get_group_or_404",
-            new=AsyncMock(return_value=group),
-        ),
-    ):
-        with pytest.raises(Forbidden):
-            await GroupService.join_group("g1", "u2")
+    with pytest.raises(Forbidden):
+        await GroupService.join_group("g1", "u2")

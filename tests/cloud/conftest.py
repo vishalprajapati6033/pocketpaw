@@ -32,6 +32,43 @@ def _install_noop_bus():
     bus_mod._bus = prev  # type: ignore[attr-defined]
 
 
+@pytest.fixture(autouse=True)
+def _reset_repo_singletons():
+    # Snapshot and restore each repositories module's lazy singleton.
+    # Tests that swap in a fake via `set_*_repository(...)` (or poke the
+    # global directly) would otherwise leak the fake into later tests.
+    from ee.cloud.agents import repositories as agents_repos
+    from ee.cloud.auth import repositories as auth_repos
+    from ee.cloud.chat import repositories as chat_repos
+    from ee.cloud.notifications import repositories as notifications_repos
+    from ee.cloud.pockets import repositories as pockets_repos
+    from ee.cloud.sessions import repositories as sessions_repos
+    from ee.cloud.workspace import repositories as workspace_repos
+
+    snapshots: list[tuple[object, str, object]] = [
+        (agents_repos, "_default", agents_repos._default),  # type: ignore[attr-defined]
+        (auth_repos, "_default", auth_repos._default),  # type: ignore[attr-defined]
+        (chat_repos, "_default_message", chat_repos._default_message),  # type: ignore[attr-defined]
+        (chat_repos, "_default_group", chat_repos._default_group),  # type: ignore[attr-defined]
+        (notifications_repos, "_default", notifications_repos._default),  # type: ignore[attr-defined]
+        (pockets_repos, "_default", pockets_repos._default),  # type: ignore[attr-defined]
+        (sessions_repos, "_default", sessions_repos._default),  # type: ignore[attr-defined]
+        (
+            workspace_repos,
+            "_default_workspace",
+            workspace_repos._default_workspace,  # type: ignore[attr-defined]
+        ),
+        (
+            workspace_repos,
+            "_default_invite",
+            workspace_repos._default_invite,  # type: ignore[attr-defined]
+        ),
+    ]
+    yield
+    for module, attr, prev in snapshots:
+        setattr(module, attr, prev)
+
+
 def _fixed_user() -> str:
     return "u1"
 

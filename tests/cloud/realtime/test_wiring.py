@@ -51,30 +51,29 @@ def test_init_realtime_falls_back_to_inprocess_for_unsupported_bus(monkeypatch, 
 
 
 @pytest.mark.asyncio
-async def test_group_list_member_ids_returns_members_field(monkeypatch):
+async def test_group_list_member_ids_returns_members_field():
+    """Phase 10 routes list_member_ids through ``IGroupRepository.get`` so the
+    realtime audience lookup avoids a Beanie call from the service layer."""
+    from tests.cloud.chat.conftest import FakeGroupRepo, make_domain_group
+
     from ee.cloud.chat.group_service import GroupService
+    from ee.cloud.chat.repositories import set_group_repository
 
-    class FakeGroup:
-        members = ["u1", "u2", "u3"]
+    grp_repo = FakeGroupRepo()
+    grp_repo.add(make_domain_group(id="g1", members=["u1", "u2", "u3"]))
+    set_group_repository(grp_repo)
 
-    async def fake_get(_gid: str):
-        return FakeGroup()
-
-    with patch("ee.cloud.chat.group_service.GroupService._fetch_group", fake_get, create=True):
-        # The helper calls a small internal fetcher to keep the test mockable
-        ids = await GroupService.list_member_ids("g1")
+    ids = await GroupService.list_member_ids("g1")
     assert ids == ["u1", "u2", "u3"]
 
 
 @pytest.mark.asyncio
 async def test_group_list_member_ids_returns_empty_for_missing_group():
+    from tests.cloud.chat.conftest import FakeGroupRepo
+
     from ee.cloud.chat.group_service import GroupService
+    from ee.cloud.chat.repositories import set_group_repository
 
-    async def fake_get(_gid: str):
-        return None
-
-    from unittest.mock import patch
-
-    with patch("ee.cloud.chat.group_service.GroupService._fetch_group", fake_get, create=True):
-        ids = await GroupService.list_member_ids("gmissing")
+    set_group_repository(FakeGroupRepo())  # empty repo → group lookup misses
+    ids = await GroupService.list_member_ids("gmissing")
     assert ids == []

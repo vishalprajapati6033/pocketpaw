@@ -1,17 +1,32 @@
 """Derivation tests: mention / reaction / invite → NotificationService.create.
 
 Each emit site is exercised through its owning service; the spy on
-``NotificationService.create`` proves the derivation fires with the right
-arguments (and does NOT fire for self-targeted events).
+``NotificationService.create_default`` proves the derivation fires with
+the right arguments (and does NOT fire for self-targeted events).
+
+Phase 10 routed chat mutations through ``IMessageRepository`` /
+``IGroupRepository``; these tests install in-memory fakes from
+``tests.cloud.chat.conftest`` instead of patching the Beanie ctor seam.
+The autouse ``_reset_repo_singletons`` fixture restores the real
+singletons after every test.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
+
+from ee.cloud.chat.repositories import (
+    set_group_repository,
+    set_message_repository,
+)
+from tests.cloud.chat.conftest import (
+    FakeGroupRepo,
+    FakeMessageRepo,
+    make_domain_message,
+)
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -25,6 +40,12 @@ def _fake_group(
     workspace: str = "w1",
     name: str = "general",
 ) -> SimpleNamespace:
+    """Beanie-shape stand-in for the legacy ``_get_group_or_404`` seam.
+
+    The membership / can-post check still loads the Beanie ``Group`` doc
+    via the legacy helper because mutation paths share it with
+    non-migrated reads.
+    """
     return SimpleNamespace(
         id=group_id,
         workspace=workspace,
@@ -40,35 +61,12 @@ def _fake_group(
     )
 
 
-def _fake_message(
-    *,
-    message_id: str = "m1",
-    group_id: str = "g1",
-    sender: str = "u1",
-    content: str = "hi",
-    reactions: list | None = None,
-) -> SimpleNamespace:
-    now = datetime.now(UTC)
-    return SimpleNamespace(
-        id=message_id,
-        group=group_id,
-        sender=sender,
-        sender_type="user",
-        agent=None,
-        content=content,
-        mentions=[],
-        reply_to=None,
-        thread_count=0,
-        attachments=[],
-        reactions=reactions if reactions is not None else [],
-        edited=False,
-        edited_at=None,
-        deleted=False,
-        context_type="group",
-        createdAt=now,
-        insert=AsyncMock(),
-        save=AsyncMock(),
-    )
+def _install_chat_fakes() -> tuple[FakeMessageRepo, FakeGroupRepo]:
+    msg_repo = FakeMessageRepo()
+    grp_repo = FakeGroupRepo()
+    set_message_repository(msg_repo)
+    set_group_repository(grp_repo)
+    return msg_repo, grp_repo
 
 
 # ---------------------------------------------------------------------------
@@ -80,14 +78,9 @@ def _fake_message(
 async def test_send_message_with_mention_creates_notification_for_target():
     from ee.cloud.chat.schemas import SendMessageRequest
 
+    msg_repo, _grp_repo = _install_chat_fakes()
+    msg_repo.next_id = "m1"
     group = _fake_group()
-    fake_msg = _fake_message(sender="u1", content="hello @alice")
-
-    def fake_message_ctor(*_args, **kwargs):
-        fake_msg.sender = kwargs.get("sender", fake_msg.sender)
-        fake_msg.content = kwargs.get("content", fake_msg.content)
-        fake_msg.mentions = kwargs.get("mentions", [])
-        return fake_msg
 
     spy = AsyncMock()
 
@@ -99,7 +92,6 @@ async def test_send_message_with_mention_creates_notification_for_target():
             new=AsyncMock(return_value=group),
         ),
         patch("ee.cloud.chat.message_service._require_can_post"),
-        patch("ee.cloud.chat.message_service.Message", new=fake_message_ctor),
         patch("ee.cloud.chat.message_service.NotificationService.create_default", new=spy),
         patch("ee.cloud.chat.message_service.UnreadService.bump_mention", new=AsyncMock()),
     ):
@@ -129,13 +121,8 @@ async def test_send_message_with_mention_creates_notification_for_target():
 async def test_send_message_self_mention_does_not_notify():
     from ee.cloud.chat.schemas import SendMessageRequest
 
+    _msg_repo, _grp_repo = _install_chat_fakes()
     group = _fake_group()
-    fake_msg = _fake_message(sender="u1", content="me me me")
-
-    def fake_message_ctor(*_args, **kwargs):
-        fake_msg.sender = kwargs.get("sender", fake_msg.sender)
-        fake_msg.content = kwargs.get("content", fake_msg.content)
-        return fake_msg
 
     spy = AsyncMock()
 
@@ -147,7 +134,6 @@ async def test_send_message_self_mention_does_not_notify():
             new=AsyncMock(return_value=group),
         ),
         patch("ee.cloud.chat.message_service._require_can_post"),
-        patch("ee.cloud.chat.message_service.Message", new=fake_message_ctor),
         patch("ee.cloud.chat.message_service.NotificationService.create_default", new=spy),
         patch("ee.cloud.chat.message_service.UnreadService.bump_mention", new=AsyncMock()),
     ):
@@ -172,18 +158,15 @@ async def test_send_message_self_mention_does_not_notify():
 
 @pytest.mark.asyncio
 async def test_toggle_reaction_adding_notifies_original_sender():
-    group = _fake_group(owner="u1", workspace="w1")
+    msg_repo, _grp_repo = _install_chat_fakes()
     # msg sender is u1, reactor is u2 → should notify u1.
-    msg = _fake_message(sender="u1", content="hey", reactions=[])
+    msg_repo.add(make_domain_message(id="m1", group="g1", sender="u1", content="hey"))
+    group = _fake_group(owner="u1", workspace="w1")
 
     spy = AsyncMock()
 
     with (
         patch("ee.cloud.chat.message_service.emit", new=AsyncMock()),
-        patch(
-            "ee.cloud.chat.message_service._get_group_message_or_404",
-            new=AsyncMock(return_value=msg),
-        ),
         patch(
             "ee.cloud.chat.message_service._get_group_or_404",
             new=AsyncMock(return_value=group),
@@ -209,18 +192,15 @@ async def test_toggle_reaction_adding_notifies_original_sender():
 
 @pytest.mark.asyncio
 async def test_toggle_reaction_self_reaction_does_not_notify():
-    group = _fake_group(owner="u1", workspace="w1")
+    msg_repo, _grp_repo = _install_chat_fakes()
     # msg sender and reactor are both u1 → no notification.
-    msg = _fake_message(sender="u1", content="hey", reactions=[])
+    msg_repo.add(make_domain_message(id="m1", group="g1", sender="u1", content="hey"))
+    group = _fake_group(owner="u1", workspace="w1")
 
     spy = AsyncMock()
 
     with (
         patch("ee.cloud.chat.message_service.emit", new=AsyncMock()),
-        patch(
-            "ee.cloud.chat.message_service._get_group_message_or_404",
-            new=AsyncMock(return_value=msg),
-        ),
         patch(
             "ee.cloud.chat.message_service._get_group_or_404",
             new=AsyncMock(return_value=group),
@@ -238,24 +218,18 @@ async def test_toggle_reaction_self_reaction_does_not_notify():
 
 @pytest.mark.asyncio
 async def test_toggle_reaction_removing_does_not_notify():
-    from ee.cloud.models.message import Reaction
-
+    msg_repo, _grp_repo = _install_chat_fakes()
+    # u2 already reacted — toggling removes and should NOT notify (the
+    # ``toggle_added=False`` knob mimics the repo's "user removed
+    # reaction" return path).
+    msg_repo.add(make_domain_message(id="m1", group="g1", sender="u1", content="hey"))
+    msg_repo.toggle_added = False
     group = _fake_group(owner="u1", workspace="w1")
-    # u2 already reacted — toggling removes and should NOT notify.
-    msg = _fake_message(
-        sender="u1",
-        content="hey",
-        reactions=[Reaction(emoji="\U0001f44d", users=["u2"])],
-    )
 
     spy = AsyncMock()
 
     with (
         patch("ee.cloud.chat.message_service.emit", new=AsyncMock()),
-        patch(
-            "ee.cloud.chat.message_service._get_group_message_or_404",
-            new=AsyncMock(return_value=msg),
-        ),
         patch(
             "ee.cloud.chat.message_service._get_group_or_404",
             new=AsyncMock(return_value=group),

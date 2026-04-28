@@ -1,13 +1,14 @@
 """Tests that MessageService emits realtime events via the bus.
 
 Each public MessageService mutation must fire the appropriate Event class
-through ``emit()``. We patch the DB/permission layer at its seams so we
-test the emit behavior in isolation.
+through ``emit()``. We install fake message + group repositories (Phase 10
+moved mutations to ``IMessageRepository`` / ``IGroupRepository``) and
+patch the residual legacy seams (``_get_group_or_404`` /
+``_require_can_post``) so emit behavior is exercised in isolation.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -19,11 +20,16 @@ def _fake_group(
     owner: str = "u1",
     members: list[str] | None = None,
 ) -> SimpleNamespace:
-    """Minimal Group stand-in for permission checks."""
+    """Beanie-shape Group stand-in for the legacy ``_get_group_or_404`` seam.
+
+    The membership / can-post check still runs against the Beanie
+    ``Group`` doc because that helper is shared with non-migrated paths.
+    """
     effective_members = members if members is not None else [owner]
     return SimpleNamespace(
         id=group_id,
         workspace="w1",
+        name="G",
         owner=owner,
         members=effective_members,
         member_roles={owner: "admin"},
@@ -35,40 +41,8 @@ def _fake_group(
     )
 
 
-def _fake_message(
-    *,
-    message_id: str = "m1",
-    group_id: str = "g1",
-    sender: str = "u1",
-    content: str = "hi",
-) -> SimpleNamespace:
-    """Minimal Message stand-in with the attributes _message_response reads."""
-    now = datetime.now(UTC)
-    return SimpleNamespace(
-        id=message_id,
-        group=group_id,
-        sender=sender,
-        sender_type="user",
-        agent=None,
-        content=content,
-        mentions=[],
-        reply_to=None,
-        thread_count=0,
-        attachments=[],
-        reactions=[],
-        edited=False,
-        edited_at=None,
-        deleted=False,
-        context_type="group",
-        createdAt=now,
-        insert=AsyncMock(),
-        save=AsyncMock(),
-    )
-
-
 def _capture_emits() -> tuple[list, object]:
-    """Return (recorded, fake_emit) where fake_emit is an async callable that
-    appends each emitted event to the shared ``recorded`` list."""
+    """Return ``(recorded, fake_emit)`` — fake_emit appends each event."""
     recorded: list = []
 
     async def fake_emit(ev):
@@ -78,27 +52,15 @@ def _capture_emits() -> tuple[list, object]:
 
 
 @pytest.mark.asyncio
-async def test_send_message_emits_new_and_sent():
+async def test_send_message_emits_new_and_sent(chat_repos):
     """MessageService.send_message must fire both message.new and message.sent."""
+    from ee.cloud.chat.message_service import MessageService
     from ee.cloud.chat.schemas import SendMessageRequest
     from ee.cloud.realtime.events import MessageNew, MessageSent
 
-    recorded: list = []
-
-    async def fake_emit(ev):
-        recorded.append(ev)
-
+    msg_repo, _grp_repo = chat_repos
+    recorded, fake_emit = _capture_emits()
     group = _fake_group()
-
-    fake_msg = _fake_message(sender="u1", content="hi")
-
-    def _fake_message_ctor(*args, **kwargs):
-        # Mirror the fields send_message sets on the Message so _message_response
-        # produces a sensible shape.
-        fake_msg.content = kwargs.get("content", fake_msg.content)
-        fake_msg.sender = kwargs.get("sender", fake_msg.sender)
-        fake_msg.group = kwargs.get("group", fake_msg.group)
-        return fake_msg
 
     with (
         patch("ee.cloud.chat.message_service.emit", new=fake_emit),
@@ -108,11 +70,15 @@ async def test_send_message_emits_new_and_sent():
         ),
         patch("ee.cloud.chat.message_service._require_can_post"),
         patch("ee.cloud.chat.message_service.event_bus.emit", new=AsyncMock()),
-        patch("ee.cloud.chat.message_service.Message", new=_fake_message_ctor),
     ):
-        from ee.cloud.chat.message_service import MessageService
-
         await MessageService.send_message("g1", "u1", SendMessageRequest(content="hi"))
+
+    # Repository was called with the right shape.
+    assert len(msg_repo.created) == 1
+    call = msg_repo.created[0]
+    assert call["sender"] == "u1"
+    assert call["content"] == "hi"
+    assert call["sender_type"] == "user"
 
     wire_types = {type(e).__name__ for e in recorded}
     assert "MessageNew" in wire_types
@@ -128,33 +94,30 @@ async def test_send_message_emits_new_and_sent():
 
 
 @pytest.mark.asyncio
-async def test_edit_message_emits_edited():
+async def test_edit_message_emits_edited(chat_repos):
+    from tests.cloud.chat.conftest import make_domain_message
+    from ee.cloud.chat.message_service import MessageService
     from ee.cloud.chat.schemas import EditMessageRequest
     from ee.cloud.realtime.events import MessageEdited
 
-    recorded: list = []
+    msg_repo, _grp_repo = chat_repos
+    msg_repo.add(make_domain_message(id="m1", group="g1", sender="u1"))
 
-    async def fake_emit(ev):
-        recorded.append(ev)
-
-    msg = _fake_message()
+    recorded, fake_emit = _capture_emits()
     group = _fake_group()
 
     with (
         patch("ee.cloud.chat.message_service.emit", new=fake_emit),
-        patch(
-            "ee.cloud.chat.message_service._get_group_message_or_404",
-            new=AsyncMock(return_value=msg),
-        ),
         patch(
             "ee.cloud.chat.message_service._get_group_or_404",
             new=AsyncMock(return_value=group),
         ),
         patch("ee.cloud.chat.message_service._require_can_post"),
     ):
-        from ee.cloud.chat.message_service import MessageService
-
         await MessageService.edit_message("m1", "u1", EditMessageRequest(content="new"))
+
+    assert len(msg_repo.edited) == 1
+    assert msg_repo.edited[0]["content"] == "new"
 
     assert any(isinstance(e, MessageEdited) for e in recorded)
     ev = next(e for e in recorded if isinstance(e, MessageEdited))
@@ -165,26 +128,20 @@ async def test_edit_message_emits_edited():
 
 
 @pytest.mark.asyncio
-async def test_delete_message_emits_deleted():
+async def test_delete_message_emits_deleted(chat_repos):
+    from tests.cloud.chat.conftest import make_domain_message
+    from ee.cloud.chat.message_service import MessageService
     from ee.cloud.realtime.events import MessageDeleted
 
-    recorded: list = []
+    msg_repo, _grp_repo = chat_repos
+    msg_repo.add(make_domain_message(id="m1", group="g1", sender="u1"))
 
-    async def fake_emit(ev):
-        recorded.append(ev)
+    recorded, fake_emit = _capture_emits()
 
-    msg = _fake_message()
-
-    with (
-        patch("ee.cloud.chat.message_service.emit", new=fake_emit),
-        patch(
-            "ee.cloud.chat.message_service._get_group_message_or_404",
-            new=AsyncMock(return_value=msg),
-        ),
-    ):
-        from ee.cloud.chat.message_service import MessageService
-
+    with patch("ee.cloud.chat.message_service.emit", new=fake_emit):
         await MessageService.delete_message("m1", "u1")
+
+    assert msg_repo.deleted == ["m1"]
 
     assert any(isinstance(e, MessageDeleted) for e in recorded)
     ev = next(e for e in recorded if isinstance(e, MessageDeleted))
@@ -193,32 +150,30 @@ async def test_delete_message_emits_deleted():
 
 
 @pytest.mark.asyncio
-async def test_toggle_reaction_emits_message_reaction():
+async def test_toggle_reaction_emits_message_reaction(chat_repos):
+    from tests.cloud.chat.conftest import make_domain_message
+    from ee.cloud.chat.message_service import MessageService
     from ee.cloud.realtime.events import MessageReaction
 
-    recorded: list = []
+    msg_repo, _grp_repo = chat_repos
+    msg_repo.add(make_domain_message(id="m1", group="g1", sender="u1"))
 
-    async def fake_emit(ev):
-        recorded.append(ev)
-
-    msg = _fake_message()
+    recorded, fake_emit = _capture_emits()
     group = _fake_group()
 
     with (
         patch("ee.cloud.chat.message_service.emit", new=fake_emit),
-        patch(
-            "ee.cloud.chat.message_service._get_group_message_or_404",
-            new=AsyncMock(return_value=msg),
-        ),
         patch(
             "ee.cloud.chat.message_service._get_group_or_404",
             new=AsyncMock(return_value=group),
         ),
         patch("ee.cloud.chat.message_service._require_can_post"),
     ):
-        from ee.cloud.chat.message_service import MessageService
-
         await MessageService.toggle_reaction("m1", "u1", "\U0001f44d")
+
+    assert msg_repo.reactions == [
+        {"message_id": "m1", "user_id": "u1", "emoji": "\U0001f44d"}
+    ]
 
     assert any(isinstance(e, MessageReaction) for e in recorded)
     ev = next(e for e in recorded if isinstance(e, MessageReaction))
@@ -248,7 +203,7 @@ def test_router_no_longer_broadcasts_message_events():
 
 
 @pytest.mark.asyncio
-async def test_send_message_fans_out_everyone_mention_to_all_members():
+async def test_send_message_fans_out_everyone_mention_to_all_members(chat_repos):
     """@everyone creates one notification per non-sender member and bumps their
     mention counter."""
     from types import SimpleNamespace
@@ -256,6 +211,7 @@ async def test_send_message_fans_out_everyone_mention_to_all_members():
     from ee.cloud.chat.message_service import MessageService
     from ee.cloud.chat.schemas import SendMessageRequest
 
+    _msg_repo, _grp_repo = chat_repos
     recorded, fake_emit = _capture_emits()
     group = _fake_group(owner="sender", members=["sender", "u2", "u3"])
 
@@ -269,12 +225,6 @@ async def test_send_message_fans_out_everyone_mention_to_all_members():
     async def fake_bump(user_id, group_id):
         bumped.append((user_id, group_id))
 
-    fake_msg_ns = SimpleNamespace(
-        id="m1",
-        createdAt=None,
-        insert=AsyncMock(),
-    )
-
     with (
         patch("ee.cloud.chat.message_service.emit", new=fake_emit),
         patch(
@@ -284,14 +234,6 @@ async def test_send_message_fans_out_everyone_mention_to_all_members():
         patch(
             "ee.cloud.chat.message_service._require_can_post",
             new=MagicMock(),
-        ),
-        patch(
-            "ee.cloud.chat.message_service.Message",
-            new=MagicMock(return_value=fake_msg_ns),
-        ),
-        patch(
-            "ee.cloud.chat.message_service._message_response",
-            new=MagicMock(return_value={"_id": "m1"}),
         ),
         patch(
             "ee.cloud.chat.message_service.event_bus.emit",
@@ -318,7 +260,7 @@ async def test_send_message_fans_out_everyone_mention_to_all_members():
 
 
 @pytest.mark.asyncio
-async def test_send_message_user_and_broadcast_mention_dedupes():
+async def test_send_message_user_and_broadcast_mention_dedupes(chat_repos):
     """If a message has both @user(u2) and @everyone, u2 only gets one
     notification, not two."""
     from types import SimpleNamespace
@@ -326,7 +268,8 @@ async def test_send_message_user_and_broadcast_mention_dedupes():
     from ee.cloud.chat.message_service import MessageService
     from ee.cloud.chat.schemas import SendMessageRequest
 
-    recorded, fake_emit = _capture_emits()
+    _msg_repo, _grp_repo = chat_repos
+    _recorded, fake_emit = _capture_emits()
     group = _fake_group(owner="sender", members=["sender", "u2", "u3"])
 
     created_notifs: list[dict] = []
@@ -335,20 +278,22 @@ async def test_send_message_user_and_broadcast_mention_dedupes():
         created_notifs.append(kwargs)
         return SimpleNamespace(id="n")
 
-    fake_msg_ns = SimpleNamespace(id="m1", createdAt=None, insert=AsyncMock())
-
     with (
         patch("ee.cloud.chat.message_service.emit", new=fake_emit),
-        patch("ee.cloud.chat.message_service._get_group_or_404", new=AsyncMock(return_value=group)),
-        patch("ee.cloud.chat.message_service._require_can_post", new=MagicMock()),
-        patch("ee.cloud.chat.message_service.Message", new=MagicMock(return_value=fake_msg_ns)),
         patch(
-            "ee.cloud.chat.message_service._message_response",
-            new=MagicMock(return_value={"_id": "m1"}),
+            "ee.cloud.chat.message_service._get_group_or_404",
+            new=AsyncMock(return_value=group),
         ),
+        patch("ee.cloud.chat.message_service._require_can_post", new=MagicMock()),
         patch("ee.cloud.chat.message_service.event_bus.emit", new=AsyncMock()),
-        patch("ee.cloud.chat.message_service.NotificationService.create_default", new=fake_notif),
-        patch("ee.cloud.chat.message_service.UnreadService.bump_mention", new=AsyncMock()),
+        patch(
+            "ee.cloud.chat.message_service.NotificationService.create_default",
+            new=fake_notif,
+        ),
+        patch(
+            "ee.cloud.chat.message_service.UnreadService.bump_mention",
+            new=AsyncMock(),
+        ),
     ):
         body = SendMessageRequest(
             content="hi u2",
@@ -365,28 +310,23 @@ async def test_send_message_user_and_broadcast_mention_dedupes():
 
 
 @pytest.mark.asyncio
-async def test_send_message_emits_unread_update_for_non_senders():
+async def test_send_message_emits_unread_update_for_non_senders(chat_repos):
     """Every non-sender member should receive an unread.update event."""
-    from types import SimpleNamespace
-
     from ee.cloud.chat.message_service import MessageService
     from ee.cloud.chat.schemas import SendMessageRequest
     from ee.cloud.realtime.events import UnreadUpdate
 
+    _msg_repo, _grp_repo = chat_repos
     recorded, fake_emit = _capture_emits()
     group = _fake_group(owner="sender", members=["sender", "u2", "u3"])
 
-    fake_msg_ns = SimpleNamespace(id="m1", createdAt=None, insert=AsyncMock())
-
     with (
         patch("ee.cloud.chat.message_service.emit", new=fake_emit),
-        patch("ee.cloud.chat.message_service._get_group_or_404", new=AsyncMock(return_value=group)),
-        patch("ee.cloud.chat.message_service._require_can_post", new=MagicMock()),
-        patch("ee.cloud.chat.message_service.Message", new=MagicMock(return_value=fake_msg_ns)),
         patch(
-            "ee.cloud.chat.message_service._message_response",
-            new=MagicMock(return_value={"_id": "m1"}),
+            "ee.cloud.chat.message_service._get_group_or_404",
+            new=AsyncMock(return_value=group),
         ),
+        patch("ee.cloud.chat.message_service._require_can_post", new=MagicMock()),
         patch("ee.cloud.chat.message_service.event_bus.emit", new=AsyncMock()),
     ):
         await MessageService.send_message("g1", "sender", SendMessageRequest(content="hi"))
@@ -400,89 +340,70 @@ async def test_send_message_emits_unread_update_for_non_senders():
 
 
 @pytest.mark.asyncio
-async def test_send_reply_does_not_bump_thread_count():
-    """Inline-quoted replies replaced threads: parent.thread_count stays
-    untouched so we don't do a pointless parent write on every reply."""
-    from types import SimpleNamespace
-
+async def test_send_reply_does_not_bump_thread_count(chat_repos):
+    """Inline-quoted replies replaced threads: the parent message is
+    fetched for preview only — never edited/deleted/reacted as a side
+    effect of the reply send."""
+    from tests.cloud.chat.conftest import make_domain_message
     from ee.cloud.chat.message_service import MessageService
     from ee.cloud.chat.schemas import SendMessageRequest
+
+    msg_repo, _grp_repo = chat_repos
+    parent = make_domain_message(id="parent1", group="g1", sender="u_other", thread_count=0)
+    msg_repo.add(parent)
 
     _recorded, fake_emit = _capture_emits()
     group = _fake_group(owner="sender", members=["sender", "u2"])
 
-    parent = SimpleNamespace(
-        id="parent1",
-        thread_count=0,
-        sender_type="user",
-        agent=None,
-        save=AsyncMock(),
-    )
-    fake_msg_ns = SimpleNamespace(id="reply1", createdAt=None, insert=AsyncMock())
-
-    fake_message_class = MagicMock(return_value=fake_msg_ns)
-    fake_message_class.find_one = AsyncMock(return_value=parent)
-
     with (
         patch("ee.cloud.chat.message_service.emit", new=fake_emit),
-        patch("ee.cloud.chat.message_service._get_group_or_404", new=AsyncMock(return_value=group)),
-        patch("ee.cloud.chat.message_service._require_can_post", new=MagicMock()),
-        patch("ee.cloud.chat.message_service.Message", new=fake_message_class),
         patch(
-            "ee.cloud.chat.message_service._message_response",
-            new=MagicMock(return_value={"_id": "reply1"}),
+            "ee.cloud.chat.message_service._get_group_or_404",
+            new=AsyncMock(return_value=group),
         ),
+        patch("ee.cloud.chat.message_service._require_can_post", new=MagicMock()),
         patch("ee.cloud.chat.message_service.event_bus.emit", new=AsyncMock()),
     ):
         await MessageService.send_message(
             "g1",
             "sender",
-            SendMessageRequest(content="a reply", reply_to="507f1f77bcf86cd799439011"),
+            SendMessageRequest(content="a reply", reply_to="parent1"),
         )
 
-    assert parent.thread_count == 0
-    parent.save.assert_not_awaited()
+    # Parent must not be touched as a side-effect of the reply.
+    assert msg_repo.edited == []
+    assert msg_repo.deleted == []
+    assert msg_repo.reactions == []
 
 
 @pytest.mark.asyncio
-async def test_send_reply_emits_message_new_not_thread_reply():
+async def test_send_reply_emits_message_new_not_thread_reply(chat_repos):
     """Inline replies fan out via MessageNew; no ThreadReply event fires
     because we no longer render a separate thread panel."""
-    from types import SimpleNamespace
-
+    from tests.cloud.chat.conftest import make_domain_message
     from ee.cloud.chat.message_service import MessageService
     from ee.cloud.chat.schemas import SendMessageRequest
     from ee.cloud.realtime.events import MessageNew, ThreadReply
 
+    msg_repo, _grp_repo = chat_repos
+    msg_repo.add(make_domain_message(id="parent1", group="g1", sender="u_other"))
+
     recorded, fake_emit = _capture_emits()
     group = _fake_group(owner="sender", members=["sender"])
-    parent = SimpleNamespace(
-        id="parent1",
-        thread_count=0,
-        sender_type="user",
-        agent=None,
-        save=AsyncMock(),
-    )
-    fake_msg_ns = SimpleNamespace(id="r1", createdAt=None, insert=AsyncMock(), thread_count=0)
-
-    fake_message_class = MagicMock(return_value=fake_msg_ns)
-    fake_message_class.find_one = AsyncMock(return_value=parent)
 
     with (
         patch("ee.cloud.chat.message_service.emit", new=fake_emit),
-        patch("ee.cloud.chat.message_service._get_group_or_404", new=AsyncMock(return_value=group)),
-        patch("ee.cloud.chat.message_service._require_can_post", new=MagicMock()),
-        patch("ee.cloud.chat.message_service.Message", new=fake_message_class),
         patch(
-            "ee.cloud.chat.message_service._message_response",
-            new=MagicMock(return_value={"_id": "r1"}),
+            "ee.cloud.chat.message_service._get_group_or_404",
+            new=AsyncMock(return_value=group),
         ),
+        patch("ee.cloud.chat.message_service._require_can_post", new=MagicMock()),
         patch("ee.cloud.chat.message_service.event_bus.emit", new=AsyncMock()),
     ):
         await MessageService.send_message(
             "g1",
             "sender",
-            SendMessageRequest(content="a reply", reply_to="507f1f77bcf86cd799439011"),
+            SendMessageRequest(content="a reply", reply_to="parent1"),
         )
 
     threads = [e for e in recorded if isinstance(e, ThreadReply)]
