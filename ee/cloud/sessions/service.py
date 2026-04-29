@@ -624,6 +624,47 @@ async def attach_pocket_to_session_doc(
     return str(doc.id)
 
 
+async def set_title_if_default(session_id: str, title: str) -> bool:
+    """Persist ``title`` only when the current title is still a system
+    default (``"New Chat"`` / ``"Chat"`` / empty). Used by the cloud
+    title listener so user-edited titles aren't clobbered when a delayed
+    backend titler fires for the same session.
+
+    Returns ``True`` if the title was written, ``False`` if the session
+    is missing, already has a user-edited title, or the save failed.
+    """
+    try:
+        doc = await _SessionDoc.find_one(_SessionDoc.sessionId == session_id)
+    except Exception:
+        logger.warning("session lookup failed for %s", session_id, exc_info=True)
+        return False
+    if doc is None:
+        return False
+    if doc.title and doc.title not in ("New Chat", "Chat"):
+        return False
+
+    doc.title = title
+    try:
+        await doc.save()
+    except Exception:
+        logger.warning("session title save failed for %s", session_id, exc_info=True)
+        return False
+
+    try:
+        await emit(
+            SessionUpdated(
+                data={
+                    "session_id": str(doc.id),
+                    "user_id": doc.owner,
+                    "title": title,
+                }
+            )
+        )
+    except Exception:
+        logger.warning("session title emit failed for %s", session_id, exc_info=True)
+    return True
+
+
 async def set_title(session_id: str, title: str) -> bool:
     """Write ``title`` to ``Session.title`` and broadcast ``SessionUpdated``.
 
@@ -701,6 +742,7 @@ __all__ = [
     "list_for_owner",
     "list_for_pocket",
     "set_title",
+    "set_title_if_default",
     "touch",
     "touch_doc",
     "update",
