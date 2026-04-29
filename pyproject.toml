@@ -475,6 +475,7 @@ source_modules = [
     "ee.cloud.agents.router",
     "ee.cloud.agents.dto",
     "ee.cloud.agents.domain",
+    "ee.cloud.kb.knowledge_router",
 ]
 forbidden_modules = ["ee.cloud.models.agent"]
 

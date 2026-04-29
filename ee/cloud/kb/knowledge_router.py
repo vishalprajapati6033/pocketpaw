@@ -45,12 +45,13 @@ router = APIRouter(
 
 
 async def _list_workspace_agent_ids(workspace_id: str) -> list[str]:
-    """Return every agent id that belongs to *workspace_id*. Lazy import so
-    tests can patch this without pulling in Beanie/Mongo eagerly."""
-    from ee.cloud.models.agent import Agent
+    """Return every agent id that belongs to *workspace_id*. Routes
+    through ``agents.service`` so this router stays out of
+    ``ee.cloud.models.agent``."""
+    from ee.cloud.agents import service as agents_service
 
-    docs = await Agent.find(Agent.workspace == workspace_id).to_list()
-    return [str(doc.id) for doc in docs]
+    agents = await agents_service.list_agents(workspace_id)
+    return [a.id for a in agents]
 
 
 def _call_kb_list(scope: str) -> list[Any]:
