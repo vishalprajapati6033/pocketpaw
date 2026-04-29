@@ -713,6 +713,79 @@ async def search_workspace_messages(
     return [message_to_wire_dict(m) for m in messages]
 
 
+async def persist_pocket_memory_message(
+    *,
+    session_key: str,
+    role: str,
+    sender_type: str,
+    content: str,
+    workspace_id: str | None,
+    attachments: list[dict] | None = None,
+) -> str:
+    """Insert a pocket-context Message used by the cloud memory store.
+
+    Returns the new message id (as str). Used by ``MongoMemoryStore.save``
+    so the memory adapter doesn't import the Message Beanie class.
+    """
+    attachment_docs = (
+        [_AttachmentDoc(**a) for a in attachments] if attachments else []
+    )
+    msg = _MessageDoc(
+        context_type="pocket",
+        session_key=session_key,
+        role=role,  # type: ignore[arg-type]
+        sender_type=sender_type,
+        content=content,
+        workspace_id=workspace_id,
+        attachments=attachment_docs,
+    )
+    await msg.insert()
+    return str(msg.id)
+
+
+async def find_pocket_dedup_twin_id(
+    session_key: str, role: str, content: str, *, window_seconds: int = 5
+) -> str | None:
+    """Return the id of an existing pocket-context Message that matches
+    ``(session_key, role, content)`` within the dedup window, else ``None``.
+
+    Used by the memory store to drop duplicate writes on the synchronous
+    in-request race between the chat endpoint and the agent loop's
+    ``memory.add_to_session`` calling here with the same content.
+    """
+    from datetime import timedelta
+
+    cutoff = datetime.now(UTC) - timedelta(seconds=window_seconds)
+    try:
+        doc = await _MessageDoc.find_one(
+            {
+                "context_type": "pocket",
+                "session_key": session_key,
+                "role": role,
+                "content": content,
+                "createdAt": {"$gte": cutoff},
+            }
+        )
+    except Exception:
+        logger.exception("memory dedup lookup failed for session=%s", session_key)
+        return None
+    return str(doc.id) if doc else None
+
+
+async def delete_message_doc_by_id(message_id: str) -> bool:
+    """Hard-delete a Message Beanie row by id. Returns True if a row was
+    removed. Used by the memory store's ``delete`` and ``clear_session``."""
+    try:
+        oid = PydanticObjectId(message_id)
+    except Exception:
+        return False
+    doc = await _MessageDoc.get(oid)
+    if doc is None:
+        return False
+    await doc.delete()
+    return True
+
+
 async def list_recent_for_group(
     group_id: str, *, limit: int = 20
 ) -> list[_MessageDomain]:
@@ -834,11 +907,14 @@ async def persist_assistant_message_for_scope(
 __all__ = [
     "create_agent_message",
     "delete_message",
+    "delete_message_doc_by_id",
     "edit_message",
+    "find_pocket_dedup_twin_id",
     "get_messages",
     "get_thread",
     "list_recent_for_group",
     "persist_assistant_message_for_scope",
+    "persist_pocket_memory_message",
     "persist_user_message_for_scope",
     "pin_message",
     "search_messages",

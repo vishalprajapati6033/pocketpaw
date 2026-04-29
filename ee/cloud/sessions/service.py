@@ -519,6 +519,74 @@ async def ensure_for_agent_scope(
     return None
 
 
+async def auto_create_pocket_session(
+    session_key: str, *, workspace_id: str | None = None
+) -> _SessionDoc | None:
+    """Create a pocket ``Session`` doc for ``session_key`` when none exists.
+
+    Picks the first user in the target workspace (or any workspace user
+    if ``workspace_id`` is not provided) so the session has an owner.
+    Returns ``None`` if no suitable user exists. Used by the cloud
+    memory store so its adapter doesn't have to import ``Session`` /
+    ``User`` directly.
+    """
+    from ee.cloud.models.user import User as _UserDoc
+
+    query: dict
+    if workspace_id:
+        query = {"workspaces.workspace": workspace_id}
+    else:
+        query = {"workspaces": {"$ne": []}}
+    users = await _UserDoc.find(query).limit(1).to_list()
+    if not users:
+        logger.warning("auto_create_pocket_session: no user with a workspace")
+        return None
+
+    user = users[0]
+    if workspace_id is None:
+        workspace_id = user.workspaces[0].workspace if user.workspaces else None
+    if not workspace_id:
+        return None
+
+    doc = _SessionDoc(
+        sessionId=session_key,
+        context_type="pocket",
+        workspace=workspace_id,
+        owner=str(user.id),
+        title="Chat",
+    )
+    await doc.insert()
+    logger.info(
+        "auto-created pocket session: sessionId=%s owner=%s", session_key, user.id
+    )
+    return doc
+
+
+async def find_by_session_id(session_id: str) -> _SessionDoc | None:
+    """Return the ``Session`` Beanie doc keyed by ``sessionId`` (the safe
+    string form, not the Mongo ObjectId), or ``None`` if missing.
+
+    Used by the cloud memory store for its session-resolution path so it
+    doesn't import ``Session`` directly.
+    """
+    return await _SessionDoc.find_one(_SessionDoc.sessionId == session_id)
+
+
+async def touch_doc(doc: _SessionDoc) -> None:
+    """Increment ``messageCount`` and refresh ``lastActivity`` on an
+    already-loaded ``Session`` doc. Failures log but don't raise.
+
+    Variant of :func:`touch` for callers that already have the doc in
+    hand (the cloud memory store's write path) — saves a refetch.
+    """
+    try:
+        doc.lastActivity = datetime.now(UTC)
+        doc.messageCount = (doc.messageCount or 0) + 1
+        await doc.save()
+    except Exception:
+        logger.warning("failed to touch Session %s", doc.sessionId, exc_info=True)
+
+
 async def attach_pocket_to_session_doc(
     session_mongo_id: str, user_id: str, pocket_id: str
 ) -> str | None:
@@ -620,9 +688,11 @@ async def touch(session_id: str) -> None:
 
 __all__ = [
     "attach_pocket_to_session_doc",
+    "auto_create_pocket_session",
     "create",
     "delete",
     "ensure_for_agent_scope",
+    "find_by_session_id",
     "get",
     "get_history",
     "legacy_ctx",
@@ -632,5 +702,6 @@ __all__ = [
     "list_for_pocket",
     "set_title",
     "touch",
+    "touch_doc",
     "update",
 ]
