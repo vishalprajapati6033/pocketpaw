@@ -360,6 +360,22 @@ async def _try_eager_soul(agent: Agent) -> None:
         logger.warning("Eager soul creation failed for agent %s", agent.id, exc_info=True)
 
 
+async def get_persona(agent_id: str) -> str | None:
+    """Return the agent's persona snippet for relevance/smart checks.
+
+    Resolves to ``soul_persona`` when set, falling back to ``system_prompt``
+    and finally the agent's display name. Returns ``None`` if the agent
+    doesn't exist (callers degrade silently).
+    """
+    try:
+        doc = await _AgentDoc.get(PydanticObjectId(agent_id))
+    except Exception:
+        return None
+    if doc is None:
+        return None
+    return doc.config.soul_persona or doc.config.system_prompt or doc.name
+
+
 async def seed_default_agent(
     workspace_id: str, owner_id: str
 ) -> tuple[_AgentDoc, bool] | tuple[None, bool]:
@@ -431,6 +447,7 @@ __all__ = [
     "ensure_default_agent_all_workspaces",
     "get",
     "get_by_slug",
+    "get_persona",
     "get_scopes",
     "legacy_ctx",
     "list_agents",

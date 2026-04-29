@@ -88,23 +88,17 @@ async def _dispatch_agent_responses(data: dict) -> None:
 
     logger.info("Agent bridge: message in group %s from %s: %s", group_id, sender_id, content[:50])
 
-    from beanie import PydanticObjectId
+    from ee.cloud.chat import group_service
 
-    from ee.cloud.models.group import Group
-
-    try:
-        group = await Group.get(PydanticObjectId(group_id))
-    except Exception:
-        logger.error("Agent bridge: failed to load group %s", group_id, exc_info=True)
-        return
-    if not group or not group.agents:
-        logger.info("Agent bridge: group %s has no agents", group_id)
+    group = await group_service.get_for_dispatch(group_id)
+    if group is None or not group.agents:
+        logger.info("Agent bridge: group %s missing or has no agents", group_id)
         return
 
     logger.info(
         "Agent bridge: group has %d agents: %s",
         len(group.agents),
-        [(a.agent, a.respond_mode) for a in group.agents],
+        [(a.agent_id, a.respond_mode) for a in group.agents],
     )
 
     for group_agent in group.agents:
@@ -118,14 +112,14 @@ async def _dispatch_agent_responses(data: dict) -> None:
         )
         logger.info(
             "Agent bridge: agent %s respond_mode=%s should_respond=%s",
-            group_agent.agent,
+            group_agent.agent_id,
             group_agent.respond_mode,
             should,
         )
         if should:
             asyncio.create_task(
                 _run_agent_response(
-                    agent_id=group_agent.agent,
+                    agent_id=group_agent.agent_id,
                     group_id=group_id,
                     workspace_id=workspace_id,
                     user_message=content,
@@ -172,13 +166,13 @@ async def _should_agent_respond(
 
     agent_mentions = [m for m in mentions if m.get("type") == "agent"]
     if agent_mentions:
-        return any(m.get("id") == group_agent.agent for m in agent_mentions)
+        return any(m.get("id") == group_agent.agent_id for m in agent_mentions)
 
     # Directed reply handling — see docstring step 3.
     if reply_to:
         if reply_to_sender_type == "user":
             return False
-        if reply_to_sender_type == "agent" and reply_to_agent_id != group_agent.agent:
+        if reply_to_sender_type == "agent" and reply_to_agent_id != group_agent.agent_id:
             return False
 
     if mode == "auto":
@@ -186,22 +180,18 @@ async def _should_agent_respond(
     if mode == "mention_only":
         return False
     if mode == "smart":
-        return await _smart_relevance_check(group_agent.agent, content)
+        return await _smart_relevance_check(group_agent.agent_id, content)
     return False
 
 
 async def _smart_relevance_check(agent_id: str, content: str) -> bool:
     """Use a cheap LLM call to check if the message is relevant to the agent."""
-    from beanie import PydanticObjectId
-
-    from ee.cloud.models.agent import Agent
+    from ee.cloud.agents import service as agents_service
 
     try:
-        agent = await Agent.get(PydanticObjectId(agent_id))
-        if not agent:
+        persona = await agents_service.get_persona(agent_id)
+        if not persona:
             return False
-
-        persona = agent.config.soul_persona or agent.config.system_prompt or agent.name
 
         from pocketpaw.agents.registry import get_backend_class
         from pocketpaw.config import Settings
@@ -295,7 +285,7 @@ async def _run_agent_response(
     ``meta``). They're formatted into ``user_message`` before ``pool.run`` so
     the agent sees filename/mime/size the same way it does on the DM path.
     """
-    from ee.cloud.models.message import Attachment, Message
+    from ee.cloud.chat import message_service
     from pocketpaw.agents.pool import get_agent_pool
 
     pool = get_agent_pool()
@@ -314,22 +304,15 @@ async def _run_agent_response(
         logger.error("Failed to get agent instance %s", agent_id, exc_info=True)
         return
 
-    # Fetch recent conversation history from cloud Messages
-    recent_msgs = (
-        await Message.find(
-            Message.group == group_id,
-            Message.deleted == False,  # noqa: E712
-        )
-        .sort(-Message.createdAt)
-        .limit(20)
-        .to_list()
-    )
-    recent_msgs.reverse()  # oldest first
-
-    history = []
-    for m in recent_msgs:
-        role = "assistant" if m.sender_type == "agent" else "user"
-        history.append({"role": role, "content": m.content})
+    # Fetch recent conversation history from cloud Messages.
+    recent_msgs = await message_service.list_recent_for_group(group_id, limit=20)
+    history = [
+        {
+            "role": "assistant" if m.sender_type == "agent" else "user",
+            "content": m.content,
+        }
+        for m in recent_msgs
+    ]
 
     # Inject knowledge context from agent's knowledge engine
     knowledge_context = ""
@@ -422,7 +405,7 @@ async def _run_agent_response(
         return
 
     # Check for ripple spec in response
-    attachments: list[Attachment] = []
+    attachment_dicts: list[dict] = []
     ripple_spec = None
     try:
         json_match = re.search(r"```json\s*(\{.*?\})\s*```", full_text, re.DOTALL)
@@ -432,7 +415,7 @@ async def _run_agent_response(
                 from ee.cloud.ripple_normalizer import normalize_ripple_spec
 
                 ripple_spec = normalize_ripple_spec(candidate)
-                attachments.append(Attachment(type="ripple", meta=ripple_spec))
+                attachment_dicts.append({"type": "ripple", "meta": ripple_spec})
                 full_text = full_text[: json_match.start()] + full_text[json_match.end() :]
                 full_text = full_text.strip()
     except Exception:
@@ -450,16 +433,14 @@ async def _run_agent_response(
             description=f"Generated by {instance.agent_name}",
         )
 
-    # Persist agent message to MongoDB
-    msg = Message(
-        group=group_id,
-        sender=None,
-        sender_type="agent",
-        agent=agent_id,
+    # Persist agent message via the chat service so this file stays out
+    # of ``ee.cloud.models.message``.
+    msg = await message_service.create_agent_message(
+        group_id=group_id,
+        agent_id=agent_id,
         content=full_text,
-        attachments=attachments,
+        attachments=attachment_dicts or None,
     )
-    await msg.insert()
 
     # Broadcast final message. ``temp_message_id`` is echoed from the
     # matching ``stream_start`` so the FE can precisely replace the

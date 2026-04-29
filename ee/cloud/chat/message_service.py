@@ -713,6 +713,25 @@ async def search_workspace_messages(
     return [message_to_wire_dict(m) for m in messages]
 
 
+async def list_recent_for_group(
+    group_id: str, *, limit: int = 20
+) -> list[_MessageDomain]:
+    """Return up to ``limit`` most-recent non-deleted group messages,
+    oldest-first. Used by the agent bridge to rehydrate prior turns
+    before a ``pool.run`` call."""
+    docs = (
+        await _MessageDoc.find(
+            _MessageDoc.group == group_id,
+            _MessageDoc.deleted == False,  # noqa: E712
+        )
+        .sort(-_MessageDoc.createdAt)
+        .limit(limit)
+        .to_list()
+    )
+    docs.reverse()
+    return [_message_doc_to_domain(d) for d in docs]
+
+
 # ---------------------------------------------------------------------------
 # Agent-stream persist helpers
 #
@@ -818,6 +837,7 @@ __all__ = [
     "edit_message",
     "get_messages",
     "get_thread",
+    "list_recent_for_group",
     "persist_assistant_message_for_scope",
     "persist_user_message_for_scope",
     "pin_message",

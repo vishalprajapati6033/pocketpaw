@@ -978,6 +978,13 @@ async def list_member_ids(group_id: str) -> list[str]:
     return list(group.members) if group else []
 
 
+async def get_for_dispatch(group_id: str) -> _GroupDomain | None:
+    """Load the domain group for cross-domain orchestrators (the agent
+    bridge fan-out, audience resolvers). Returns ``None`` if missing —
+    callers do their own NotFound shaping."""
+    return await _get_group_domain_or_none(group_id)
+
+
 async def seed_default_group(workspace_id: str, owner_id: str) -> _GroupDoc | None:
     """Insert the default ``General`` public channel for a freshly-created
     workspace. Returns the inserted Beanie doc (callers may ignore it).
@@ -1059,6 +1066,7 @@ __all__ = [
     "leave_group",
     "list_groups",
     "list_member_ids",
+    "get_for_dispatch",
     "remove_agent",
     "remove_member",
     "resolve_group_role",
