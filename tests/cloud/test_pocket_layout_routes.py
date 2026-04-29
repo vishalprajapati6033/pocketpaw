@@ -6,10 +6,10 @@
 #   POST /pockets/templates
 #   GET  /pockets/templates
 #
-# PocketService.get is monkey-patched to return a canned pocket dict so
-# the tests stay independent of Beanie + MongoDB. Auth dependencies and
-# the user-template store are overridden via app.dependency_overrides —
-# same pattern the widget-router tests use.
+# ``pockets_service.get`` is monkey-patched to return a canned pocket
+# dict so the tests stay independent of Beanie + MongoDB. Auth
+# dependencies and the user-template store are overridden via
+# ``app.dependency_overrides`` — same pattern the widget-router tests use.
 #
 # What this pins:
 #   1. /export-layout returns a YAML document carrying the pocket's

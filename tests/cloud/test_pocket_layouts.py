@@ -3,7 +3,7 @@
 # and the in-process user-template store. These tests are pure — no
 # Beanie, no MongoDB, no FastAPI. The router-level tests in
 # test_pocket_layout_routes.py exercise the HTTP surface against the
-# same store with PocketService.get monkeypatched.
+# same store with ``pockets_service.get`` monkeypatched.
 #
 # What this pins:
 #   1. YAML export is deterministic (same input → byte-identical output).

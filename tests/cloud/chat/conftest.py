@@ -1,10 +1,9 @@
 """Fixtures for cloud chat tests.
 
-Chat tests now drive the service module against a real in-memory
-mongomock-motor database (``mongo_db`` fixture in
+Chat tests drive the service modules (``chat.message_service`` /
+``chat.group_service`` / ``chat.unread_service``) against a real
+in-memory mongomock-motor database (``mongo_db`` fixture in
 ``tests/cloud/conftest.py``) and assert on ``recording_bus.events``.
-The Phase 10 ``IMessageRepository`` / ``IGroupRepository`` Protocol fakes
-are gone — pre-Milestone-1 emit-tests have been rewritten.
 """
 
 from __future__ import annotations

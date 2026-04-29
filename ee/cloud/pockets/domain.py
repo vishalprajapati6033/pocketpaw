@@ -1,12 +1,9 @@
 """Domain value objects for the pockets module.
 
-Pure-Python frozen dataclasses. The repository layer converts between
-these and the Beanie ``Pocket``/``Widget`` documents.
-
-Phase 8 ships these alongside the existing PocketService — only one
-read-path method (``get``) is migrated to use the new repository in
-this slice. The remaining 14 methods stay on Beanie. Future slices
-will migrate them incrementally.
+Pure-Python frozen dataclasses. ``pockets/service.py`` owns the
+conversion between these and the Beanie ``Pocket`` / ``Widget``
+documents — domain objects are what every consumer outside the service
+sees on read paths.
 """
 
 from __future__ import annotations

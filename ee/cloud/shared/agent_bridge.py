@@ -1,19 +1,23 @@
 """Bridge between cloud chat events and the PocketPaw agent pool.
 
-Changes:
-- 2026-04-19: Forward ``Message.attachments`` through ``on_message_for_agents``
-  and ``_run_agent_response`` so channel agents see filename/mime/size context.
-  Matches the DM path's shape (``Attached files:`` block appended to the user
-  prompt before ``pool.run``); keeps ``pool.run``'s signature unchanged.
-- Replaced inline pocket creation with PocketService.create_from_ripple_spec()
-  to reduce coupling. Pocket creation logic now lives in the pockets domain.
+Pure cross-domain orchestrator: subscribes to the legacy ``message.sent``
+``event_bus`` event and delegates every Beanie touch to the owning
+entity service (``chat.group_service`` for group lookup,
+``agents.service`` for persona, ``chat.message_service`` for history
+rehydration + reply persistence, ``pockets.service`` for ripple-spec
+auto-pocket creation).
 
-Responsibilities (focused orchestrator):
+Responsibilities:
 1. Checks each agent's respond_mode (silent, auto, mention_only, smart)
 2. Triggers agents that should respond and streams responses via WebSocket
-3. Parses ripple specs from agent responses (understanding the response)
-4. Delegates pocket creation to PocketService
-5. Persists agent messages to MongoDB
+3. Parses ripple specs from agent responses
+4. Delegates pocket creation to ``pockets_service.create_from_ripple_spec``
+5. Persists agent messages via ``message_service.create_agent_message``
+
+User-message attachments ride the ``message.sent`` payload so channel
+agents see the same filename/mime/size context DM agents already get —
+appended to the user prompt as an ``Attached files:`` block before
+``pool.run`` (matching ``src/pocketpaw/agents/loop.py``'s DM shape).
 """
 
 from __future__ import annotations
