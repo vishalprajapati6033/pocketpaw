@@ -1,4 +1,5 @@
 """Shared fixtures for files tests."""
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -7,14 +8,14 @@ from typing import Any
 
 import pytest
 
-from ee.cloud.files.errors import ProviderUnsupported
-from ee.cloud.files.schemas import (
+from ee.cloud.files.dto import (
     FileEntry,
     Page,
     Permission,
     RequestContext,
     ResolvedMount,
 )
+from ee.cloud.files.errors import ProviderUnsupported
 
 
 class FakeProvider:
@@ -45,6 +46,7 @@ class FakeProvider:
     async def open_stream(self, ctx: RequestContext, entry_id: str) -> AsyncIterator[bytes]:
         async def _gen() -> AsyncIterator[bytes]:
             yield b"data"
+
         return _gen()
 
     async def upload(self, ctx, mount_path, upload):  # noqa: ANN001
@@ -92,6 +94,7 @@ def make_entry():
         )
         base.update(overrides)
         return FileEntry(**base)
+
     return _make
 
 
@@ -107,4 +110,5 @@ def make_mount():
             order=order,
             variables={},
         )
+
     return _make

@@ -1,260 +1,523 @@
 """Agents domain — business logic service.
 
-Updated 2026-04-19 (feat/cluster-d-agent-scope-picker): create/update now
-pass the new ``scopes`` field through to ``AgentConfig``, and a dedicated
-``get_scopes`` / ``set_scopes`` pair backs the ``/agents/{id}/scope``
-endpoint. ``set_scopes`` re-applies the scope validator so a direct
-service call (e.g. a fleet installer) can't store an unvalidated list.
+Sole owner of writes to the ``Agent`` Beanie document. Module-level
+``async def`` API. Eager soul materialization
+(``get_agent_pool().ensure_soul``) preserved on create when
+``soul_enabled``.
+
+Public API:
+- ``create(ctx, workspace_id, body)``
+- ``get(agent_id)``
+- ``get_by_slug(workspace_id, slug)``
+- ``list_agents(workspace_id, query=None)``
+- ``update(ctx, agent_id, body)``
+- ``delete(ctx, agent_id)``
+- ``get_scopes(agent_id)``
+- ``set_scopes(agent_id, scopes)``
+- ``discover(ctx, workspace_id, body)``
+- ``legacy_ctx(user_id, workspace_id)`` — helper for the router
 """
 
 from __future__ import annotations
 
+import logging
+from dataclasses import replace
+from datetime import UTC, datetime
+from typing import Any
+
 from beanie import PydanticObjectId
 
-from ee.cloud.agents.schemas import (
+from ee.cloud._core.context import RequestContext, ScopeKind
+from ee.cloud._core.errors import ConflictError, Forbidden, NotFound
+from ee.cloud.agents.domain import Agent, AgentConfigSpec
+from ee.cloud.agents.dto import (
     CreateAgentRequest,
     DiscoverRequest,
     UpdateAgentRequest,
 )
 from ee.cloud.agents.scope_rules import normalise_and_validate_scopes
-from ee.cloud.models.agent import Agent, AgentConfig
-from ee.cloud.shared.errors import ConflictError, Forbidden, NotFound
-from ee.cloud.shared.time import iso_utc
+from ee.cloud.models.agent import Agent as _AgentDoc
+from ee.cloud.models.agent import AgentConfig as _AgentConfigDoc
+
+logger = logging.getLogger(__name__)
 
 
-def _agent_response(agent: Agent) -> dict:
-    """Build a frontend-compatible dict from an Agent document."""
-    return {
-        "_id": str(agent.id),
-        "workspace": agent.workspace,
-        "name": agent.name,
-        "uname": agent.slug,
-        "avatar": agent.avatar,
-        "visibility": agent.visibility,
-        "config": agent.config.model_dump(),
-        "owner": agent.owner,
-        "createdOn": iso_utc(agent.createdAt),
-        "lastUpdatedOn": iso_utc(agent.updatedAt),
-    }
+# ---------------------------------------------------------------------------
+# Private mapping helpers
+# ---------------------------------------------------------------------------
 
 
-class AgentService:
-    """Stateless service encapsulating agent business logic."""
+def _config_to_domain(c: _AgentConfigDoc) -> AgentConfigSpec:
+    return AgentConfigSpec(
+        backend=c.backend,
+        model=c.model,
+        system_prompt=c.system_prompt,
+        tools=tuple(c.tools),
+        trust_level=c.trust_level,
+        temperature=c.temperature,
+        max_tokens=c.max_tokens,
+        scopes=tuple(c.scopes),
+        soul_enabled=c.soul_enabled,
+        soul_persona=c.soul_persona,
+        soul_archetype=c.soul_archetype,
+        soul_values=tuple(c.soul_values),
+        soul_ocean=tuple(c.soul_ocean.items()),
+    )
 
-    @staticmethod
-    async def create(workspace_id: str, user_id: str, body: CreateAgentRequest) -> dict:
-        """Create an agent with slug uniqueness within the workspace."""
-        existing = await Agent.find_one(
-            Agent.workspace == workspace_id,
-            Agent.slug == body.slug,
+
+def _config_to_doc(c: AgentConfigSpec) -> _AgentConfigDoc:
+    return _AgentConfigDoc(
+        backend=c.backend,
+        model=c.model,
+        system_prompt=c.system_prompt,
+        tools=list(c.tools),
+        trust_level=c.trust_level,
+        temperature=c.temperature,
+        max_tokens=c.max_tokens,
+        scopes=list(c.scopes),
+        soul_enabled=c.soul_enabled,
+        soul_persona=c.soul_persona,
+        soul_archetype=c.soul_archetype,
+        soul_values=list(c.soul_values),
+        soul_ocean=dict(c.soul_ocean),
+    )
+
+
+def _to_domain(doc: _AgentDoc) -> Agent:
+    return Agent(
+        id=str(doc.id),
+        workspace_id=doc.workspace,
+        name=doc.name,
+        slug=doc.slug,
+        avatar=doc.avatar,
+        visibility=doc.visibility,
+        owner=doc.owner,
+        config=_config_to_domain(doc.config),
+        created_at=getattr(doc, "createdAt", None),  # type: ignore[arg-type]
+        updated_at=getattr(doc, "updatedAt", None),  # type: ignore[arg-type]
+    )
+
+
+def legacy_ctx(user_id: str, workspace_id: str | None = None) -> RequestContext:
+    """Build a RequestContext for routers that haven't migrated to
+    ``Depends(request_context)`` yet."""
+    return RequestContext(
+        user_id=user_id,
+        workspace_id=workspace_id,
+        request_id="legacy",
+        scope=ScopeKind.NONE,
+        started_at=datetime.now(UTC),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Config builders
+# ---------------------------------------------------------------------------
+
+
+def _build_create_config(body: CreateAgentRequest) -> AgentConfigSpec:
+    """Build a domain AgentConfigSpec from a CreateAgentRequest."""
+    base = AgentConfigSpec(
+        backend=body.backend,
+        model=body.model,
+        system_prompt=body.system_prompt,
+        soul_enabled=body.soul_enabled,
+        soul_persona=body.persona,
+        soul_archetype=body.soul_archetype or f"The {body.name}",
+    )
+    overrides: dict[str, Any] = {}
+    if body.temperature is not None:
+        overrides["temperature"] = body.temperature
+    if body.max_tokens is not None:
+        overrides["max_tokens"] = body.max_tokens
+    if body.tools is not None:
+        overrides["tools"] = tuple(body.tools)
+    if body.trust_level is not None:
+        overrides["trust_level"] = body.trust_level
+    if body.scopes is not None:
+        overrides["scopes"] = tuple(body.scopes)
+    if body.soul_values is not None:
+        overrides["soul_values"] = tuple(body.soul_values)
+    if body.soul_ocean is not None:
+        overrides["soul_ocean"] = tuple(body.soul_ocean.items())
+    return replace(base, **overrides) if overrides else base
+
+
+def _apply_update(current: AgentConfigSpec, body: UpdateAgentRequest) -> AgentConfigSpec:
+    """Apply config-shaped overrides from an UpdateAgentRequest."""
+    if body.config is not None:
+        c = body.config
+        return AgentConfigSpec(
+            backend=c.get("backend", current.backend),
+            model=c.get("model", current.model),
+            system_prompt=c.get("system_prompt", current.system_prompt),
+            tools=tuple(c.get("tools", list(current.tools))),
+            trust_level=c.get("trust_level", current.trust_level),
+            temperature=c.get("temperature", current.temperature),
+            max_tokens=c.get("max_tokens", current.max_tokens),
+            scopes=tuple(c.get("scopes", list(current.scopes))),
+            soul_enabled=c.get("soul_enabled", current.soul_enabled),
+            soul_persona=c.get("soul_persona", current.soul_persona),
+            soul_archetype=c.get("soul_archetype", current.soul_archetype),
+            soul_values=tuple(c.get("soul_values", list(current.soul_values))),
+            soul_ocean=tuple(
+                c.get("soul_ocean", dict(current.soul_ocean)).items()
+                if isinstance(c.get("soul_ocean", dict(current.soul_ocean)), dict)
+                else current.soul_ocean
+            ),
         )
-        if existing:
-            raise ConflictError(
-                "agent.slug_taken",
-                f"Slug '{body.slug}' is already in use in this workspace",
-            )
 
-        config_data: dict = {
-            "backend": body.backend,
-            "model": body.model,
-            "system_prompt": body.system_prompt,
-            "soul_enabled": body.soul_enabled,
-            "soul_persona": body.persona,
-            "soul_archetype": body.soul_archetype or f"The {body.name}",
+    overrides: dict[str, Any] = {}
+    for field, attr in [
+        ("backend", body.backend),
+        ("model", body.model),
+        ("system_prompt", body.system_prompt),
+        ("temperature", body.temperature),
+        ("max_tokens", body.max_tokens),
+        ("trust_level", body.trust_level),
+        ("soul_enabled", body.soul_enabled),
+        ("soul_archetype", body.soul_archetype),
+    ]:
+        if attr is not None:
+            overrides[field] = attr
+    if body.tools is not None:
+        overrides["tools"] = tuple(body.tools)
+    if body.scopes is not None:
+        overrides["scopes"] = tuple(body.scopes)
+    if body.soul_values is not None:
+        overrides["soul_values"] = tuple(body.soul_values)
+    if body.soul_ocean is not None:
+        overrides["soul_ocean"] = tuple(body.soul_ocean.items())
+    if body.persona is not None:
+        overrides["soul_persona"] = body.persona
+
+    return replace(current, **overrides) if overrides else current
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
+async def create(
+    ctx: RequestContext, workspace_id: str, body: CreateAgentRequest
+) -> Agent:
+    existing = await _AgentDoc.find_one(
+        _AgentDoc.workspace == workspace_id,
+        _AgentDoc.slug == body.slug,
+    )
+    if existing is not None:
+        raise ConflictError(
+            "agent.slug_taken",
+            f"Slug '{body.slug}' is already in use in this workspace",
+        )
+
+    config = _build_create_config(body)
+    doc = _AgentDoc(
+        workspace=workspace_id,
+        name=body.name,
+        slug=body.slug,
+        avatar=body.avatar,
+        visibility=body.visibility,
+        owner=ctx.user_id,
+        config=_config_to_doc(config),
+    )
+    await doc.insert()
+    agent = _to_domain(doc)
+
+    # Eagerly materialize the soul on disk if enabled. Failures are
+    # non-fatal; AgentPool will retry lazily on first chat.
+    if agent.config.soul_enabled:
+        await _try_eager_soul(agent)
+
+    return agent
+
+
+async def get(agent_id: str) -> Agent:
+    try:
+        doc = await _AgentDoc.get(PydanticObjectId(agent_id))
+    except Exception:
+        doc = None
+    if doc is None:
+        raise NotFound("agent", agent_id)
+    return _to_domain(doc)
+
+
+async def get_by_slug(workspace_id: str, slug: str) -> Agent:
+    doc = await _AgentDoc.find_one(
+        _AgentDoc.workspace == workspace_id,
+        _AgentDoc.slug == slug,
+    )
+    if doc is None:
+        raise NotFound("agent", slug)
+    return _to_domain(doc)
+
+
+async def list_agents(
+    workspace_id: str, *, query: str | None = None
+) -> list[Agent]:
+    filters: dict[str, Any] = {"workspace": workspace_id}
+    if query:
+        filters["name"] = {"$regex": query, "$options": "i"}
+    docs = await _AgentDoc.find(filters).to_list()
+    return [_to_domain(d) for d in docs]
+
+
+async def update(
+    ctx: RequestContext, agent_id: str, body: UpdateAgentRequest
+) -> Agent:
+    try:
+        doc = await _AgentDoc.get(PydanticObjectId(agent_id))
+    except Exception:
+        doc = None
+    if doc is None:
+        raise NotFound("agent", agent_id)
+    if doc.owner != ctx.user_id:
+        raise Forbidden("agent.not_owner", "Only the agent owner can update it")
+
+    new_config = _apply_update(_config_to_domain(doc.config), body)
+
+    if body.name is not None:
+        doc.name = body.name
+    if body.avatar is not None:
+        doc.avatar = body.avatar
+    if body.visibility is not None:
+        doc.visibility = body.visibility
+    if new_config != _config_to_domain(doc.config):
+        doc.config = _config_to_doc(new_config)
+    await doc.save()
+    return _to_domain(doc)
+
+
+async def delete(ctx: RequestContext, agent_id: str) -> None:
+    try:
+        doc = await _AgentDoc.get(PydanticObjectId(agent_id))
+    except Exception:
+        doc = None
+    if doc is None:
+        raise NotFound("agent", agent_id)
+    if doc.owner != ctx.user_id:
+        raise Forbidden("agent.not_owner", "Only the agent owner can delete it")
+    await doc.delete()
+
+
+async def get_scopes(agent_id: str) -> list[str]:
+    agent = await get(agent_id)
+    return list(agent.config.scopes)
+
+
+async def set_scopes(agent_id: str, scopes: list[str]) -> list[str]:
+    cleaned = normalise_and_validate_scopes(scopes)
+    try:
+        doc = await _AgentDoc.get(PydanticObjectId(agent_id))
+    except Exception:
+        doc = None
+    if doc is None:
+        raise NotFound("agent", agent_id)
+    new_config = replace(_config_to_domain(doc.config), scopes=tuple(cleaned))
+    doc.config = _config_to_doc(new_config)
+    await doc.save()
+    return list(new_config.scopes)
+
+
+async def discover(
+    ctx: RequestContext,
+    workspace_id: str,
+    body: DiscoverRequest,
+) -> list[Agent]:
+    filters: dict[str, Any] = {}
+    if body.visibility == "private":
+        filters["workspace"] = workspace_id
+        filters["owner"] = ctx.user_id
+    elif body.visibility == "workspace":
+        filters["workspace"] = workspace_id
+    elif body.visibility == "public":
+        filters["visibility"] = "public"
+    else:
+        filters["$or"] = [
+            {"workspace": workspace_id, "owner": ctx.user_id},
+            {"workspace": workspace_id, "visibility": "workspace"},
+            {"visibility": "public"},
+        ]
+    if body.query:
+        filters["name"] = {"$regex": body.query, "$options": "i"}
+
+    skip = (body.page - 1) * body.page_size
+    docs = await _AgentDoc.find(filters).skip(skip).limit(body.page_size).to_list()
+    return [_to_domain(d) for d in docs]
+
+
+async def _try_eager_soul(agent: Agent) -> None:
+    """Best-effort eager soul materialization. Logs and continues on failure."""
+    try:
+        from pocketpaw.agents.pool import get_agent_pool
+
+        doc = await _AgentDoc.get(PydanticObjectId(agent.id))
+        if doc is None:
+            return
+        await get_agent_pool().ensure_soul(doc)
+    except Exception:
+        logger.warning("Eager soul creation failed for agent %s", agent.id, exc_info=True)
+
+
+async def suggest_for_mentions(
+    workspace_id: str, q: str, *, limit: int = 8
+) -> list[dict]:
+    """Return up to ``limit`` agents matching ``q`` against name / slug.
+    Used by the chat ``/mentions/suggest`` endpoint."""
+    aquery: dict = {"workspace": workspace_id}
+    if q:
+        aquery["$or"] = [
+            {"name": {"$regex": q, "$options": "i"}},
+            {"slug": {"$regex": q, "$options": "i"}},
+        ]
+    docs = await _AgentDoc.find(aquery).limit(limit).to_list()
+    return [
+        {
+            "type": "agent",
+            "id": str(a.id),
+            "display_name": a.name or a.slug,
         }
-        if body.temperature is not None:
-            config_data["temperature"] = body.temperature
-        if body.max_tokens is not None:
-            config_data["max_tokens"] = body.max_tokens
-        if body.tools is not None:
-            config_data["tools"] = body.tools
-        if body.trust_level is not None:
-            config_data["trust_level"] = body.trust_level
-        if body.scopes is not None:
-            config_data["scopes"] = body.scopes
-        if body.soul_values is not None:
-            config_data["soul_values"] = body.soul_values
-        if body.soul_ocean is not None:
-            config_data["soul_ocean"] = body.soul_ocean
-        config = AgentConfig(**config_data)
+        for a in docs
+    ]
 
-        agent = Agent(
-            workspace=workspace_id,
-            name=body.name,
-            slug=body.slug,
-            avatar=body.avatar,
-            visibility=body.visibility,
-            config=config,
-            owner=user_id,
-        )
-        await agent.insert()
 
-        # Eagerly materialize the soul on disk so it exists before the agent's
-        # first chat. Failures are non-fatal — lazy init in AgentPool will retry.
-        if config.soul_enabled:
-            try:
-                from pocketpaw.agents.pool import get_agent_pool
+async def is_owner_or_workspace_admin(agent_id: str, user: Any) -> bool:
+    """Return ``True`` if ``user`` owns the agent or is an admin in the
+    agent's workspace. Raises ``NotFound`` if the agent doesn't exist.
 
-                await get_agent_pool().ensure_soul(agent)
-            except Exception:
-                import logging
+    Used by the ``require_agent_owner_or_admin`` FastAPI guard so the
+    Agent Beanie load stays inside the service.
+    """
+    from pocketpaw.ee.guards.deps import resolve_workspace_role
+    from pocketpaw.ee.guards.rbac import Forbidden as GuardForbidden
+    from pocketpaw.ee.guards.rbac import WorkspaceRole
 
-                logging.getLogger(__name__).warning(
-                    "Eager soul creation failed for agent %s", agent.id, exc_info=True
-                )
+    try:
+        agent_oid = PydanticObjectId(agent_id)
+    except Exception as exc:  # noqa: BLE001
+        raise NotFound("agent", agent_id) from exc
 
-        return _agent_response(agent)
+    doc = await _AgentDoc.get(agent_oid)
+    if doc is None:
+        raise NotFound("agent", agent_id)
 
-    @staticmethod
-    async def list_agents(workspace_id: str, query: str | None = None) -> list[dict]:
-        """List agents in a workspace with optional name search."""
-        filters: dict = {"workspace": workspace_id}
-        if query:
-            filters["name"] = {"$regex": query, "$options": "i"}
+    user_id = str(user.id)
+    if doc.owner == user_id:
+        return True
+    try:
+        role = resolve_workspace_role(user, doc.workspace)
+    except GuardForbidden:
+        return False
+    return role.level >= WorkspaceRole.ADMIN.level
 
-        agents = await Agent.find(filters).to_list()
-        return [_agent_response(a) for a in agents]
 
-    @staticmethod
-    async def get(agent_id: str) -> dict:
-        """Get a single agent by ID. Raises NotFound if missing."""
-        agent = await Agent.get(PydanticObjectId(agent_id))
-        if not agent:
-            raise NotFound("agent", agent_id)
-        return _agent_response(agent)
+async def get_workspace(agent_id: str) -> str | None:
+    """Return the agent's workspace id, or ``None`` if the agent doesn't
+    exist. Used by the deny-log path of ``require_agent_owner_or_admin``."""
+    try:
+        agent_oid = PydanticObjectId(agent_id)
+    except Exception:
+        return None
+    doc = await _AgentDoc.get(agent_oid)
+    return doc.workspace if doc else None
 
-    @staticmethod
-    async def get_by_slug(workspace_id: str, slug: str) -> dict:
-        """Find an agent by slug within a workspace."""
-        agent = await Agent.find_one(
-            Agent.workspace == workspace_id,
-            Agent.slug == slug,
-        )
-        if not agent:
-            raise NotFound("agent", slug)
-        return _agent_response(agent)
 
-    @staticmethod
-    async def update(agent_id: str, user_id: str, body: UpdateAgentRequest) -> dict:
-        """Update agent fields. Owner only."""
-        agent = await Agent.get(PydanticObjectId(agent_id))
-        if not agent:
-            raise NotFound("agent", agent_id)
-        if agent.owner != user_id:
-            raise Forbidden("agent.not_owner", "Only the agent owner can update it")
+async def get_persona(agent_id: str) -> str | None:
+    """Return the agent's persona snippet for relevance/smart checks.
 
-        if body.name is not None:
-            agent.name = body.name
-        if body.avatar is not None:
-            agent.avatar = body.avatar
-        if body.visibility is not None:
-            agent.visibility = body.visibility
-        if body.config is not None:
-            agent.config = AgentConfig(**body.config)
-        else:
-            # Apply individual config/soul field overrides
-            current = agent.config.model_dump()
-            changed = False
-            for field, attr in [
-                ("backend", body.backend),
-                ("model", body.model),
-                ("system_prompt", body.system_prompt),
-                ("temperature", body.temperature),
-                ("max_tokens", body.max_tokens),
-                ("tools", body.tools),
-                ("trust_level", body.trust_level),
-                ("scopes", body.scopes),
-                ("soul_enabled", body.soul_enabled),
-                ("soul_archetype", body.soul_archetype),
-                ("soul_values", body.soul_values),
-                ("soul_ocean", body.soul_ocean),
-            ]:
-                if attr is not None:
-                    current[field] = attr
-                    changed = True
-            if body.persona is not None:
-                current["soul_persona"] = body.persona
-                changed = True
-            if changed:
-                agent.config = AgentConfig(**current)
+    Resolves to ``soul_persona`` when set, falling back to ``system_prompt``
+    and finally the agent's display name. Returns ``None`` if the agent
+    doesn't exist (callers degrade silently).
+    """
+    try:
+        doc = await _AgentDoc.get(PydanticObjectId(agent_id))
+    except Exception:
+        return None
+    if doc is None:
+        return None
+    return doc.config.soul_persona or doc.config.system_prompt or doc.name
 
-        await agent.save()
-        return _agent_response(agent)
 
-    @staticmethod
-    async def get_scopes(agent_id: str) -> list[str]:
-        """Return the stored scope list for an agent.
+async def seed_default_agent(
+    workspace_id: str, owner_id: str
+) -> tuple[_AgentDoc, bool] | tuple[None, bool]:
+    """Create the default ``pocketpaw`` Agent for a workspace if missing.
 
-        Used by ``GET /agents/{id}/scope``. No auth check here — the
-        router applies ``require_agent_owner_or_admin`` before reaching
-        the service; downstream callers (service-to-service) should apply
-        their own checks.
-        """
-        agent = await Agent.get(PydanticObjectId(agent_id))
-        if not agent:
-            raise NotFound("agent", agent_id)
-        return list(agent.config.scopes)
+    The frontend uses this agent's id as the DM room identifier and Session
+    docs for DMs carry ``agent=<this agent's id>`` so per-agent history works.
 
-    @staticmethod
-    async def set_scopes(agent_id: str, scopes: list[str]) -> list[str]:
-        """Replace the stored scope list for an agent, re-normalising and
-        validating server-side. Returns the stored list.
+    Idempotent. Returns ``(agent, created)`` — ``created`` is ``True`` only
+    when this call inserted a new row, so back-fill paths can report
+    accurate counts. Returns ``(None, False)`` if the insert raises (callers
+    are expected to wrap in try/except).
+    """
+    existing = await _AgentDoc.find_one(
+        _AgentDoc.workspace == workspace_id, _AgentDoc.slug == "pocketpaw"
+    )
+    if existing is not None:
+        return existing, False
 
-        The endpoint wrapping this method re-applies the same validator
-        via the ``ScopeAssignmentRequest`` Pydantic model; the extra call
-        here makes the service safe to call from fleet installers or a
-        future CLI without depending on the REST body validation.
-        """
-        cleaned = normalise_and_validate_scopes(scopes)
-        agent = await Agent.get(PydanticObjectId(agent_id))
-        if not agent:
-            raise NotFound("agent", agent_id)
-        current = agent.config.model_dump()
-        current["scopes"] = cleaned
-        agent.config = AgentConfig(**current)
-        await agent.save()
-        return list(agent.config.scopes)
+    agent = _AgentDoc(
+        workspace=workspace_id,
+        name="PocketPaw",
+        slug="pocketpaw",
+        avatar="",
+        owner=owner_id,
+        visibility="workspace",
+        config=_AgentConfigDoc(
+            system_prompt=(
+                "You are PocketPaw — the default assistant in this workspace. "
+                "Help the user with their tasks. Be concise, accurate, and honest."
+            ),
+            soul_persona="PocketPaw",
+        ),
+    )
+    await agent.insert()
+    logger.info(
+        "Default 'pocketpaw' agent seeded in workspace %s (id: %s)",
+        workspace_id,
+        agent.id,
+    )
+    return agent, True
 
-    @staticmethod
-    async def delete(agent_id: str, user_id: str) -> None:
-        """Hard-delete an agent. Owner only."""
-        agent = await Agent.get(PydanticObjectId(agent_id))
-        if not agent:
-            raise NotFound("agent", agent_id)
-        if agent.owner != user_id:
-            raise Forbidden("agent.not_owner", "Only the agent owner can delete it")
 
-        await agent.delete()
+async def ensure_default_agent_all_workspaces() -> int:
+    """Back-fill the pocketpaw agent for every existing workspace.
 
-    @staticmethod
-    async def discover(workspace_id: str, user_id: str, body: DiscoverRequest) -> list[dict]:
-        """Paginated agent discovery with visibility filtering.
+    Called on every boot so the DM target exists regardless of install age.
+    Returns the number of agents actually created this run.
+    """
+    from ee.cloud.models.workspace import Workspace as _WorkspaceDoc
 
-        Visibility rules:
-        - private: only the requesting user's own agents
-        - workspace: all agents in the workspace
-        - public: all public agents (across workspaces)
-        """
-        filters: dict = {}
+    seeded = 0
+    async for ws in _WorkspaceDoc.find_all():
+        try:
+            _, created = await seed_default_agent(str(ws.id), str(ws.owner))
+            if created:
+                seeded += 1
+        except Exception as exc:
+            logger.warning(
+                "Failed to back-fill pocketpaw agent for ws=%s: %s", ws.id, exc
+            )
+    return seeded
 
-        if body.visibility == "private":
-            filters["workspace"] = workspace_id
-            filters["owner"] = user_id
-        elif body.visibility == "workspace":
-            filters["workspace"] = workspace_id
-        elif body.visibility == "public":
-            filters["visibility"] = "public"
-        else:
-            # Default: user's own agents + workspace-visible + public
-            filters["$or"] = [
-                {"workspace": workspace_id, "owner": user_id},
-                {"workspace": workspace_id, "visibility": "workspace"},
-                {"visibility": "public"},
-            ]
 
-        if body.query:
-            filters["name"] = {"$regex": body.query, "$options": "i"}
-
-        skip = (body.page - 1) * body.page_size
-        agents = await Agent.find(filters).skip(skip).limit(body.page_size).to_list()
-        return [_agent_response(a) for a in agents]
+__all__ = [
+    "create",
+    "delete",
+    "discover",
+    "ensure_default_agent_all_workspaces",
+    "get",
+    "get_by_slug",
+    "get_persona",
+    "get_scopes",
+    "get_workspace",
+    "is_owner_or_workspace_admin",
+    "legacy_ctx",
+    "list_agents",
+    "seed_default_agent",
+    "set_scopes",
+    "suggest_for_mentions",
+    "update",
+]

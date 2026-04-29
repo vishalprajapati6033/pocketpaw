@@ -1,4 +1,4 @@
-from ee.cloud.realtime.events import Event, GroupCreated
+from ee.cloud._core.realtime.events import Event, GroupCreated
 
 
 def test_event_has_type_data_ts():

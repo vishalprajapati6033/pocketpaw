@@ -4,14 +4,13 @@ Providers implement the `FolderProvider` protocol (duck-typed; any class with
 matching methods works). The registry owns a list of MountConfig and routes
 incoming paths to providers via longest-prefix match.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from typing import Protocol, runtime_checkable
 
-from ee.cloud.files.errors import MountNotFound
-from ee.cloud.files.mounts_config import resolve_template
-from ee.cloud.files.schemas import (
+from ee.cloud.files.dto import (
     FileEntry,
     MountConfig,
     Page,
@@ -20,6 +19,8 @@ from ee.cloud.files.schemas import (
     ResolvedMount,
     SearchQuery,
 )
+from ee.cloud.files.errors import MountNotFound
+from ee.cloud.files.mounts_config import resolve_template
 
 
 @runtime_checkable
@@ -36,9 +37,7 @@ class FolderProvider(Protocol):
         filters: dict,
     ) -> Page[FileEntry]: ...
     async def get_entry(self, ctx: RequestContext, entry_id: str) -> FileEntry: ...
-    async def open_stream(
-        self, ctx: RequestContext, entry_id: str
-    ) -> AsyncIterator[bytes]: ...
+    async def open_stream(self, ctx: RequestContext, entry_id: str) -> AsyncIterator[bytes]: ...
     async def upload(self, ctx: RequestContext, mount_path: str, upload: object) -> FileEntry: ...
     async def rename(self, ctx: RequestContext, entry_id: str, new_name: str) -> FileEntry: ...
     async def move(self, ctx: RequestContext, entry_id: str, dest_mount_path: str) -> FileEntry: ...

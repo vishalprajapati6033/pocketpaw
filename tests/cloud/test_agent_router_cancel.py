@@ -15,7 +15,7 @@ from ee.cloud.chat import agent_router as mod
 async def test_stop_with_no_active_run_returns_404(cloud_app_client: AsyncClient):
     resp = await cloud_app_client.post("/cloud/chat/group/g1/agent/stop")
     assert resp.status_code == 404
-    assert resp.json()["detail"]["code"] == "no_active_run"
+    assert resp.json()["error"]["code"] == "active_run.not_found"
 
 
 @pytest.mark.asyncio

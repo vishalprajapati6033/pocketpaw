@@ -13,18 +13,19 @@ at registry construction time (see Task 14/bootstrap) that satisfies the
 and mapping the returned dicts to the expected keys (id, title, mime, size,
 owner_id, workspace_id, created_at, updated_at, tags).
 """
+
 from __future__ import annotations
 
 from typing import Any, Protocol
 
-from ee.cloud.files.providers.base import BaseFolderProvider
-from ee.cloud.files.schemas import (
+from ee.cloud.files.dto import (
     FileEntry,
     Page,
     Permission,
     RequestContext,
     ResolvedMount,
 )
+from ee.cloud.files.providers.base import BaseFolderProvider
 
 
 class _KbService(Protocol):

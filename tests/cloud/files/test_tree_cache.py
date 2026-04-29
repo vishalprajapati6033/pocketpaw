@@ -1,11 +1,11 @@
 """Tests for the /tree 30s in-process cache."""
+
 from __future__ import annotations
 
 import pytest
 
 from ee.cloud.files.abac_config import AbacRuleSet
-from ee.cloud.files.registry import ProviderRegistry
-from ee.cloud.files.schemas import (
+from ee.cloud.files.dto import (
     FileEntry,
     MountConfig,
     Page,
@@ -13,6 +13,7 @@ from ee.cloud.files.schemas import (
     RequestContext,
     ResolvedMount,
 )
+from ee.cloud.files.registry import ProviderRegistry
 from ee.cloud.files.tree import CachedTreeBuilder, invalidate_tree_cache
 
 
@@ -35,6 +36,7 @@ class CountingProvider:
     async def open_stream(self, ctx, entry_id):  # noqa: ANN001
         async def _g():
             yield b""
+
         return _g()
 
     async def upload(self, ctx, mount_path, upload):  # noqa: ANN001

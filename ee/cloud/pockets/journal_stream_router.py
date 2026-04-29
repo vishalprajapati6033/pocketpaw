@@ -219,9 +219,7 @@ async def stream_pocket_journal(
             while not cancel_event.is_set():
                 await asyncio.sleep(POLL_INTERVAL_SEC)
 
-                matched, nonlocal_since = _drain_since(
-                    journal, pocket_id, nonlocal_since
-                )
+                matched, nonlocal_since = _drain_since(journal, pocket_id, nonlocal_since)
                 for seq, entry in matched:
                     yield _encode_entry(entry, seq=seq)
 
@@ -235,7 +233,7 @@ async def stream_pocket_journal(
                             # distinguish "backlog drained" from "connection
                             # dropped". Matches the Fleet router convention
                             # of always framing terminal state explicitly.
-                            yield "event: closed\ndata: {\"reason\": \"idle\"}\n\n"
+                            yield 'event: closed\ndata: {"reason": "idle"}\n\n'
                             return
 
                 # Keepalive comment keeps intermediaries happy when the
@@ -250,9 +248,7 @@ async def stream_pocket_journal(
             # without producing a 500.
             raise
         except Exception:  # pragma: no cover — defensive
-            logger.exception(
-                "pocket journal stream failed for pocket_id=%s", pocket_id
-            )
+            logger.exception("pocket journal stream failed for pocket_id=%s", pocket_id)
             raise
 
     return StreamingResponse(

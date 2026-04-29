@@ -12,12 +12,7 @@ def test_load_rules_empty(tmp_path: Path):
 
 def test_load_rules_parses_shape(tmp_path: Path):
     p = tmp_path / "r.yaml"
-    p.write_text(
-        "rules:\n"
-        "  - tag: confidential\n"
-        "    require:\n"
-        "      role: [admin, owner]\n"
-    )
+    p.write_text("rules:\n  - tag: confidential\n    require:\n      role: [admin, owner]\n")
     rs = load_rules(p)
     assert len(rs.rules) == 1
     r = rs.rules[0]

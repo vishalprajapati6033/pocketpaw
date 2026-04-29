@@ -2,8 +2,8 @@ from datetime import UTC, datetime
 
 import pytest
 
+from ee.cloud.files.dto import RequestContext
 from ee.cloud.files.providers.kb import KbProvider
-from ee.cloud.files.schemas import RequestContext
 from tests.cloud.files.test_provider_contract import ProviderContract
 
 
@@ -56,10 +56,9 @@ async def test_kb_list_entries_scoped_to_workspace():
 async def test_kb_baseline_rbac_workspace_member_reads():
     svc = _FakeKbService([])
     p = KbProvider(service=svc)
-    ctx = RequestContext(
-        user_id="u2", workspace_id="ws_1", attributes={"role": "member"}
-    )
-    from ee.cloud.files.schemas import FileEntry
+    ctx = RequestContext(user_id="u2", workspace_id="ws_1", attributes={"role": "member"})
+    from ee.cloud.files.dto import FileEntry
+
     e = FileEntry(
         id="kb:a",
         provider_id="kb",
@@ -85,7 +84,8 @@ async def test_kb_baseline_rbac_admin_manages():
     svc = _FakeKbService([])
     p = KbProvider(service=svc)
     ctx = RequestContext(user_id="u1", workspace_id="ws_1", attributes={"role": "admin"})
-    from ee.cloud.files.schemas import FileEntry
+    from ee.cloud.files.dto import FileEntry
+
     e = FileEntry(
         id="kb:a",
         provider_id="kb",

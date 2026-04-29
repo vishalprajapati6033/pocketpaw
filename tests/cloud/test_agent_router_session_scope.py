@@ -84,6 +84,9 @@ async def test_smoke_session_scope_all_event_kinds(cloud_app_client: AsyncClient
         target_agent_id="a1",
         agent_ids_in_scope=["a1"],
         pocket_tool_specs=[],
+        session_id=None,
+        pocket_id=None,
+        intent=None,
     )
 
     async def resolver(**_):
@@ -144,6 +147,9 @@ async def test_cancel_session_scope(cloud_app_client: AsyncClient):
         target_agent_id="a1",
         agent_ids_in_scope=["a1"],
         pocket_tool_specs=[],
+        session_id=None,
+        pocket_id=None,
+        intent=None,
     )
 
     async def fake_resolver(**kwargs):

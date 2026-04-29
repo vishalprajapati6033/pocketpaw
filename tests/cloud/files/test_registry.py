@@ -1,8 +1,8 @@
 import pytest
 
+from ee.cloud.files.dto import MountConfig
 from ee.cloud.files.errors import MountNotFound
 from ee.cloud.files.registry import ProviderRegistry
-from ee.cloud.files.schemas import MountConfig
 
 
 def test_register_and_get(ctx):

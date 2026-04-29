@@ -57,6 +57,7 @@ class Session(TimestampedDocument):
             if self.pocket:
                 raise ValueError("group session must not have pocket set")
         elif self.context_type == "session":
+            # Session-scope: single-user agent chat, no group/pocket anchor.
             if self.group:
                 raise ValueError("session-typed session must not have group set")
             if self.pocket:

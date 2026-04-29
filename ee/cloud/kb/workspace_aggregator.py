@@ -49,9 +49,7 @@ class AggregatedArticle:
         }
 
 
-def _row_to_article(
-    row: Any, *, scope: str, agent_id: str | None
-) -> AggregatedArticle | None:
+def _row_to_article(row: Any, *, scope: str, agent_id: str | None) -> AggregatedArticle | None:
     """Normalise one kb-binary row into an AggregatedArticle.
 
     The kb binary returns JSON objects that vary by list/search call. We accept
@@ -62,12 +60,7 @@ def _row_to_article(
     article_id = row.get("id") or row.get("article_id") or row.get("_id")
     if not article_id:
         return None
-    title = (
-        row.get("title")
-        or row.get("name")
-        or row.get("source")
-        or f"article:{article_id}"
-    )
+    title = row.get("title") or row.get("name") or row.get("source") or f"article:{article_id}"
     source = row.get("source") or row.get("origin") or ""
     updated_at = row.get("updated_at") or row.get("updatedAt") or row.get("modified")
     return AggregatedArticle(
@@ -98,14 +91,18 @@ def _dedupe(articles: list[AggregatedArticle]) -> list[AggregatedArticle]:
 def _sort_newest_first(articles: list[AggregatedArticle]) -> list[AggregatedArticle]:
     """Sort by updated_at desc with None last. Stable on ties so scope ordering
     is preserved from the caller."""
-    return sorted(
-        articles,
-        key=lambda a: (a.updated_at is None, a.updated_at or ""),
-        reverse=False,
-    ) if not articles else sorted(
-        articles,
-        key=lambda a: a.updated_at or "",
-        reverse=True,
+    return (
+        sorted(
+            articles,
+            key=lambda a: (a.updated_at is None, a.updated_at or ""),
+            reverse=False,
+        )
+        if not articles
+        else sorted(
+            articles,
+            key=lambda a: a.updated_at or "",
+            reverse=True,
+        )
     )
 
 

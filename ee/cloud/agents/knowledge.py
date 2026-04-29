@@ -74,9 +74,7 @@ class KnowledgeService:
             return {"error": str(exc), "url": url}
 
     @staticmethod
-    async def ingest_file(
-        agent_id: str, file_path: str, source: str | None = None
-    ) -> dict:
+    async def ingest_file(agent_id: str, file_path: str, source: str | None = None) -> dict:
         """Extract file content (PDF/DOCX via Python if needed), pipe to kb.
 
         ``source`` overrides the stored title/source — pass the original
@@ -95,9 +93,7 @@ class KnowledgeService:
                 input_text=text,
             )
         # Text/code files go directly to kb
-        return _kb(
-            "ingest", file_path, "--scope", f"agent:{agent_id}", "--source", label
-        )
+        return _kb("ingest", file_path, "--scope", f"agent:{agent_id}", "--source", label)
 
     @staticmethod
     async def list_articles(agent_id: str) -> list[dict]:

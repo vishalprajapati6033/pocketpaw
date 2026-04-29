@@ -3,11 +3,12 @@
 Subscribers (realtime bridge in Phase 4) consume these via the
 ee.cloud.realtime bus. Phase 1-2 only defines the shapes.
 """
+
 from __future__ import annotations
 
 from pydantic import BaseModel
 
-from ee.cloud.files.schemas import FileEntry
+from ee.cloud.files.dto import FileEntry
 
 
 class FileAdded(BaseModel):

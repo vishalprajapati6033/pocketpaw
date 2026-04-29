@@ -102,9 +102,7 @@ def test_upload_auto_creates_folder_chain(folder_client: TestClient):
     # All three folders should now exist.
     for p in ("/reports", "/reports/2026", "/reports/2026/q2"):
         # creating should 409 because it exists
-        rr = folder_client.post(
-            "/api/v1/uploads/folders", json={"path": p}, headers=_hdr()
-        )
+        rr = folder_client.post("/api/v1/uploads/folders", json={"path": p}, headers=_hdr())
         assert rr.status_code == 409, f"{p}: {rr.status_code} {rr.text}"
 
 
@@ -164,9 +162,7 @@ def test_delete_folder_not_empty_409(folder_client: TestClient):
         return (await FolderStore().get_by_path("w1", "/a")).folder_id
 
     fid = asyncio.get_event_loop().run_until_complete(_fid())
-    r = folder_client.delete(
-        f"/api/v1/uploads/folders/{fid}?cascade=false", headers=_hdr()
-    )
+    r = folder_client.delete(f"/api/v1/uploads/folders/{fid}?cascade=false", headers=_hdr())
     assert r.status_code == 409
     assert r.json()["detail"] == "folder.not_empty"
 
@@ -188,9 +184,7 @@ def test_delete_folder_cascade_softdeletes_files(folder_client: TestClient):
         return (await FolderStore().get_by_path("w1", "/a")).folder_id
 
     fid = asyncio.get_event_loop().run_until_complete(_fid())
-    r = folder_client.delete(
-        f"/api/v1/uploads/folders/{fid}?cascade=true", headers=_hdr()
-    )
+    r = folder_client.delete(f"/api/v1/uploads/folders/{fid}?cascade=true", headers=_hdr())
     assert r.status_code == 204
     # File is soft-deleted → GET 404.
     r2 = folder_client.get(f"/api/v1/uploads/{fid_file}", headers=_hdr())

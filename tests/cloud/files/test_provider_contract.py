@@ -3,6 +3,7 @@
 Concrete providers subclass `ProviderContract` and override `build_provider`
 to yield a ready-to-use provider populated with the supplied test entries.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -11,9 +12,9 @@ from datetime import UTC, datetime
 
 import pytest
 
+from ee.cloud.files.dto import FileEntry, RequestContext
 from ee.cloud.files.errors import ProviderUnsupported
 from ee.cloud.files.registry import FolderProvider
-from ee.cloud.files.schemas import FileEntry, RequestContext
 
 
 def _entry(provider_id: str) -> FileEntry:

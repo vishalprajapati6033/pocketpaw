@@ -1,8 +1,8 @@
 import pytest
 
 from ee.cloud.files.abac_config import AbacRuleSet
+from ee.cloud.files.dto import MountConfig
 from ee.cloud.files.registry import ProviderRegistry
-from ee.cloud.files.schemas import MountConfig
 from ee.cloud.files.tree import build_tree
 from tests.cloud.files.conftest import FakeProvider
 
@@ -11,9 +11,7 @@ from tests.cloud.files.conftest import FakeProvider
 async def test_build_tree_merges_mounts_sorted_by_order(ctx, make_mount):
     reg = ProviderRegistry(
         configs=[
-            MountConfig(
-                provider_id="uploads", mount_template="/My Files", writable=True, order=10
-            ),
+            MountConfig(provider_id="uploads", mount_template="/My Files", writable=True, order=10),
             MountConfig(
                 provider_id="kb",
                 mount_template="/Workspaces/ws_1/KB",

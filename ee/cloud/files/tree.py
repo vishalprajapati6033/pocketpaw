@@ -5,6 +5,7 @@ ruleset at the mount level (mounts may be tagged via their provider but today
 none are — untagged mounts always pass), then merges all resolved mounts into
 a single FolderNode tree by splitting each path on '/'.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -13,8 +14,8 @@ from collections.abc import Callable
 from typing import Literal, overload
 
 from ee.cloud.files.abac_config import AbacRuleSet
+from ee.cloud.files.dto import FolderNode, RequestContext, ResolvedMount
 from ee.cloud.files.registry import FolderProvider, ProviderRegistry
-from ee.cloud.files.schemas import FolderNode, RequestContext, ResolvedMount
 
 
 def _insert(root: FolderNode, mount: ResolvedMount) -> None:
@@ -69,17 +70,13 @@ async def build_tree(
     collect_warnings: bool = False,
 ):
     providers: list[FolderProvider] = registry.all()
-    results = await asyncio.gather(
-        *(p.list_mounts(ctx) for p in providers), return_exceptions=True
-    )
+    results = await asyncio.gather(*(p.list_mounts(ctx) for p in providers), return_exceptions=True)
 
     warnings: list[dict[str, str]] = []
     mounts: list[ResolvedMount] = []
     for provider, res in zip(providers, results, strict=True):
         if isinstance(res, BaseException):
-            warnings.append(
-                {"provider_id": provider.provider_id, "code": "files.provider_error"}
-            )
+            warnings.append({"provider_id": provider.provider_id, "code": "files.provider_error"})
             continue
         mounts.extend(res)
 
@@ -95,15 +92,11 @@ async def build_tree(
 
 # In-process TTL cache for /tree.
 # Key is (user_id, workspace_id). Value is (expires_at, tree, warnings).
-_TREE_CACHE: dict[
-    tuple[str, str | None], tuple[float, FolderNode, list[dict[str, str]]]
-] = {}
+_TREE_CACHE: dict[tuple[str, str | None], tuple[float, FolderNode, list[dict[str, str]]]] = {}
 _TREE_TTL_SECONDS = 30.0
 
 
-def invalidate_tree_cache(
-    *, user_id: str | None = None, workspace_id: str | None = None
-) -> None:
+def invalidate_tree_cache(*, user_id: str | None = None, workspace_id: str | None = None) -> None:
     """Evict cached tree entries.
 
     If both user_id and workspace_id are None, clears the entire cache.

@@ -1,12 +1,12 @@
 from datetime import UTC, datetime
 
 from ee.cloud.files.abac_config import AbacRule, AbacRuleSet
+from ee.cloud.files.dto import FileEntry, Permission, RequestContext
 from ee.cloud.files.permissions import (
     PermissionsEvaluator,
     apply_abac,
     derive_capabilities,
 )
-from ee.cloud.files.schemas import FileEntry, Permission, RequestContext
 
 
 def _entry(tags=None, caps=("read", "download")):
@@ -48,27 +48,21 @@ def test_apply_abac_allows_when_attr_matches():
 def test_derive_capabilities_intersects_rbac_and_mount_writable():
     e = _entry(caps=("read", "download", "rename", "delete"))
     rbac = Permission(read=True, write=False, manage=False)
-    caps = derive_capabilities(
-        entry=e, rbac=rbac, mount_writable=False, abac_allowed=True
-    )
+    caps = derive_capabilities(entry=e, rbac=rbac, mount_writable=False, abac_allowed=True)
     assert set(caps) == {"read", "download"}
 
 
 def test_derive_capabilities_strips_all_when_abac_denies():
     e = _entry(caps=("read", "download"))
     rbac = Permission(read=True, write=True, manage=True)
-    caps = derive_capabilities(
-        entry=e, rbac=rbac, mount_writable=True, abac_allowed=False
-    )
+    caps = derive_capabilities(entry=e, rbac=rbac, mount_writable=True, abac_allowed=False)
     assert caps == []
 
 
 def test_derive_capabilities_requires_manage_for_delete():
     e = _entry(caps=("read", "delete", "rename"))
     rbac = Permission(read=True, write=True, manage=False)
-    caps = derive_capabilities(
-        entry=e, rbac=rbac, mount_writable=True, abac_allowed=True
-    )
+    caps = derive_capabilities(entry=e, rbac=rbac, mount_writable=True, abac_allowed=True)
     assert "delete" not in caps
     assert "rename" in caps
 

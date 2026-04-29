@@ -221,7 +221,7 @@ class TestHistoryReturnsAttachments:
         from ee.cloud.models.message import Attachment, Message
         from ee.cloud.models.session import Session
         from ee.cloud.models.user import User, WorkspaceMembership
-        from ee.cloud.sessions.service import SessionService
+        from ee.cloud.sessions import service as sessions_service
 
         user = User(
             email="u2@example.com",
@@ -260,7 +260,7 @@ class TestHistoryReturnsAttachments:
         )
         await msg.insert()
 
-        result = await SessionService.get_history("hist-1", str(user.id))
+        result = await sessions_service.get_history("hist-1", str(user.id))
         messages = result["messages"]
         assert len(messages) == 1
         assert "attachments" in messages[0]
@@ -272,7 +272,8 @@ class TestHistoryReturnsAttachments:
 class TestListByAgent:
     async def test_filters_sessions_to_given_agent(self, beanie_db) -> None:
         from ee.cloud.models.session import Session
-        from ee.cloud.sessions.service import SessionService
+        from ee.cloud.sessions import service as sessions_service
+        from ee.cloud.sessions.dto import session_to_wire_dict
 
         s_match = Session(
             sessionId="s1",
@@ -300,7 +301,9 @@ class TestListByAgent:
         for s in (s_match, s_other, s_no_agent):
             await s.insert()
 
-        found = await SessionService.list_by_agent("ws-1", "user-1", "agent-A")
+        ctx = sessions_service.legacy_ctx("user-1", "ws-1")
+        items = await sessions_service.list_by_agent(ctx, "ws-1", "agent-A")
+        found = [session_to_wire_dict(s) for s in items]
         assert len(found) == 1
         assert found[0]["sessionId"] == "s1"
         assert found[0]["agent"] == "agent-A"
@@ -309,7 +312,7 @@ class TestListByAgent:
         from datetime import UTC, datetime
 
         from ee.cloud.models.session import Session
-        from ee.cloud.sessions.service import SessionService
+        from ee.cloud.sessions import service as sessions_service
 
         deleted = Session(
             sessionId="s-dead",
@@ -322,5 +325,6 @@ class TestListByAgent:
         )
         await deleted.insert()
 
-        found = await SessionService.list_by_agent("ws-1", "user-1", "agent-A")
-        assert found == []
+        ctx = sessions_service.legacy_ctx("user-1", "ws-1")
+        items = await sessions_service.list_by_agent(ctx, "ws-1", "agent-A")
+        assert items == []

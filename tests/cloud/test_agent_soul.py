@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ee.cloud.agents.schemas import CreateAgentRequest
+from ee.cloud.agents.dto import CreateAgentRequest
 from ee.cloud.models.agent import AgentConfig
 
 

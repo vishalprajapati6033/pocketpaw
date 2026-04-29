@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
-from ee.cloud.pockets.schemas import (
+from ee.cloud.pockets.dto import (
     AddCollaboratorRequest,
     AddWidgetRequest,
     CreatePocketRequest,
@@ -175,7 +175,7 @@ def test_pocket_response_model():
     from datetime import UTC, datetime
 
     now = datetime.now(UTC)
-    from ee.cloud.pockets.schemas import PocketResponse
+    from ee.cloud.pockets.dto import PocketResponse
 
     resp = PocketResponse(
         id="p1",

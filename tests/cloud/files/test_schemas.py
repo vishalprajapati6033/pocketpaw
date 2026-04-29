@@ -1,4 +1,5 @@
 """Schema validation tests."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -6,7 +7,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from ee.cloud.files.schemas import (
+from ee.cloud.files.dto import (
     FileEntry,
     FolderNode,
     MountConfig,

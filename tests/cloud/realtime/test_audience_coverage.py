@@ -12,9 +12,9 @@ import inspect
 
 import pytest
 
-from ee.cloud.realtime import events as ev_mod
-from ee.cloud.realtime.audience import AudienceResolver
-from ee.cloud.realtime.events import Event
+from ee.cloud._core.realtime import events as ev_mod
+from ee.cloud._core.realtime.audience import AudienceResolver
+from ee.cloud._core.realtime.events import Event
 
 
 async def _members(_key: str) -> list[str]:

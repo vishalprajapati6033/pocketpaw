@@ -1,11 +1,12 @@
 """YAML loader for mounts.yaml — sorted + validated."""
+
 from __future__ import annotations
 
 from pathlib import Path
 
 import yaml
 
-from ee.cloud.files.schemas import MountConfig
+from ee.cloud.files.dto import MountConfig
 
 _DEFAULT_PATH = Path(__file__).parent / "mounts.yaml"
 

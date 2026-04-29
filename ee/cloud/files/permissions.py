@@ -10,10 +10,11 @@ derive_capabilities() returns the final UI-facing capability list:
 Only capabilities the provider already declared on the entry survive
 (so a provider can opt-out of a capability regardless of permission).
 """
+
 from __future__ import annotations
 
 from ee.cloud.files.abac_config import AbacRuleSet
-from ee.cloud.files.schemas import (
+from ee.cloud.files.dto import (
     Capability,
     FileEntry,
     Permission,
@@ -31,9 +32,7 @@ def apply_abac(
     ctx: RequestContext,
     rules: AbacRuleSet,
 ) -> list[FileEntry]:
-    return [
-        e for e in entries if rules.allows(tags=e.tags, attributes=ctx.attributes)
-    ]
+    return [e for e in entries if rules.allows(tags=e.tags, attributes=ctx.attributes)]
 
 
 def derive_capabilities(
@@ -59,7 +58,5 @@ class PermissionsEvaluator:
     def __init__(self, rules: AbacRuleSet) -> None:
         self._rules = rules
 
-    def filter(
-        self, *, entries: list[FileEntry], ctx: RequestContext
-    ) -> list[FileEntry]:
+    def filter(self, *, entries: list[FileEntry], ctx: RequestContext) -> list[FileEntry]:
         return apply_abac(entries, ctx=ctx, rules=self._rules)

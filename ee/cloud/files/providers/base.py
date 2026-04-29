@@ -1,10 +1,10 @@
 """Shared provider helpers."""
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from ee.cloud.files.errors import ProviderUnsupported
-from ee.cloud.files.schemas import (
+from ee.cloud.files.dto import (
     FileEntry,
     Page,
     Permission,
@@ -12,6 +12,7 @@ from ee.cloud.files.schemas import (
     ResolvedMount,
     SearchQuery,
 )
+from ee.cloud.files.errors import ProviderUnsupported
 
 
 class BaseFolderProvider:

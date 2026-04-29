@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from ee.cloud.realtime.audience import AudienceResolver
-from ee.cloud.realtime.bus import InProcessBus, get_bus, set_bus
-from ee.cloud.realtime.events import GroupCreated, MessageSent
+from ee.cloud._core.realtime.audience import AudienceResolver
+from ee.cloud._core.realtime.bus import InProcessBus, get_bus, set_bus
+from ee.cloud._core.realtime.events import GroupCreated, MessageSent
 
 
 @pytest.mark.asyncio
@@ -72,7 +72,7 @@ async def test_inprocess_bus_swallows_audience_resolution_errors():
 
 def test_module_singleton_get_raises_if_not_set():
     # Reset singleton state
-    from ee.cloud.realtime import bus as bus_mod
+    from ee.cloud._core.realtime import bus as bus_mod
 
     bus_mod._bus = None  # type: ignore[attr-defined]
     with pytest.raises(AssertionError):
@@ -80,7 +80,7 @@ def test_module_singleton_get_raises_if_not_set():
 
 
 def test_module_singleton_set_then_get():
-    from ee.cloud.realtime import bus as bus_mod
+    from ee.cloud._core.realtime import bus as bus_mod
 
     bus_mod._bus = None  # type: ignore[attr-defined]
     dummy = object()

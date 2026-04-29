@@ -120,7 +120,7 @@ async def test_room_join_rejects_non_member(monkeypatch):
     async def members(_gid: str) -> list[str]:
         return ["someone-else", "another-user"]
 
-    monkeypatch.setattr(router_mod.GroupService, "list_member_ids", members)
+    monkeypatch.setattr(router_mod.group_service, "list_member_ids", members)
     monkeypatch.setattr(router_mod.manager, "join_room", _AsyncMock())
 
     ws = _AsyncMock()
@@ -145,7 +145,7 @@ async def test_room_join_allows_member(monkeypatch):
         return ["u1", "u2"]
 
     join_spy = MagicMock()
-    monkeypatch.setattr(router_mod.GroupService, "list_member_ids", members)
+    monkeypatch.setattr(router_mod.group_service, "list_member_ids", members)
     monkeypatch.setattr(router_mod.manager, "join_room", join_spy)
 
     ws = MagicMock()
@@ -177,7 +177,7 @@ async def test_typing_rejects_non_member(monkeypatch):
 
     send_spy = _AsyncMock()
     start_typing_spy = MagicMock()
-    monkeypatch.setattr(router_mod.GroupService, "list_member_ids", members)
+    monkeypatch.setattr(router_mod.group_service, "list_member_ids", members)
     monkeypatch.setattr(router_mod.manager, "send_to_room", send_spy)
     monkeypatch.setattr(router_mod.manager, "start_typing", start_typing_spy)
 
@@ -207,7 +207,7 @@ async def test_typing_allows_member(monkeypatch):
 
     send_spy = _AsyncMock()
     start_typing_spy = MagicMock()
-    monkeypatch.setattr(router_mod.GroupService, "list_member_ids", members)
+    monkeypatch.setattr(router_mod.group_service, "list_member_ids", members)
     monkeypatch.setattr(router_mod.manager, "send_to_room", send_spy)
     monkeypatch.setattr(router_mod.manager, "start_typing", start_typing_spy)
 
@@ -235,7 +235,7 @@ async def test_read_ack_rejects_non_member(monkeypatch):
         return ["u1", "u2"]
 
     send_spy = _AsyncMock()
-    monkeypatch.setattr(router_mod.GroupService, "list_member_ids", members)
+    monkeypatch.setattr(router_mod.group_service, "list_member_ids", members)
     monkeypatch.setattr(router_mod.manager, "send_to_room", send_spy)
 
     await router_mod._ws_read_ack(
@@ -260,7 +260,7 @@ async def test_read_ack_allows_member(monkeypatch):
         return ["u1", "u2"]
 
     send_spy = _AsyncMock()
-    monkeypatch.setattr(router_mod.GroupService, "list_member_ids", members)
+    monkeypatch.setattr(router_mod.group_service, "list_member_ids", members)
     monkeypatch.setattr(router_mod.manager, "send_to_room", send_spy)
 
     await router_mod._ws_read_ack(

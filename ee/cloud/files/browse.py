@@ -1,13 +1,14 @@
 """Per-mount paginated listing."""
+
 from __future__ import annotations
 
 from typing import Any
 
 from ee.cloud.files.abac_config import AbacRuleSet
+from ee.cloud.files.dto import FileEntry, Page, RequestContext
 from ee.cloud.files.errors import MountNotFound
 from ee.cloud.files.permissions import apply_abac, derive_capabilities
 from ee.cloud.files.registry import ProviderRegistry
-from ee.cloud.files.schemas import FileEntry, Page, RequestContext
 
 
 async def browse_mount(

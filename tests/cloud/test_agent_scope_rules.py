@@ -27,9 +27,7 @@ class TestNormaliseAndValidateScopes:
         assert out == ["org:sales:leads"]
 
     def test_dedupe_preserves_order(self):
-        out = normalise_and_validate_scopes(
-            ["org:sales:*", "org:sales:*", "org:marketing"]
-        )
+        out = normalise_and_validate_scopes(["org:sales:*", "org:sales:*", "org:marketing"])
         assert out == ["org:sales:*", "org:marketing"]
 
     def test_universal_wildcard_rejected(self):

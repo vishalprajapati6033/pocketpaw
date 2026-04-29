@@ -6,10 +6,10 @@
 #   POST /pockets/templates
 #   GET  /pockets/templates
 #
-# PocketService.get is monkey-patched to return a canned pocket dict so
-# the tests stay independent of Beanie + MongoDB. Auth dependencies and
-# the user-template store are overridden via app.dependency_overrides —
-# same pattern the widget-router tests use.
+# ``pockets_service.get`` is monkey-patched to return a canned pocket
+# dict so the tests stay independent of Beanie + MongoDB. Auth
+# dependencies and the user-template store are overridden via
+# ``app.dependency_overrides`` — same pattern the widget-router tests use.
 #
 # What this pins:
 #   1. /export-layout returns a YAML document carrying the pocket's
@@ -31,6 +31,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from ee.cloud.license import require_license
+from ee.cloud.pockets import service as pockets_service
 from ee.cloud.pockets.layouts import (
     UserTemplateStore,
     get_user_template_store,
@@ -38,14 +39,12 @@ from ee.cloud.pockets.layouts import (
     reset_user_template_store,
 )
 from ee.cloud.pockets.router import router
-from ee.cloud.pockets.service import PocketService
 from ee.cloud.shared.deps import (
     current_user_id,
     current_workspace_id,
     require_pocket_edit,
     require_pocket_owner,
 )
-
 
 FAKE_WORKSPACE = "ws-alpha"
 FAKE_USER = "user-alice"
@@ -82,13 +81,16 @@ def _reset_store():
 
 @pytest.fixture
 def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
+    from ee.cloud._core.http import add_error_handler
+
     a = FastAPI()
+    add_error_handler(a)
     a.include_router(router)
 
     async def _fake_get(pocket_id: str, user_id: str) -> dict:
         return dict(POCKET_FIXTURE, _id=pocket_id)
 
-    monkeypatch.setattr(PocketService, "get", staticmethod(_fake_get))
+    monkeypatch.setattr(pockets_service, "get", _fake_get)
 
     # Skip the license/auth guards entirely for the integration tests —
     # the point here is the new surface, not the guard wiring.
@@ -187,9 +189,11 @@ class TestWorkspaceScoping:
         confirm the GET under Alpha returns nothing.
         """
 
-        store: UserTemplateStore = app.dependency_overrides[get_user_template_store]() \
-            if get_user_template_store in app.dependency_overrides \
+        store: UserTemplateStore = (
+            app.dependency_overrides[get_user_template_store]()
+            if get_user_template_store in app.dependency_overrides
             else get_user_template_store()
+        )
 
         from ee.cloud.pockets.layouts import UserPocketTemplate
 
@@ -227,7 +231,9 @@ class TestMalformedYaml:
             },
         )
         assert res.status_code == 400
-        assert "spec" in res.json()["detail"]
+        body = res.json()
+        assert body["error"]["code"] == "layout.invalid_yaml"
+        assert "spec" in body["error"]["message"]
 
 
 # ---------------------------------------------------------------------------

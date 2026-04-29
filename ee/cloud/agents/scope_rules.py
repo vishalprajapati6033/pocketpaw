@@ -63,8 +63,7 @@ def _validate_one(raw: str) -> str:
             continue
         if not _SEGMENT_PATTERN.match(seg):
             raise ScopeValidationError(
-                f"Scope '{raw}' has an invalid segment '{seg}' — "
-                "segments must match [a-z0-9]+"
+                f"Scope '{raw}' has an invalid segment '{seg}' — segments must match [a-z0-9]+"
             )
     return cleaned
 
@@ -89,9 +88,7 @@ def normalise_and_validate_scopes(raw: list[str]) -> list[str]:
     return out
 
 
-def admin_can_assign_scopes(
-    admin_scopes: list[str] | None, requested_scopes: list[str]
-) -> bool:
+def admin_can_assign_scopes(admin_scopes: list[str] | None, requested_scopes: list[str]) -> bool:
     """Return True when ``admin_scopes`` covers every entry in
     ``requested_scopes`` by hierarchical containment.
 

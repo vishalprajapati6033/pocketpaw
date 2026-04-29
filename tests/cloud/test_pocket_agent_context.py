@@ -1,50 +1,38 @@
 """Unit tests for the agent-facing pocket helpers.
 
 These back the in-process MCP tools (``sdk_mcp_pocket.py``) that the cloud
-SSE chat agent uses to read/write the pocket it lives inside. Beanie's
-``Pocket`` model is mocked so the tests stay isolated from Mongo.
+SSE chat agent uses to read/write the pocket it lives inside. Tests use
+the ``mongo_db`` fixture (mongomock-motor) so we exercise the real
+service layer end-to-end instead of mocking Beanie.
 """
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 
-class _FakePocket(SimpleNamespace):
-    """Minimal stand-in for the Beanie ``Pocket`` model.
+async def _make_pocket(**fields):
+    """Insert a fresh Pocket and return it. Defaults match what the
+    agent helpers exercise (workspace, owner, basic shape)."""
+    from ee.cloud.models.pocket import Pocket
 
-    ``model_dump`` mirrors Pydantic's signature closely enough that
-    ``fetch_pocket_for_agent`` and friends serialize correctly, and
-    ``save`` is awaitable so write paths can ``await pocket.save()``.
-    """
-
-    def model_dump(self, **_kwargs):
-        out = {k: v for k, v in self.__dict__.items() if not callable(v)}
-        # Mirror by_alias=True for ``rippleSpec``.
-        if "ripple_spec" in out and "rippleSpec" not in out:
-            out["rippleSpec"] = out.pop("ripple_spec")
-        # Drop None-valued fields the way exclude_none would.
-        return {k: v for k, v in out.items() if v is not None}
-
-    async def save(self):  # noqa: D401 - matches Beanie API
-        return None
-
-
-def _make_pocket(**fields):
     base = dict(
-        id="p1",
+        workspace="w1",
         name="Test Pocket",
         description="",
+        type="custom",
         icon="",
         color="",
-        widgets=[],
-        rippleSpec=None,
+        owner="u1",
+        visibility="workspace",
     )
     base.update(fields)
-    return _FakePocket(**base)
+    doc = Pocket(**base)
+    await doc.insert()
+    return doc
 
 
 # ---------------------------------------------------------------------------
@@ -53,61 +41,46 @@ def _make_pocket(**fields):
 
 
 @pytest.mark.asyncio
-async def test_update_pocket_patches_only_provided_fields():
-    pocket = _make_pocket(name="Old", description="orig", color="#000")
-    with (
-        patch(
-            "ee.cloud.pockets.agent_context._load_pocket",
-            AsyncMock(return_value=(pocket, None)),
-        ),
-        patch(
-            "ee.cloud.ripple_normalizer.normalize_ripple_spec",
-            side_effect=lambda spec: spec,
-        ),
-    ):
-        from ee.cloud.pockets.agent_context import update_pocket_for_agent
+async def test_update_pocket_patches_only_provided_fields(mongo_db):
+    from ee.cloud.models.pocket import Pocket
+    from ee.cloud.pockets.agent_context import update_pocket_for_agent
 
-        result = await update_pocket_for_agent("p1", name="New Name")
+    pocket = await _make_pocket(name="Old", description="orig", color="#000")
+
+    result = await update_pocket_for_agent(str(pocket.id), name="New Name")
 
     assert result["ok"] is True
-    assert pocket.name == "New Name"
-    # Untouched fields stay put.
-    assert pocket.description == "orig"
-    assert pocket.color == "#000"
+    refreshed = await Pocket.get(pocket.id)
+    assert refreshed.name == "New Name"
+    assert refreshed.description == "orig"
+    assert refreshed.color == "#000"
 
 
 @pytest.mark.asyncio
-async def test_update_pocket_normalizes_ripple_spec():
-    pocket = _make_pocket()
-    new_spec = {"version": "1.0", "ui": {"type": "flex", "children": []}}
-    with (
-        patch(
-            "ee.cloud.pockets.agent_context._load_pocket",
-            AsyncMock(return_value=(pocket, None)),
-        ),
-        patch(
-            "ee.cloud.ripple_normalizer.normalize_ripple_spec",
-            side_effect=lambda spec: {"normalized": True, **spec},
-        ),
-    ):
-        from ee.cloud.pockets.agent_context import update_pocket_for_agent
+async def test_update_pocket_normalizes_ripple_spec(mongo_db):
+    from ee.cloud.models.pocket import Pocket
+    from ee.cloud.pockets.agent_context import update_pocket_for_agent
 
-        result = await update_pocket_for_agent("p1", ripple_spec=new_spec)
+    pocket = await _make_pocket()
+    raw_spec = {"type": "flex", "props": {}, "children": []}
+
+    result = await update_pocket_for_agent(str(pocket.id), ripple_spec=raw_spec)
 
     assert result["ok"] is True
-    assert pocket.rippleSpec == {"normalized": True, **new_spec}
+    refreshed = await Pocket.get(pocket.id)
+    # The normalizer wraps a raw UISpec node under ``ui`` and adds an envelope.
+    assert refreshed.rippleSpec is not None
+    assert refreshed.rippleSpec.get("ui", {}).get("type") == "flex"
 
 
 @pytest.mark.asyncio
-async def test_update_pocket_propagates_load_error():
-    with patch(
-        "ee.cloud.pockets.agent_context._load_pocket",
-        AsyncMock(return_value=(None, "pocket xyz not found")),
-    ):
-        from ee.cloud.pockets.agent_context import update_pocket_for_agent
+async def test_update_pocket_propagates_load_error(mongo_db):
+    from ee.cloud.pockets.agent_context import update_pocket_for_agent
 
-        result = await update_pocket_for_agent("xyz", name="anything")
-    assert result == {"ok": False, "error": "pocket xyz not found"}
+    # Valid ObjectId shape but no matching doc.
+    result = await update_pocket_for_agent("507f1f77bcf86cd799439011", name="anything")
+    assert result["ok"] is False
+    assert "not found" in result["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -116,26 +89,25 @@ async def test_update_pocket_propagates_load_error():
 
 
 @pytest.mark.asyncio
-async def test_add_widget_appends_with_defaults():
-    pocket = _make_pocket(widgets=[])
-    spec = {"name": "Sales", "type": "metric", "data": {"value": 10}}
-    with patch(
-        "ee.cloud.pockets.agent_context._load_pocket",
-        AsyncMock(return_value=(pocket, None)),
-    ):
-        from ee.cloud.pockets.agent_context import add_widget_for_agent
+async def test_add_widget_appends_with_defaults(mongo_db):
+    from ee.cloud.models.pocket import Pocket
+    from ee.cloud.pockets.agent_context import add_widget_for_agent
 
-        result = await add_widget_for_agent("p1", spec)
+    pocket = await _make_pocket()
+    spec = {"name": "Sales", "type": "metric", "data": {"value": 10}}
+
+    result = await add_widget_for_agent(str(pocket.id), spec)
 
     assert result["ok"] is True
-    assert len(pocket.widgets) == 1
-    assert pocket.widgets[0].name == "Sales"
-    assert pocket.widgets[0].type == "metric"
-    assert pocket.widgets[0].data == {"value": 10}
+    refreshed = await Pocket.get(pocket.id)
+    assert len(refreshed.widgets) == 1
+    assert refreshed.widgets[0].name == "Sales"
+    assert refreshed.widgets[0].type == "metric"
+    assert refreshed.widgets[0].data == {"value": 10}
 
 
 @pytest.mark.asyncio
-async def test_add_widget_rejects_non_dict_widget():
+async def test_add_widget_rejects_non_dict_widget(mongo_db):
     from ee.cloud.pockets.agent_context import add_widget_for_agent
 
     result = await add_widget_for_agent("p1", "not a dict")  # type: ignore[arg-type]
@@ -149,39 +121,32 @@ async def test_add_widget_rejects_non_dict_widget():
 
 
 @pytest.mark.asyncio
-async def test_update_widget_patches_listed_fields():
-    from ee.cloud.models.pocket import Widget
+async def test_update_widget_patches_listed_fields(mongo_db):
+    from ee.cloud.models.pocket import Pocket, Widget
+    from ee.cloud.pockets.agent_context import update_widget_for_agent
 
     widget = Widget(name="Sales", type="metric", data={"value": 10})
-    widget_id = widget.id
-    pocket = _make_pocket(widgets=[widget])
-    with patch(
-        "ee.cloud.pockets.agent_context._load_pocket",
-        AsyncMock(return_value=(pocket, None)),
-    ):
-        from ee.cloud.pockets.agent_context import update_widget_for_agent
+    pocket = await _make_pocket(widgets=[widget])
 
-        result = await update_widget_for_agent(
-            "p1", widget_id, {"name": "Revenue", "data": {"value": 20}}
-        )
+    result = await update_widget_for_agent(
+        str(pocket.id), widget.id, {"name": "Revenue", "data": {"value": 20}}
+    )
 
     assert result["ok"] is True
-    assert pocket.widgets[0].name == "Revenue"
-    assert pocket.widgets[0].data == {"value": 20}
+    refreshed = await Pocket.get(pocket.id)
+    assert refreshed.widgets[0].name == "Revenue"
+    assert refreshed.widgets[0].data == {"value": 20}
     # Type wasn't in the patch payload, so it stays.
-    assert pocket.widgets[0].type == "metric"
+    assert refreshed.widgets[0].type == "metric"
 
 
 @pytest.mark.asyncio
-async def test_update_widget_returns_error_when_widget_missing():
-    pocket = _make_pocket(widgets=[])
-    with patch(
-        "ee.cloud.pockets.agent_context._load_pocket",
-        AsyncMock(return_value=(pocket, None)),
-    ):
-        from ee.cloud.pockets.agent_context import update_widget_for_agent
+async def test_update_widget_returns_error_when_widget_missing(mongo_db):
+    from ee.cloud.pockets.agent_context import update_widget_for_agent
 
-        result = await update_widget_for_agent("p1", "missing", {"name": "x"})
+    pocket = await _make_pocket()
+
+    result = await update_widget_for_agent(str(pocket.id), "missing", {"name": "x"})
     assert result["ok"] is False
     assert "missing" in result["error"]
 
@@ -192,35 +157,29 @@ async def test_update_widget_returns_error_when_widget_missing():
 
 
 @pytest.mark.asyncio
-async def test_remove_widget_drops_matching_id():
-    from ee.cloud.models.pocket import Widget
+async def test_remove_widget_drops_matching_id(mongo_db):
+    from ee.cloud.models.pocket import Pocket, Widget
+    from ee.cloud.pockets.agent_context import remove_widget_for_agent
 
     keep = Widget(name="Keep", type="text")
     drop = Widget(name="Drop", type="text")
-    pocket = _make_pocket(widgets=[keep, drop])
-    with patch(
-        "ee.cloud.pockets.agent_context._load_pocket",
-        AsyncMock(return_value=(pocket, None)),
-    ):
-        from ee.cloud.pockets.agent_context import remove_widget_for_agent
+    pocket = await _make_pocket(widgets=[keep, drop])
 
-        result = await remove_widget_for_agent("p1", drop.id)
+    result = await remove_widget_for_agent(str(pocket.id), drop.id)
 
     assert result["ok"] is True
-    assert len(pocket.widgets) == 1
-    assert pocket.widgets[0].id == keep.id
+    refreshed = await Pocket.get(pocket.id)
+    assert len(refreshed.widgets) == 1
+    assert refreshed.widgets[0].id == keep.id
 
 
 @pytest.mark.asyncio
-async def test_remove_widget_errors_when_id_unknown():
-    pocket = _make_pocket(widgets=[])
-    with patch(
-        "ee.cloud.pockets.agent_context._load_pocket",
-        AsyncMock(return_value=(pocket, None)),
-    ):
-        from ee.cloud.pockets.agent_context import remove_widget_for_agent
+async def test_remove_widget_errors_when_id_unknown(mongo_db):
+    from ee.cloud.pockets.agent_context import remove_widget_for_agent
 
-        result = await remove_widget_for_agent("p1", "nonexistent")
+    pocket = await _make_pocket()
+
+    result = await remove_widget_for_agent(str(pocket.id), "nonexistent")
     assert result["ok"] is False
     assert "nonexistent" in result["error"]
 
@@ -232,31 +191,18 @@ async def test_remove_widget_errors_when_id_unknown():
 
 
 @pytest.mark.asyncio
-async def test_update_pocket_pushes_mutation_when_sink_attached():
-    import asyncio
-
+async def test_update_pocket_pushes_mutation_when_sink_attached(mongo_db):
     from ee.cloud.chat.agent_service import (
         attach_sse_event_sink,
         detach_sse_event_sink,
     )
+    from ee.cloud.pockets.agent_context import update_pocket_for_agent
 
-    pocket = _make_pocket(name="Old")
+    pocket = await _make_pocket(name="Old")
     queue: asyncio.Queue = asyncio.Queue()
     token = attach_sse_event_sink(queue)
     try:
-        with (
-            patch(
-                "ee.cloud.pockets.agent_context._load_pocket",
-                AsyncMock(return_value=(pocket, None)),
-            ),
-            patch(
-                "ee.cloud.ripple_normalizer.normalize_ripple_spec",
-                side_effect=lambda spec: spec,
-            ),
-        ):
-            from ee.cloud.pockets.agent_context import update_pocket_for_agent
-
-            result = await update_pocket_for_agent("p1", name="Brand New")
+        result = await update_pocket_for_agent(str(pocket.id), name="Brand New")
     finally:
         detach_sse_event_sink(token)
 
@@ -265,28 +211,19 @@ async def test_update_pocket_pushes_mutation_when_sink_attached():
     name, payload = queue.get_nowait()
     assert name == "pocket_mutation"
     assert payload["action"] == "replace"
-    assert payload["pocket_id"] == "p1"
+    assert payload["pocket_id"] == str(pocket.id)
     assert payload["pocket"]["name"] == "Brand New"
 
 
 @pytest.mark.asyncio
-async def test_push_is_noop_without_sink():
+async def test_push_is_noop_without_sink(mongo_db):
     """Calling the mutation helpers outside an SSE stream must not raise."""
-    pocket = _make_pocket(name="Old")
-    with (
-        patch(
-            "ee.cloud.pockets.agent_context._load_pocket",
-            AsyncMock(return_value=(pocket, None)),
-        ),
-        patch(
-            "ee.cloud.ripple_normalizer.normalize_ripple_spec",
-            side_effect=lambda spec: spec,
-        ),
-    ):
-        from ee.cloud.pockets.agent_context import update_pocket_for_agent
+    from ee.cloud.pockets.agent_context import update_pocket_for_agent
 
-        # No sink attached — should still return ok without exceptions.
-        result = await update_pocket_for_agent("p1", name="Whatever")
+    pocket = await _make_pocket(name="Old")
+
+    # No sink attached — should still return ok without exceptions.
+    result = await update_pocket_for_agent(str(pocket.id), name="Whatever")
     assert result["ok"] is True
 
 

@@ -140,9 +140,7 @@ class EEUploadService:
         result = await self._oss.upload_many(files, owner_id, chat_id)
         # Persist each successful record in Mongo with workspace scoping
         for rec in result.uploaded:
-            await self._meta.save_scoped(
-                rec, workspace=workspace, folder_path=folder_path
-            )
+            await self._meta.save_scoped(rec, workspace=workspace, folder_path=folder_path)
             # Only chat-scoped uploads are realtime-broadcastable; avatars
             # and knowledge uploads aren't rendered in chat timelines.
             if rec.chat_id:

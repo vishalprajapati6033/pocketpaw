@@ -19,7 +19,7 @@ from ee.instinct.models import ActionTrigger
 from ee.instinct.store import InstinctStore
 from pocketpaw.connectors.yaml_engine import DirectRESTAdapter, parse_connector_yaml
 
-CONNECTORS_DIR = Path(__file__).parent.parent / "connectors"
+CONNECTORS_DIR = Path(__file__).parent.parent.parent / "connectors"
 
 
 # ---------------------------------------------------------------------------

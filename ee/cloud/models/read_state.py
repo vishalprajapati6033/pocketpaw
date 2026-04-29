@@ -6,7 +6,7 @@ with the group's message_count to derive unread counts without count queries.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pydantic import Field
 from pymongo import ASCENDING, IndexModel
@@ -18,7 +18,7 @@ class ReadState(TimestampedDocument):
     user: str
     group: str
     last_read_message_id: str
-    last_read_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_read_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     mention_unread: int = 0
 
     class Settings:

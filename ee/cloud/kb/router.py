@@ -14,7 +14,7 @@ import logging
 from fastapi import APIRouter, Depends
 
 from ee.cloud.agents.knowledge import _extract_url, _kb
-from ee.cloud.kb.schemas import IngestTextRequest, IngestUrlRequest, LintRequest, SearchRequest
+from ee.cloud.kb.dto import IngestTextRequest, IngestUrlRequest, LintRequest, SearchRequest
 from ee.cloud.license import require_license
 from ee.cloud.shared.deps import (
     current_user_id,

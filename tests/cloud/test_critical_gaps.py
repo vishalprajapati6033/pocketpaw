@@ -10,7 +10,7 @@ import pytest
 
 from pocketpaw.connectors.yaml_engine import DirectRESTAdapter, parse_connector_yaml
 
-CONNECTORS_DIR = Path(__file__).parent.parent / "connectors"
+CONNECTORS_DIR = Path(__file__).parent.parent.parent / "connectors"
 
 
 # --- Gap 1: Real HTTP in DirectRESTAdapter ---

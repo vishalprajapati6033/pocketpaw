@@ -48,6 +48,9 @@ async def test_full_run_emits_chunks_ripple_and_routes_observe_to_target(
         target_agent_id="agent_X",
         agent_ids_in_scope=["agent_X"],
         pocket_tool_specs=[],
+        session_id=None,
+        pocket_id=None,
+        intent=None,
     )
     fake_pool = _FakePool()
 

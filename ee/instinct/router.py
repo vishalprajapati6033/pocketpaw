@@ -383,6 +383,23 @@ class HydratedAuditEntry(BaseModel):
     )
 
 
+# /instinct/audit/export must be declared BEFORE the parameterised
+# /instinct/audit/{audit_id} below — FastAPI routes match in registration
+# order, and a literal-vs-parameter collision would otherwise route
+# /audit/export to the {audit_id} handler and 404.
+@router.get("/instinct/audit/export")
+async def export_audit(
+    pocket_id: str | None = Query(None, description="Filter by pocket ID"),
+):
+    """Export the full instinct audit log as JSON for compliance."""
+    data = await _store().export_audit(pocket_id=pocket_id)
+    return Response(
+        content=data,
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="instinct_audit.json"'},
+    )
+
+
 @router.get("/instinct/audit/{audit_id}", response_model=HydratedAuditEntry)
 async def get_audit_entry(
     audit_id: str,
@@ -458,16 +475,3 @@ async def _fetch_current_fabric(object_ids: list[str]) -> list[dict[str, Any]]:
             },
         )
     return results
-
-
-@router.get("/instinct/audit/export")
-async def export_audit(
-    pocket_id: str | None = Query(None, description="Filter by pocket ID"),
-):
-    """Export the full instinct audit log as JSON for compliance."""
-    data = await _store().export_audit(pocket_id=pocket_id)
-    return Response(
-        content=data,
-        media_type="application/json",
-        headers={"Content-Disposition": 'attachment; filename="instinct_audit.json"'},
-    )

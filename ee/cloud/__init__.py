@@ -13,10 +13,7 @@ Each has router.py (thin), service.py (logic), schemas.py (validation).
 
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse
-
-from ee.cloud.shared.errors import CloudError
+from fastapi import Depends, FastAPI
 
 
 def init_realtime() -> None:
@@ -24,19 +21,19 @@ def init_realtime() -> None:
     import logging
     import os
 
-    from ee.cloud.chat.group_service import GroupService
+    from ee.cloud.chat import group_service
     from ee.cloud.chat.ws import manager as _conn_manager
     from ee.cloud.realtime.audience import AudienceResolver
     from ee.cloud.realtime.bus import InProcessBus, set_bus, set_resolver
-    from ee.cloud.workspace.service import WorkspaceService
+    from ee.cloud.workspace import service as workspace_service
 
     logger = logging.getLogger(__name__)
 
     resolver = AudienceResolver(
-        group_members=GroupService.list_member_ids,
-        workspace_members=WorkspaceService.list_member_ids,
-        workspace_admins=WorkspaceService.list_admin_ids,
-        workspace_peers=WorkspaceService.list_peer_ids,
+        group_members=group_service.list_member_ids,
+        workspace_members=workspace_service.list_member_ids,
+        workspace_admins=workspace_service.list_admin_ids,
+        workspace_peers=workspace_service.list_peer_ids,
     )
 
     mode = os.environ.get("POCKETPAW_REALTIME_BUS", "inprocess").lower()
@@ -52,12 +49,16 @@ def init_realtime() -> None:
 
 
 def mount_cloud(app: FastAPI) -> None:
-    """Mount all cloud domain routers and the error handler."""
+    """Mount all cloud domain routers, the error handler, and the
+    request-timing middleware."""
+    from ee.cloud._core.http import add_error_handler
+    from ee.cloud._core.timing import TimingMiddleware
 
-    # Global error handler
-    @app.exception_handler(CloudError)
-    async def cloud_error_handler(request: Request, exc: CloudError):
-        return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
+    # Request-timing middleware first so it wraps every subsequent route
+    app.add_middleware(TimingMiddleware)
+
+    # Global error handler — extracted to ee.cloud._core.http
+    add_error_handler(app)
 
     # Import and mount domain routers
     from ee.cloud.agents.router import router as agents_router
@@ -113,13 +114,13 @@ def mount_cloud(app: FastAPI) -> None:
     from ee.cloud.auth.core import current_active_user as _current_active_user
     from ee.cloud.files.abac_config import load_rules as _load_abac_rules
     from ee.cloud.files.browse import browse_mount as _browse_mount
+    from ee.cloud.files.dto import RequestContext as _RequestContext
     from ee.cloud.files.errors import FilesError as _FilesError
     from ee.cloud.files.errors import MountNotFound as _MountNotFound
     from ee.cloud.files.mounts_config import load_mounts as _load_mounts
     from ee.cloud.files.providers.kb import KbProvider as _KbProvider
     from ee.cloud.files.providers.uploads import UploadsProvider as _UploadsProvider
     from ee.cloud.files.registry import ProviderRegistry as _ProviderRegistry
-    from ee.cloud.files.schemas import RequestContext as _RequestContext
     from ee.cloud.files.tree import CachedTreeBuilder as _CachedTreeBuilder
     from ee.cloud.models.user import User as _User
     from ee.cloud.uploads.mongo_store import MongoFileStore as _UploadsStore
@@ -135,16 +136,12 @@ def mount_cloud(app: FastAPI) -> None:
     _files_registry.register(_UploadsProvider(store=_UploadsStore()))
     _files_registry.register(_KbProvider(service=_NoopKbService()))
     _files_rules = _load_abac_rules()
-    _files_tree_builder = _CachedTreeBuilder(
-        registry=_files_registry, rules=_files_rules
-    )
+    _files_tree_builder = _CachedTreeBuilder(registry=_files_registry, rules=_files_rules)
 
     def _files_ctx_from_user(user: _User) -> _RequestContext:
         role = ""
         for ws in getattr(user, "workspaces", []) or []:
-            ws_id = getattr(ws, "workspace", None) or getattr(
-                ws, "workspace_id", None
-            )
+            ws_id = getattr(ws, "workspace", None) or getattr(ws, "workspace_id", None)
             if ws_id == user.active_workspace:
                 role = getattr(ws, "role", "") or ""
                 break
@@ -163,12 +160,8 @@ def mount_cloud(app: FastAPI) -> None:
     ) -> dict[str, Any]:
         ctx = _files_ctx_from_user(user)
         if workspace_id is not None and workspace_id != ctx.workspace_id:
-            raise _HTTPException(
-                status_code=403, detail="files.workspace_mismatch"
-            )
-        tree, warnings = await _files_tree_builder.build(
-            ctx=ctx, collect_warnings=True
-        )
+            raise _HTTPException(status_code=403, detail="files.workspace_mismatch")
+        tree, warnings = await _files_tree_builder.build(ctx=ctx, collect_warnings=True)
         return {**tree.model_dump(), "warnings": warnings}
 
     @_files_v2.get("/browse")
@@ -181,9 +174,7 @@ def mount_cloud(app: FastAPI) -> None:
     ) -> dict[str, Any]:
         ctx = _files_ctx_from_user(user)
         if workspace_id is not None and workspace_id != ctx.workspace_id:
-            raise _HTTPException(
-                status_code=403, detail="files.workspace_mismatch"
-            )
+            raise _HTTPException(status_code=403, detail="files.workspace_mismatch")
         variables = {"workspace_id": ctx.workspace_id or ""}
         try:
             page = await _browse_mount(
@@ -197,9 +188,7 @@ def mount_cloud(app: FastAPI) -> None:
                 filters={},
             )
         except _MountNotFound:
-            raise _HTTPException(
-                status_code=404, detail="files.mount_not_found"
-            ) from None
+            raise _HTTPException(status_code=404, detail="files.mount_not_found") from None
         except _FilesError as e:
             raise _HTTPException(status_code=e.http_status, detail=e.code) from e
         return page.model_dump()
@@ -212,7 +201,43 @@ def mount_cloud(app: FastAPI) -> None:
 
     # User search endpoint — used by group settings, pocket sharing
     from ee.cloud.models.user import User as UserModel
-    from ee.cloud.shared.deps import current_user, current_workspace_id
+    from ee.cloud.shared.deps import (
+        current_user,
+        current_workspace_id,
+        require_action_any_workspace,
+    )
+
+    # Admin perf endpoint — dumps the in-memory request-timing buffer
+    # populated by ``_core.timing.TimingMiddleware`` (Phase 0). The Phase 11
+    # perf pass uses this to identify hot endpoints from production load
+    # before optimizing. Gated on ``admin.perf`` (owner-only) — per-route
+    # timing reveals traffic patterns and shouldn't be visible to every
+    # admin in a workspace.
+    @app.get("/api/v1/_admin/perf", tags=["Admin"])
+    async def perf_report(
+        _user: UserModel = Depends(require_action_any_workspace("admin.perf")),
+    ) -> dict[str, Any]:
+        from ee.cloud._core.timing import percentiles, snapshot
+
+        snap = snapshot()
+        return {
+            "endpoints": [
+                {
+                    "method": method,
+                    "path": path,
+                    "count": len(samples),
+                    "p50_ms": round(percentiles(samples)[0.5], 2),
+                    "p95_ms": round(percentiles(samples)[0.95], 2),
+                    "p99_ms": round(percentiles(samples)[0.99], 2),
+                }
+                for (method, path), samples in sorted(
+                    snap.items(),
+                    key=lambda kv: percentiles(kv[1])[0.95],
+                    reverse=True,
+                )
+            ],
+            "total_endpoints": len(snap),
+        }
 
     @app.get("/api/v1/users", tags=["Users"])
     async def search_users(

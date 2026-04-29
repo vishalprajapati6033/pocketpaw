@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
-from ee.cloud.workspace.schemas import (
+from ee.cloud.workspace.dto import (
     CreateInviteRequest,
     CreateWorkspaceRequest,
     UpdateMemberRoleRequest,
