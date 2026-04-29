@@ -978,6 +978,39 @@ async def list_member_ids(group_id: str) -> list[str]:
     return list(group.members) if group else []
 
 
+async def seed_default_group(workspace_id: str, owner_id: str) -> _GroupDoc | None:
+    """Insert the default ``General`` public channel for a freshly-created
+    workspace. Returns the inserted Beanie doc (callers may ignore it).
+
+    Skipped silently if the insert raises so the broader workspace-seed
+    flow keeps going — callers log and proceed.
+    """
+    try:
+        doc = _GroupDoc(
+            workspace=workspace_id,
+            name="General",
+            slug="general",
+            description="Default channel for team discussion",
+            type="public",
+            owner=owner_id,
+            members=[owner_id],
+        )
+        await doc.insert()
+        logger.info(
+            "Default 'General' group seeded in workspace %s (id: %s)",
+            workspace_id,
+            doc.id,
+        )
+        return doc
+    except Exception:
+        logger.warning(
+            "Failed to seed default 'General' group for workspace %s",
+            workspace_id,
+            exc_info=True,
+        )
+        return None
+
+
 async def suggest_channels(workspace_id: str, q: str, *, limit: int = 8) -> list[dict]:
     """Return up to ``limit`` channel-type groups in the workspace that
     match the prefix-ish query. Used by the @-mention picker."""
@@ -1029,7 +1062,9 @@ __all__ = [
     "remove_agent",
     "remove_member",
     "resolve_group_role",
+    "seed_default_group",
     "set_member_role",
+    "suggest_channels",
     "update_agent",
     "update_group",
 ]

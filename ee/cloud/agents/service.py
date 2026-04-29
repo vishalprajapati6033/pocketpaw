@@ -360,15 +360,81 @@ async def _try_eager_soul(agent: Agent) -> None:
         logger.warning("Eager soul creation failed for agent %s", agent.id, exc_info=True)
 
 
+async def seed_default_agent(
+    workspace_id: str, owner_id: str
+) -> tuple[_AgentDoc, bool] | tuple[None, bool]:
+    """Create the default ``pocketpaw`` Agent for a workspace if missing.
+
+    The frontend uses this agent's id as the DM room identifier and Session
+    docs for DMs carry ``agent=<this agent's id>`` so per-agent history works.
+
+    Idempotent. Returns ``(agent, created)`` — ``created`` is ``True`` only
+    when this call inserted a new row, so back-fill paths can report
+    accurate counts. Returns ``(None, False)`` if the insert raises (callers
+    are expected to wrap in try/except).
+    """
+    existing = await _AgentDoc.find_one(
+        _AgentDoc.workspace == workspace_id, _AgentDoc.slug == "pocketpaw"
+    )
+    if existing is not None:
+        return existing, False
+
+    agent = _AgentDoc(
+        workspace=workspace_id,
+        name="PocketPaw",
+        slug="pocketpaw",
+        avatar="",
+        owner=owner_id,
+        visibility="workspace",
+        config=_AgentConfigDoc(
+            system_prompt=(
+                "You are PocketPaw — the default assistant in this workspace. "
+                "Help the user with their tasks. Be concise, accurate, and honest."
+            ),
+            soul_persona="PocketPaw",
+        ),
+    )
+    await agent.insert()
+    logger.info(
+        "Default 'pocketpaw' agent seeded in workspace %s (id: %s)",
+        workspace_id,
+        agent.id,
+    )
+    return agent, True
+
+
+async def ensure_default_agent_all_workspaces() -> int:
+    """Back-fill the pocketpaw agent for every existing workspace.
+
+    Called on every boot so the DM target exists regardless of install age.
+    Returns the number of agents actually created this run.
+    """
+    from ee.cloud.models.workspace import Workspace as _WorkspaceDoc
+
+    seeded = 0
+    async for ws in _WorkspaceDoc.find_all():
+        try:
+            _, created = await seed_default_agent(str(ws.id), str(ws.owner))
+            if created:
+                seeded += 1
+        except Exception as exc:
+            logger.warning(
+                "Failed to back-fill pocketpaw agent for ws=%s: %s", ws.id, exc
+            )
+    return seeded
+
+
 __all__ = [
-    "legacy_ctx",
     "create",
+    "delete",
+    "discover",
+    "ensure_default_agent_all_workspaces",
     "get",
     "get_by_slug",
-    "list_agents",
-    "update",
-    "delete",
     "get_scopes",
+    "legacy_ctx",
+    "list_agents",
+    "seed_default_agent",
     "set_scopes",
-    "discover",
+    "update",
 ]

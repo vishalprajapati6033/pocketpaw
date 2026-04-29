@@ -608,22 +608,71 @@ async def list_peer_ids(user_id: str) -> list[str]:
     return [str(u.id) for u in peers]
 
 
+async def seed_default_workspace(
+    admin_id: str, *, name: str, slug: str
+) -> _WorkspaceDoc | None:
+    """Insert a default workspace with enterprise plan + 50 seats and
+    register ``admin_id`` as the owner. Skips silently if any workspace
+    already exists or if the admin already has a workspace.
+
+    Returns the inserted Beanie doc, or ``None`` if seed was skipped or
+    the insert raised. Bootstrap-time analogue of ``create()`` — the
+    enterprise plan / 50 seats / explicit ``WorkspaceSettings()`` only
+    apply to first-boot seeding.
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    admin = await _UserDoc.get(PydanticObjectId(admin_id))
+    if admin is None:
+        logger.debug("Admin %s not found — skipping workspace seed", admin_id)
+        return None
+    if admin.workspaces:
+        logger.debug("Admin already has workspace(s) — skipping seed")
+        return None
+    existing = await _WorkspaceDoc.find_one()
+    if existing is not None:
+        logger.debug("Workspace already exists — skipping seed")
+        return None
+
+    try:
+        doc = _WorkspaceDoc(
+            name=name,
+            slug=slug,
+            owner=admin_id,
+            plan="enterprise",
+            seats=50,
+            settings=WorkspaceSettings(),
+        )
+        await doc.insert()
+        await _add_member(str(doc.id), admin_id, role="owner", set_active=True)
+        logger.info(
+            "Default workspace seeded: %s (slug: %s, id: %s)", name, slug, doc.id
+        )
+        return doc
+    except Exception:
+        logger.warning("Failed to seed default workspace", exc_info=True)
+        return None
+
+
 __all__ = [
-    "legacy_ctx",
-    "create",
-    "get",
-    "update",
-    "delete",
-    "list_for_user",
-    "list_members",
-    "update_member_role",
-    "remove_member",
-    "list_invites",
-    "create_invite",
-    "validate_invite",
     "accept_invite",
-    "revoke_invite",
-    "list_member_ids",
+    "create",
+    "create_invite",
+    "delete",
+    "get",
+    "legacy_ctx",
     "list_admin_ids",
+    "list_for_user",
+    "list_invites",
+    "list_member_ids",
+    "list_members",
     "list_peer_ids",
+    "remove_member",
+    "revoke_invite",
+    "seed_default_workspace",
+    "update",
+    "update_member_role",
+    "validate_invite",
 ]
