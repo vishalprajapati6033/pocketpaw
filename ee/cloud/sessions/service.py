@@ -519,6 +519,43 @@ async def ensure_for_agent_scope(
     return None
 
 
+async def attach_pocket_to_session_doc(
+    session_mongo_id: str, user_id: str, pocket_id: str
+) -> str | None:
+    """Link an existing session (by Beanie ``_id``) to a freshly-created
+    pocket. The session's ``pocket`` and ``context_type`` are updated and
+    persisted. Returns the session's ``_id`` (as str) on success, ``None``
+    if the session is missing, owned by someone else, or the save failed.
+
+    Used by the in-process MCP ``create_pocket`` tool so the chat that
+    built the pocket shows up in that pocket's session list — without
+    this the conversation gets orphaned at the workspace level.
+    """
+    try:
+        doc = await _SessionDoc.get(PydanticObjectId(session_mongo_id))
+    except Exception:
+        logger.warning(
+            "attach_pocket_to_session_doc: invalid session id %s",
+            session_mongo_id,
+            exc_info=True,
+        )
+        return None
+    if doc is None or doc.owner != user_id:
+        return None
+    doc.pocket = pocket_id
+    doc.context_type = "pocket"
+    try:
+        await doc.save()
+    except Exception:
+        logger.warning(
+            "attach_pocket_to_session_doc: save failed for %s",
+            session_mongo_id,
+            exc_info=True,
+        )
+        return None
+    return str(doc.id)
+
+
 async def set_title(session_id: str, title: str) -> bool:
     """Write ``title`` to ``Session.title`` and broadcast ``SessionUpdated``.
 
@@ -582,6 +619,7 @@ async def touch(session_id: str) -> None:
 
 
 __all__ = [
+    "attach_pocket_to_session_doc",
     "create",
     "delete",
     "ensure_for_agent_scope",

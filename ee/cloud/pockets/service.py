@@ -528,25 +528,216 @@ async def remove_agent(pocket_id: str, user_id: str, agent_id: str) -> dict:
     return pocket_to_wire_dict(updated)
 
 
+# ---------------------------------------------------------------------------
+# Agent-facing helpers — back the in-process MCP write tools the cloud
+# SSE chat agent uses to edit the pocket it lives inside. The MCP shape
+# wrapper (``{ok, error}`` returns + SSE event push) lives in
+# ``pockets/agent_context.py``; the Beanie ops live here.
+# ---------------------------------------------------------------------------
+
+
+_AGENT_INVISIBLE_FIELDS = (
+    "share_link_token",
+    "shared_with",
+    "team",
+    "agents",
+)
+
+
+def _agent_view_dict(doc: _PocketDoc) -> dict:
+    """Json-safe pocket dict with secrets/relationship fields stripped.
+
+    Used by the in-process MCP tool channel — same shape every
+    ``agent_*`` helper returns on success.
+    """
+    import json
+
+    raw = doc.model_dump(mode="json", by_alias=True, exclude_none=True)
+    for k in _AGENT_INVISIBLE_FIELDS:
+        raw.pop(k, None)
+    return json.loads(json.dumps(raw, default=str))
+
+
+async def _agent_load_doc(pocket_id: str) -> tuple[_PocketDoc | None, str | None]:
+    if not pocket_id or not isinstance(pocket_id, str):
+        return None, "pocket_id is required (string)"
+    try:
+        doc = await _PocketDoc.get(PydanticObjectId(pocket_id))
+    except Exception as exc:  # noqa: BLE001
+        return None, f"could not load pocket {pocket_id}: {exc}"
+    if doc is None:
+        return None, f"pocket {pocket_id} not found"
+    return doc, None
+
+
+async def agent_view(pocket_id: str) -> tuple[dict | None, str | None]:
+    """Read-only fetch — returns ``(view_dict, None)`` on success or
+    ``(None, error)`` on failure."""
+    doc, err = await _agent_load_doc(pocket_id)
+    if err:
+        return None, err
+    return _agent_view_dict(doc), None
+
+
+async def agent_update(
+    pocket_id: str,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    icon: str | None = None,
+    color: str | None = None,
+    ripple_spec: dict | None = None,
+) -> tuple[dict | None, str | None]:
+    """Patch top-level pocket fields. Only fields the caller explicitly
+    provides are touched. ``ripple_spec`` is normalized."""
+    doc, err = await _agent_load_doc(pocket_id)
+    if err:
+        return None, err
+    if name is not None:
+        doc.name = name
+    if description is not None:
+        doc.description = description
+    if icon is not None:
+        doc.icon = icon
+    if color is not None:
+        doc.color = color
+    if ripple_spec is not None:
+        doc.rippleSpec = normalize_ripple_spec(ripple_spec)
+    try:
+        await doc.save()
+    except Exception as exc:  # noqa: BLE001
+        return None, f"save failed: {exc}"
+    return _agent_view_dict(doc), None
+
+
+async def agent_add_widget(
+    pocket_id: str, widget: dict
+) -> tuple[dict | None, str | None]:
+    if not isinstance(widget, dict):
+        return None, "widget must be a JSON object"
+    doc, err = await _agent_load_doc(pocket_id)
+    if err:
+        return None, err
+    try:
+        new_widget = _build_widget_doc(widget)
+    except Exception as exc:  # noqa: BLE001
+        return None, f"invalid widget spec: {exc}"
+    doc.widgets.append(new_widget)
+    try:
+        await doc.save()
+    except Exception as exc:  # noqa: BLE001
+        return None, f"save failed: {exc}"
+    return _agent_view_dict(doc), None
+
+
+async def agent_update_widget(
+    pocket_id: str, widget_id: str, fields: dict
+) -> tuple[dict | None, str | None]:
+    if not isinstance(fields, dict):
+        return None, "fields must be a JSON object"
+    doc, err = await _agent_load_doc(pocket_id)
+    if err:
+        return None, err
+    widget = next((w for w in doc.widgets if w.id == widget_id), None)
+    if widget is None:
+        return None, f"widget {widget_id} not found in pocket {pocket_id}"
+    for k in ("name", "type", "icon", "color", "span", "data", "assignedAgent"):
+        if k in fields:
+            setattr(widget, k, fields[k])
+    if "config" in fields and isinstance(fields["config"], dict):
+        widget.config = fields["config"]
+    if "props" in fields and isinstance(fields["props"], dict):
+        widget.props = fields["props"]
+    if "dataSourceType" in fields:
+        widget.dataSourceType = fields["dataSourceType"]
+    try:
+        await doc.save()
+    except Exception as exc:  # noqa: BLE001
+        return None, f"save failed: {exc}"
+    return _agent_view_dict(doc), None
+
+
+async def agent_remove_widget(
+    pocket_id: str, widget_id: str
+) -> tuple[dict | None, str | None]:
+    doc, err = await _agent_load_doc(pocket_id)
+    if err:
+        return None, err
+    before = len(doc.widgets)
+    doc.widgets = [w for w in doc.widgets if w.id != widget_id]
+    if len(doc.widgets) == before:
+        return None, f"widget {widget_id} not found in pocket {pocket_id}"
+    try:
+        await doc.save()
+    except Exception as exc:  # noqa: BLE001
+        return None, f"save failed: {exc}"
+    return _agent_view_dict(doc), None
+
+
+async def agent_create(
+    *,
+    workspace_id: str,
+    owner_id: str,
+    name: str,
+    description: str = "",
+    type_: str = "custom",
+    icon: str = "",
+    color: str = "",
+    ripple_spec: dict | None = None,
+) -> tuple[dict | None, str | None, str | None]:
+    """Insert a brand-new pocket owned by ``owner_id`` in ``workspace_id``.
+
+    Returns ``(view_dict, pocket_id, None)`` on success or
+    ``(None, None, error)`` on failure. Returning the id alongside the
+    view lets the caller link sessions / push SSE events without
+    re-parsing the dict.
+    """
+    if not name:
+        return None, None, "name is required"
+    normalized = normalize_ripple_spec(ripple_spec) if ripple_spec else None
+    try:
+        doc = _PocketDoc(
+            workspace=workspace_id,
+            name=name,
+            description=description,
+            type=type_,
+            icon=icon,
+            color=color,
+            owner=owner_id,
+            rippleSpec=normalized,
+            visibility="workspace",
+        )
+        await doc.insert()
+    except Exception as exc:  # noqa: BLE001
+        return None, None, f"insert failed: {exc}"
+    return _agent_view_dict(doc), str(doc.id), None
+
+
 __all__ = [
-    "create",
-    "list_pockets",
-    "get",
-    "update",
-    "delete",
-    "create_from_ripple_spec",
+    "access_via_share_link",
+    "add_agent",
+    "add_collaborator",
+    "add_team_member",
     "add_widget",
-    "update_widget",
+    "agent_add_widget",
+    "agent_create",
+    "agent_remove_widget",
+    "agent_update",
+    "agent_update_widget",
+    "agent_view",
+    "create",
+    "create_from_ripple_spec",
+    "delete",
+    "generate_share_link",
+    "get",
+    "list_pockets",
+    "remove_agent",
+    "remove_collaborator",
+    "remove_team_member",
     "remove_widget",
     "reorder_widgets",
-    "generate_share_link",
     "revoke_share_link",
+    "update",
     "update_share_link",
-    "access_via_share_link",
-    "add_collaborator",
-    "remove_collaborator",
-    "add_team_member",
-    "remove_team_member",
-    "add_agent",
-    "remove_agent",
+    "update_widget",
 ]

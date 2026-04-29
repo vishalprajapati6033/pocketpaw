@@ -438,8 +438,12 @@ source_modules = [
     "ee.cloud.pockets.router",
     "ee.cloud.pockets.dto",
     "ee.cloud.pockets.domain",
+    "ee.cloud.pockets.agent_context",
 ]
-forbidden_modules = ["ee.cloud.models.pocket"]
+forbidden_modules = [
+    "ee.cloud.models.pocket",
+    "ee.cloud.models.session",
+]
 
 [[tool.importlinter.contracts]]
 name = "Notifications — Beanie writes only from service.py"
