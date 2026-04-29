@@ -570,6 +570,45 @@ async def _agent_load_doc(pocket_id: str) -> tuple[_PocketDoc | None, str | None
     return doc, None
 
 
+async def has_edit_access(pocket_id: str, user_id: str) -> bool:
+    """Return ``True`` if ``user_id`` may edit the pocket — owner,
+    explicit shared_with, or workspace-visible. Raises ``NotFound`` if
+    the pocket doesn't exist.
+
+    Used by the ``require_pocket_edit`` FastAPI guard so the Pocket
+    Beanie load stays inside the service.
+    """
+    try:
+        pocket_oid = PydanticObjectId(pocket_id)
+    except Exception as exc:  # noqa: BLE001
+        raise NotFound("pocket", pocket_id) from exc
+
+    doc = await _PocketDoc.get(pocket_oid)
+    if doc is None:
+        raise NotFound("pocket", pocket_id)
+
+    if doc.owner == user_id:
+        return True
+    if user_id in (doc.shared_with or []):
+        return True
+    return doc.visibility == "workspace"
+
+
+async def is_owner(pocket_id: str, user_id: str) -> bool:
+    """Return ``True`` only if ``user_id`` owns the pocket. Raises
+    ``NotFound`` if the pocket doesn't exist. Used by the
+    ``require_pocket_owner`` FastAPI guard."""
+    try:
+        pocket_oid = PydanticObjectId(pocket_id)
+    except Exception as exc:  # noqa: BLE001
+        raise NotFound("pocket", pocket_id) from exc
+
+    doc = await _PocketDoc.get(pocket_oid)
+    if doc is None:
+        raise NotFound("pocket", pocket_id)
+    return doc.owner == user_id
+
+
 async def agent_view(pocket_id: str) -> tuple[dict | None, str | None]:
     """Read-only fetch — returns ``(view_dict, None)`` on success or
     ``(None, error)`` on failure."""
@@ -730,6 +769,8 @@ __all__ = [
     "delete",
     "generate_share_link",
     "get",
+    "has_edit_access",
+    "is_owner",
     "list_pockets",
     "remove_agent",
     "remove_collaborator",

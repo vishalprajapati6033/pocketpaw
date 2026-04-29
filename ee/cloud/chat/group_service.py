@@ -978,6 +978,18 @@ async def list_member_ids(group_id: str) -> list[str]:
     return list(group.members) if group else []
 
 
+async def resolve_role_for_id(group_id: str, user_id: str) -> GroupRole:
+    """Load a group by id and resolve the caller's ``GroupRole``.
+
+    Used by the ``require_group_action`` FastAPI dependency so the
+    Beanie load stays inside the service. Raises ``NotFound`` if the
+    group is missing and ``Forbidden`` if the user has no membership
+    (mirroring :func:`resolve_group_role`).
+    """
+    group = await _get_group_or_404(group_id)
+    return resolve_group_role(group, user_id)
+
+
 async def get_for_dispatch(group_id: str) -> _GroupDomain | None:
     """Load the domain group for cross-domain orchestrators (the agent
     bridge fan-out, audience resolvers). Returns ``None`` if missing —
@@ -1068,6 +1080,7 @@ __all__ = [
     "list_member_ids",
     "get_for_dispatch",
     "remove_agent",
+    "resolve_role_for_id",
     "remove_member",
     "resolve_group_role",
     "seed_default_group",

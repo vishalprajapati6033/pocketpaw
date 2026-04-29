@@ -25,6 +25,7 @@ import asyncio
 import json
 import logging
 import os
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 
@@ -45,7 +46,6 @@ from ee.cloud.chat.schemas import (
 )
 from ee.cloud.chat.ws import PRESENCE_GRACE_SECONDS, manager
 from ee.cloud.license import get_license, require_license
-from ee.cloud.models.user import User
 from ee.cloud.realtime.emit import emit
 from ee.cloud.realtime.events import PresenceOffline, PresenceOnline
 from ee.cloud.shared.deps import (
@@ -75,7 +75,7 @@ _licensed = APIRouter(prefix="/chat", dependencies=[Depends(require_license)])
 @_licensed.post("/groups")
 async def create_group(
     body: CreateGroupRequest,
-    user: User = Depends(current_user),
+    user: Any = Depends(current_user),
     workspace_id: str = Depends(current_workspace_id),
 ):
     # Workspace-visible rooms (channels/public) are admin-only; private and DM
@@ -393,46 +393,22 @@ async def suggest_mentions(
     workspace_id: str = Depends(current_workspace_id),
     user_id: str = Depends(current_user_id),
 ):
-    from ee.cloud.models.agent import Agent as AgentModel
-    from ee.cloud.models.user import User
+    from ee.cloud.agents import service as agents_service
+    from ee.cloud.auth import service as auth_service
 
     kinds = {k.strip() for k in types.split(",") if k.strip()}
     q_lower = q.lower()
     results: list[dict] = []
 
     if "user" in kinds:
-        query: dict = {"workspaces.workspace": workspace_id}
-        if q:
-            query["$or"] = [
-                {"full_name": {"$regex": q, "$options": "i"}},
-                {"email": {"$regex": q, "$options": "i"}},
-            ]
-        users = await User.find(query).limit(8).to_list()
-        for u in users:
-            results.append(
-                {
-                    "type": "user",
-                    "id": str(u.id),
-                    "display_name": u.full_name or u.email,
-                }
-            )
+        results.extend(
+            await auth_service.suggest_workspace_members(workspace_id, q)
+        )
 
     if "agent" in kinds:
-        aquery: dict = {"workspace": workspace_id}
-        if q:
-            aquery["$or"] = [
-                {"name": {"$regex": q, "$options": "i"}},
-                {"slug": {"$regex": q, "$options": "i"}},
-            ]
-        agents = await AgentModel.find(aquery).limit(8).to_list()
-        for a in agents:
-            results.append(
-                {
-                    "type": "agent",
-                    "id": str(a.id),
-                    "display_name": a.name or a.slug,
-                }
-            )
+        results.extend(
+            await agents_service.suggest_for_mentions(workspace_id, q)
+        )
 
     if "channel" in kinds:
         results.extend(await group_service.suggest_channels(workspace_id, q))

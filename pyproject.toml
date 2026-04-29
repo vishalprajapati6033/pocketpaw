@@ -513,6 +513,18 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
+name = "Shared deps — guard via entity services only"
+type = "forbidden"
+allow_indirect_imports = "true"
+source_modules = ["ee.cloud.shared.deps"]
+forbidden_modules = [
+    "ee.cloud.models.user",
+    "ee.cloud.models.group",
+    "ee.cloud.models.agent",
+    "ee.cloud.models.pocket",
+]
+
+[[tool.importlinter.contracts]]
 name = "Chat — Beanie writes only from service.py"
 type = "forbidden"
 allow_indirect_imports = "true"
@@ -526,4 +538,6 @@ forbidden_modules = [
     "ee.cloud.models.group",
     "ee.cloud.models.message",
     "ee.cloud.models.read_state",
+    "ee.cloud.models.user",
+    "ee.cloud.models.agent",
 ]

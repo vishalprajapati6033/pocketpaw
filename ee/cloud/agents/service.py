@@ -360,6 +360,69 @@ async def _try_eager_soul(agent: Agent) -> None:
         logger.warning("Eager soul creation failed for agent %s", agent.id, exc_info=True)
 
 
+async def suggest_for_mentions(
+    workspace_id: str, q: str, *, limit: int = 8
+) -> list[dict]:
+    """Return up to ``limit`` agents matching ``q`` against name / slug.
+    Used by the chat ``/mentions/suggest`` endpoint."""
+    aquery: dict = {"workspace": workspace_id}
+    if q:
+        aquery["$or"] = [
+            {"name": {"$regex": q, "$options": "i"}},
+            {"slug": {"$regex": q, "$options": "i"}},
+        ]
+    docs = await _AgentDoc.find(aquery).limit(limit).to_list()
+    return [
+        {
+            "type": "agent",
+            "id": str(a.id),
+            "display_name": a.name or a.slug,
+        }
+        for a in docs
+    ]
+
+
+async def is_owner_or_workspace_admin(agent_id: str, user: Any) -> bool:
+    """Return ``True`` if ``user`` owns the agent or is an admin in the
+    agent's workspace. Raises ``NotFound`` if the agent doesn't exist.
+
+    Used by the ``require_agent_owner_or_admin`` FastAPI guard so the
+    Agent Beanie load stays inside the service.
+    """
+    from pocketpaw.ee.guards.deps import resolve_workspace_role
+    from pocketpaw.ee.guards.rbac import Forbidden as GuardForbidden
+    from pocketpaw.ee.guards.rbac import WorkspaceRole
+
+    try:
+        agent_oid = PydanticObjectId(agent_id)
+    except Exception as exc:  # noqa: BLE001
+        raise NotFound("agent", agent_id) from exc
+
+    doc = await _AgentDoc.get(agent_oid)
+    if doc is None:
+        raise NotFound("agent", agent_id)
+
+    user_id = str(user.id)
+    if doc.owner == user_id:
+        return True
+    try:
+        role = resolve_workspace_role(user, doc.workspace)
+    except GuardForbidden:
+        return False
+    return role.level >= WorkspaceRole.ADMIN.level
+
+
+async def get_workspace(agent_id: str) -> str | None:
+    """Return the agent's workspace id, or ``None`` if the agent doesn't
+    exist. Used by the deny-log path of ``require_agent_owner_or_admin``."""
+    try:
+        agent_oid = PydanticObjectId(agent_id)
+    except Exception:
+        return None
+    doc = await _AgentDoc.get(agent_oid)
+    return doc.workspace if doc else None
+
+
 async def get_persona(agent_id: str) -> str | None:
     """Return the agent's persona snippet for relevance/smart checks.
 
@@ -449,9 +512,12 @@ __all__ = [
     "get_by_slug",
     "get_persona",
     "get_scopes",
+    "get_workspace",
+    "is_owner_or_workspace_admin",
     "legacy_ctx",
     "list_agents",
     "seed_default_agent",
     "set_scopes",
+    "suggest_for_mentions",
     "update",
 ]

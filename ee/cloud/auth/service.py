@@ -91,9 +91,32 @@ async def set_avatar_path(ctx: RequestContext, avatar_path: str) -> AuthUser:
     return await update_profile(ctx, avatar=avatar_path)
 
 
+async def suggest_workspace_members(
+    workspace_id: str, q: str, *, limit: int = 8
+) -> list[dict]:
+    """Return up to ``limit`` workspace members matching ``q`` against
+    full_name / email. Used by the chat ``/mentions/suggest`` endpoint."""
+    query: dict = {"workspaces.workspace": workspace_id}
+    if q:
+        query["$or"] = [
+            {"full_name": {"$regex": q, "$options": "i"}},
+            {"email": {"$regex": q, "$options": "i"}},
+        ]
+    docs = await _UserDoc.find(query).limit(limit).to_list()
+    return [
+        {
+            "type": "user",
+            "id": str(u.id),
+            "display_name": u.full_name or u.email,
+        }
+        for u in docs
+    ]
+
+
 __all__ = [
     "get_profile",
-    "update_profile",
     "set_active_workspace",
     "set_avatar_path",
+    "suggest_workspace_members",
+    "update_profile",
 ]
