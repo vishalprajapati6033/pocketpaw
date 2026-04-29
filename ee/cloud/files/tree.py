@@ -14,8 +14,8 @@ from collections.abc import Callable
 from typing import Literal, overload
 
 from ee.cloud.files.abac_config import AbacRuleSet
-from ee.cloud.files.registry import FolderProvider, ProviderRegistry
 from ee.cloud.files.dto import FolderNode, RequestContext, ResolvedMount
+from ee.cloud.files.registry import FolderProvider, ProviderRegistry
 
 
 def _insert(root: FolderNode, mount: ResolvedMount) -> None:

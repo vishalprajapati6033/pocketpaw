@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ee.cloud.files.providers.uploads import UploadsProvider
 from ee.cloud.files.dto import RequestContext
+from ee.cloud.files.providers.uploads import UploadsProvider
 from tests.cloud.files.test_provider_contract import ProviderContract
 
 

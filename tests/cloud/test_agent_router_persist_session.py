@@ -33,9 +33,7 @@ async def test_persist_user_message_session_scope(monkeypatch):
         async def insert(self):
             return None
 
-    import ee.cloud.models.message as message_mod
-
-    monkeypatch.setattr(message_mod, "Message", _StubMessage)
+    monkeypatch.setattr("ee.cloud.chat.message_service._MessageDoc", _StubMessage)
 
     body = CloudAgentChatRequest(content="hello session")
     mid = await _persist_user_message(_session_ctx(), body)
@@ -67,10 +65,8 @@ async def test_persist_assistant_message_session_scope(monkeypatch):
         def __init__(self, **kw):
             self.__dict__.update(kw)
 
-    import ee.cloud.models.message as message_mod
-
-    monkeypatch.setattr(message_mod, "Message", _StubMessage)
-    monkeypatch.setattr(message_mod, "Attachment", _StubAttachment)
+    monkeypatch.setattr("ee.cloud.chat.message_service._MessageDoc", _StubMessage)
+    monkeypatch.setattr("ee.cloud.chat.message_service._AttachmentDoc", _StubAttachment)
 
     await _persist_assistant_message(_session_ctx(), "hi back", [])
 

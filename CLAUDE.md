@@ -179,6 +179,47 @@ The web dashboard (`frontend/`) is vanilla JS/CSS/HTML served via FastAPI+Jinja2
 - **Entry point**: `pocketpaw.__main__:main`
 - **Lazy imports**: Agent backends are imported inside `AgentRouter._initialize_agent()` to avoid loading unused dependencies
 
+## ee/cloud Code Rules
+
+Applies to code under `ee/cloud/`. Local-runtime code (`src/pocketpaw/`)
+uses different patterns; these rules don't apply there.
+
+1. **Each entity has a 4-file shape.** `<entity>/{domain.py, dto.py, service.py, router.py}`. No `repositories.py`. The service IS the repository — Beanie writes are inline.
+
+2. **Writes go through `<entity>/service.py`.** Never import Beanie document classes (`ee.cloud.models.*`) from routers, DTOs, domains, channels, tools, or agents. Only `<entity>/service.py` may import its own `models.<entity>`.
+
+3. **Domain enforces multi-tenancy at construction.** `domain.py` value objects are frozen with required tenancy fields (`workspace_id`, `scope`, etc.) — no defaults. Constructing a domain object without tenancy info is a type error.
+
+4. **DTOs separate request and response.** `dto.py` defines distinct `<Op>Request` and `<Entity>Response` classes. Never reuse one model for both input and output — fields leak silently.
+
+5. **Service signature.**
+   ```python
+   async def op(ctx: RequestContext, body: <RequestSchema>) -> <ResponseSchema>:
+   ```
+   Module-level `async def`, not a class. Multi-tenancy via `ctx.workspace_id` — never accept `workspace_id` as a separate parameter.
+
+6. **Validate at entry.** First line of every service function: `body = <RequestSchema>.model_validate(body)`. FastAPI parses HTTP bodies; services re-parse for internal callers (bus handlers, MCP tools, CLI, jobs).
+
+7. **Tenant filter on every read.** Every `_FooDoc.find(...)` / `find_one(...)` call includes `workspace=ctx.workspace_id` (or has an explicit `# global-read: <reason>` comment). Domain-level required fields catch construction-time leaks; this rule catches read-path leaks.
+
+8. **Mapping via Pydantic, not hand-rolled helpers.** Use `Domain.model_validate(doc, from_attributes=True)` and `Response.model_validate(domain, from_attributes=True)` where field names align. When the wire format renames or transforms fields (e.g., camelCase ↔ snake_case, nested → flat), keep mapping as a private helper *in the same `service.py`* rather than a separate file.
+
+9. **Emit on every write.** State-mutating service functions end with `await emit(<Event>(data=...))` — or have an explicit `# no-event: <reason>` comment on the line before return. Silent mutations desync downstream handlers (search index, soul memory, ripple invalidation).
+
+10. **Errors via CloudError.** Use `_core.errors` subclasses (`NotFound`, `Forbidden`, `Conflict`, etc.). Never `raise HTTPException` in services or routers — `_core.http` maps `CloudError` to JSON.
+
+11. **Prefer events over transactions.** Only money, identity, and permission flows reach for `session.start_transaction()`.
+
+### Touch-time migration rule
+
+When you touch any `ee/cloud/<entity>/*.py` file for any reason — bug fix, feature add, refactor — bring that entity onto the 4-file shape in the same PR:
+
+1. Check whether `<entity>/{domain.py, dto.py, service.py, router.py}` exists with no `repositories.py`. If not, refactor on the way out.
+2. Add `<Entity>Document` to the failing list in the `import-linter` contract; add `<entity>/router.py`, `<entity>/dto.py`, `<entity>/domain.py` to the source-modules list.
+3. Ship the original change + the consolidation in the same PR.
+
+`pockets/` is the canonical reference. Copy its shape.
+
 ---
 
 ## Desktop Client (`client/`)

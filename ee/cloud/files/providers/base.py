@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from ee.cloud.files.errors import ProviderUnsupported
 from ee.cloud.files.dto import (
     FileEntry,
     Page,
@@ -13,6 +12,7 @@ from ee.cloud.files.dto import (
     ResolvedMount,
     SearchQuery,
 )
+from ee.cloud.files.errors import ProviderUnsupported
 
 
 class BaseFolderProvider:

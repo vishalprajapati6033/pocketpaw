@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
 
 
@@ -51,29 +49,29 @@ def test_init_realtime_falls_back_to_inprocess_for_unsupported_bus(monkeypatch, 
 
 
 @pytest.mark.asyncio
-async def test_group_list_member_ids_returns_members_field():
-    """Phase 10 routes list_member_ids through ``IGroupRepository.get`` so the
-    realtime audience lookup avoids a Beanie call from the service layer."""
-    from tests.cloud.chat.conftest import FakeGroupRepo, make_domain_group
+async def test_group_list_member_ids_returns_members_field(mongo_db):
+    """``list_member_ids`` is the realtime audience lookup — must read
+    members from the persisted Group doc."""
+    from ee.cloud.chat import group_service
+    from ee.cloud.models.group import Group as _GroupDoc
 
-    from ee.cloud.chat.group_service import GroupService
-    from ee.cloud.chat.repositories import set_group_repository
+    doc = _GroupDoc(
+        workspace="w1",
+        name="G",
+        slug="g",
+        type="private",
+        members=["u1", "u2", "u3"],
+        owner="u1",
+    )
+    await doc.insert()
 
-    grp_repo = FakeGroupRepo()
-    grp_repo.add(make_domain_group(id="g1", members=["u1", "u2", "u3"]))
-    set_group_repository(grp_repo)
-
-    ids = await GroupService.list_member_ids("g1")
+    ids = await group_service.list_member_ids(str(doc.id))
     assert ids == ["u1", "u2", "u3"]
 
 
 @pytest.mark.asyncio
-async def test_group_list_member_ids_returns_empty_for_missing_group():
-    from tests.cloud.chat.conftest import FakeGroupRepo
+async def test_group_list_member_ids_returns_empty_for_missing_group(mongo_db):
+    from ee.cloud.chat import group_service
 
-    from ee.cloud.chat.group_service import GroupService
-    from ee.cloud.chat.repositories import set_group_repository
-
-    set_group_repository(FakeGroupRepo())  # empty repo → group lookup misses
-    ids = await GroupService.list_member_ids("gmissing")
+    ids = await group_service.list_member_ids("507f1f77bcf86cd799439011")
     assert ids == []

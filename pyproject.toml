@@ -332,6 +332,7 @@ dev = [
     "pytest-playwright>=0.4.0",
     "ruff>=0.4.0",
     "mypy>=1.8.0",
+    "import-linter>=2.0",
 ]
 
 [project.scripts]
@@ -402,6 +403,7 @@ dev = [
     "mongomock-motor>=0.0.36",
     "moto[s3]>=5.0.0",
     "types-aiofiles>=25.1.0.20260409",
+    "import-linter>=2.11",
 ]
 
 [tool.pytest.ini_options]
@@ -410,4 +412,132 @@ testpaths = ["tests"]
 addopts = "--ignore=tests/cloud --ignore=tests/e2e"
 markers = [
     "enforce_scope: opt a test out of the global _TESTING_FULL_ACCESS bypass so require_scope fails closed as in production",
+]
+
+# ---------------------------------------------------------------------------
+# import-linter: chokepoint contract for ee/cloud/
+# ---------------------------------------------------------------------------
+# Rules:
+#   1. Beanie document classes (ee.cloud.models.*) may only be imported
+#      from <entity>/service.py.
+#   2. router.py / dto.py / domain.py within an entity are forbidden from
+#      importing the matching Beanie doc.
+#   3. api / channels / tools / agents may not touch ee.cloud.models at all.
+#
+# Pockets is the canonical reference and ships in failing mode. Other
+# entities are added one at a time at touch-time per the touch-time
+# migration rule in CLAUDE.md.
+[tool.importlinter]
+root_packages = ["ee", "pocketpaw"]
+
+[[tool.importlinter.contracts]]
+name = "Pockets — Beanie writes only from service.py"
+type = "forbidden"
+allow_indirect_imports = "true"
+source_modules = [
+    "ee.cloud.pockets.router",
+    "ee.cloud.pockets.dto",
+    "ee.cloud.pockets.domain",
+    "ee.cloud.pockets.agent_context",
+]
+forbidden_modules = [
+    "ee.cloud.models.pocket",
+    "ee.cloud.models.session",
+]
+
+[[tool.importlinter.contracts]]
+name = "Notifications — Beanie writes only from service.py"
+type = "forbidden"
+allow_indirect_imports = "true"
+source_modules = [
+    "ee.cloud.notifications.router",
+    "ee.cloud.notifications.dto",
+    "ee.cloud.notifications.domain",
+]
+forbidden_modules = ["ee.cloud.models.notification"]
+
+[[tool.importlinter.contracts]]
+name = "Sessions — Beanie writes only from service.py"
+type = "forbidden"
+allow_indirect_imports = "true"
+source_modules = [
+    "ee.cloud.sessions.router",
+    "ee.cloud.sessions.dto",
+    "ee.cloud.sessions.domain",
+]
+forbidden_modules = ["ee.cloud.models.session"]
+
+[[tool.importlinter.contracts]]
+name = "Agents — Beanie writes only from service.py"
+type = "forbidden"
+allow_indirect_imports = "true"
+source_modules = [
+    "ee.cloud.agents.router",
+    "ee.cloud.agents.dto",
+    "ee.cloud.agents.domain",
+    "ee.cloud.kb.knowledge_router",
+]
+forbidden_modules = ["ee.cloud.models.agent"]
+
+[[tool.importlinter.contracts]]
+name = "Workspace — Beanie writes only from service.py"
+type = "forbidden"
+allow_indirect_imports = "true"
+source_modules = [
+    "ee.cloud.workspace.router",
+    "ee.cloud.workspace.dto",
+    "ee.cloud.workspace.domain",
+]
+forbidden_modules = ["ee.cloud.models.workspace"]
+
+[[tool.importlinter.contracts]]
+name = "Auth — Beanie writes only from service.py"
+type = "forbidden"
+allow_indirect_imports = "true"
+source_modules = [
+    "ee.cloud.auth.router",
+    "ee.cloud.auth.dto",
+    "ee.cloud.auth.domain",
+]
+forbidden_modules = ["ee.cloud.models.user"]
+
+[[tool.importlinter.contracts]]
+name = "Shared agent_bridge — orchestrate via entity services only"
+type = "forbidden"
+allow_indirect_imports = "true"
+source_modules = ["ee.cloud.shared.agent_bridge"]
+forbidden_modules = [
+    "ee.cloud.models.group",
+    "ee.cloud.models.message",
+    "ee.cloud.models.agent",
+]
+
+[[tool.importlinter.contracts]]
+name = "Shared deps — guard via entity services only"
+type = "forbidden"
+allow_indirect_imports = "true"
+source_modules = ["ee.cloud.shared.deps"]
+forbidden_modules = [
+    "ee.cloud.models.user",
+    "ee.cloud.models.group",
+    "ee.cloud.models.agent",
+    "ee.cloud.models.pocket",
+]
+
+[[tool.importlinter.contracts]]
+name = "Chat — Beanie writes only from service.py"
+type = "forbidden"
+allow_indirect_imports = "true"
+source_modules = [
+    "ee.cloud.chat.router",
+    "ee.cloud.chat.agent_router",
+    "ee.cloud.chat.dto",
+    "ee.cloud.chat.domain",
+]
+forbidden_modules = [
+    "ee.cloud.models.group",
+    "ee.cloud.models.message",
+    "ee.cloud.models.read_state",
+    "ee.cloud.models.user",
+    "ee.cloud.models.agent",
 ]

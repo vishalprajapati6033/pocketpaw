@@ -31,7 +31,7 @@ from beanie import PydanticObjectId
 from bson.errors import InvalidId
 
 from ee.cloud.memory.documents import MemoryFactDoc
-from ee.cloud.models.message import Attachment, Message
+from ee.cloud.models.message import Message
 from ee.cloud.models.session import Session
 from pocketpaw.memory.protocol import MemoryEntry, MemoryType  # type: ignore[import-untyped]
 
@@ -140,45 +140,49 @@ class MongoMemoryStore:
             sender_type = "agent" if role == "assistant" else "user"
             normalized_key = _normalize_session_key(entry.session_key)
 
+            from ee.cloud.chat import message_service
+
             # Dedup against a same-turn re-write. The main duplicate source
             # (chat_persistence writing in parallel) is gone — we now own
             # the single write path — but keep this guard so agent-loop
             # retries of identical content don't land twice.
-            existing = await _find_recent_twin(normalized_key, role, entry.content)
-            if existing is not None:
-                return str(existing.id)
+            existing_id = await message_service.find_pocket_dedup_twin_id(
+                normalized_key, role, entry.content
+            )
+            if existing_id is not None:
+                return existing_id
 
             # Attachments ride on the InboundMessage metadata from
             # /chat/stream so we can persist them on the same Message row
             # instead of double-writing. Malformed entries are skipped but
             # don't abort the save — the text content still gets through.
-            attachment_docs: list[Attachment] = []
+            attachment_dicts: list[dict] = []
             raw_attachments = (entry.metadata or {}).get("attachments") or []
             if isinstance(raw_attachments, list):
                 for a in raw_attachments:
-                    if not isinstance(a, dict):
-                        continue
-                    try:
-                        attachment_docs.append(Attachment(**a))
-                    except Exception:
-                        logger.warning("skipping malformed attachment on pocket message: %r", a)
+                    if isinstance(a, dict):
+                        attachment_dicts.append(a)
+                    else:
+                        logger.warning(
+                            "skipping malformed attachment on pocket message: %r", a
+                        )
 
             session, workspace_id = await _resolve_or_create_session(normalized_key, entry)
-            msg = Message(
-                context_type="pocket",
+            msg_id = await message_service.persist_pocket_memory_message(
                 session_key=normalized_key,
-                role=role,  # type: ignore[arg-type]
+                role=role,
                 sender_type=sender_type,
                 content=entry.content,
                 workspace_id=workspace_id,
-                attachments=attachment_docs,
+                attachments=attachment_dicts or None,
             )
-            await msg.insert()
 
             if session is not None:
-                await _touch_session(session)
+                from ee.cloud.sessions import service as sessions_service
 
-            return str(msg.id)
+                await sessions_service.touch_doc(session)
+
+            return msg_id
 
         # LONG_TERM / DAILY → memory_facts
         meta = dict(entry.metadata or {})
@@ -215,8 +219,9 @@ class MongoMemoryStore:
             return False
         msg = await Message.get(oid)
         if msg and msg.context_type == "pocket":
-            await msg.delete()
-            return True
+            from ee.cloud.chat import message_service
+
+            return await message_service.delete_message_doc_by_id(entry_id)
         fact = await MemoryFactDoc.get(oid)
         if fact:
             await fact.delete()
@@ -283,11 +288,14 @@ class MongoMemoryStore:
         return [_message_to_entry(m) for m in messages]
 
     async def clear_session(self, session_key: str) -> int:
+        from ee.cloud.chat import message_service
+
         key = _normalize_session_key(session_key)
         messages = await Message.find({"context_type": "pocket", "session_key": key}).to_list()
-        count = len(messages)
+        count = 0
         for m in messages:
-            await m.delete()
+            if await message_service.delete_message_doc_by_id(str(m.id)):
+                count += 1
         return count
 
     # ---- Adapter-specific (not in MemoryStoreProtocol) ----------------
@@ -397,46 +405,6 @@ class MongoMemoryStore:
         return [_fact_to_entry(f) for f in facts]
 
 
-# Window for treating an existing Message as a duplicate of the current
-# write. The dual-write race (chat endpoint + agent loop both saving) is
-# synchronous in the same request, so 5s is plenty — and short enough that a
-# real user sending back-to-back "ok" messages doesn't see one silently
-# swallowed.
-_DEDUP_WINDOW_SECONDS = 5
-
-
-async def _find_recent_twin(
-    session_key: str,
-    role: str,
-    content: str,
-) -> Message | None:
-    """Return an existing Message row with the same content written recently.
-
-    Covers the synchronous in-request race where the chat endpoint persists
-    the message once (with attachments) and the agent loop's
-    ``memory.add_to_session`` then calls us with the same content for
-    agent-context memory. The first writer wins — attachments and ordering
-    on the canonical record are preserved. Legitimate back-to-back resends
-    of the same short text (``"ok"``) fall outside the 5s window.
-    """
-    from datetime import timedelta
-
-    cutoff = datetime.now(UTC) - timedelta(seconds=_DEDUP_WINDOW_SECONDS)
-    try:
-        return await Message.find_one(
-            {
-                "context_type": "pocket",
-                "session_key": session_key,
-                "role": role,
-                "content": content,
-                "createdAt": {"$gte": cutoff},
-            }
-        )
-    except Exception:
-        logger.exception("memory dedup lookup failed for session=%s", session_key)
-        return None
-
-
 async def _resolve_or_create_session(
     session_key: str, entry: MemoryEntry
 ) -> tuple[Session | None, str | None]:
@@ -446,84 +414,31 @@ async def _resolve_or_create_session(
     1. Existing ``Session`` row where ``sessionId == session_key`` — the
        common case (client POSTed ``/sessions`` first or the session was
        auto-created on a previous turn).
-    2. Auto-create a pocket ``Session`` so the "start chatting → session
-       appears in the sidebar" UX works when the client skipped the
-       explicit create. Owner is picked the same way the old
-       ``chat_persistence`` bridge did: first user with a workspace.
+    2. Auto-create a pocket ``Session`` (via ``sessions.service``) so the
+       "start chatting → session appears in the sidebar" UX works when
+       the client skipped the explicit create.
 
     The workspace_id prefers ``entry.metadata["workspace_id"]`` when the
-    caller already knows it (e.g. an HTTP handler with active workspace in
-    scope), falling back to ``Session.workspace``.
+    caller already knows it (e.g. an HTTP handler with active workspace
+    in scope), falling back to ``Session.workspace``.
 
-    Returns ``(None, workspace_id_or_None)`` only when no session could be
-    resolved or created (no users/workspaces exist yet). The message row
-    still persists — it's just not counted against a session. Tenant-scoped
-    reads exclude untagged rows, which is the correct safe default.
+    Returns ``(None, workspace_id_or_None)`` only when no session could
+    be resolved or created. The message row still persists — it's just
+    not counted against a session.
     """
+    from ee.cloud.sessions import service as sessions_service
+
     md_ws = (entry.metadata or {}).get("workspace_id")
     md_ws = md_ws if isinstance(md_ws, str) and md_ws else None
 
-    session = await Session.find_one(Session.sessionId == session_key)
+    session = await sessions_service.find_by_session_id(session_key)
     if session is not None:
         return session, md_ws or session.workspace
 
-    session = await _auto_create_pocket_session(session_key, workspace_id=md_ws)
+    session = await sessions_service.auto_create_pocket_session(
+        session_key, workspace_id=md_ws
+    )
     if session is None:
         return None, md_ws
 
     return session, session.workspace
-
-
-async def _auto_create_pocket_session(
-    session_key: str, *, workspace_id: str | None = None
-) -> Session | None:
-    """Create a pocket ``Session`` doc for ``session_key`` when none exists.
-
-    Picks the first user in the target workspace (or any workspace user if
-    ``workspace_id`` is not provided) so the session has an owner. Returns
-    ``None`` when no suitable user exists — caller keeps writing the
-    message row without Session linkage.
-    """
-    from ee.cloud.models.user import User
-
-    query: dict
-    if workspace_id:
-        query = {"workspaces.workspace": workspace_id}
-    else:
-        query = {"workspaces": {"$ne": []}}
-    users = await User.find(query).limit(1).to_list()
-    if not users:
-        logger.warning("auto_create_pocket_session: no user with a workspace")
-        return None
-
-    user = users[0]
-    if workspace_id is None:
-        workspace_id = user.workspaces[0].workspace if user.workspaces else None
-    if not workspace_id:
-        return None
-
-    session = Session(
-        sessionId=session_key,
-        context_type="pocket",
-        workspace=workspace_id,
-        owner=str(user.id),
-        title="Chat",
-    )
-    await session.insert()
-    logger.info("auto-created pocket session: sessionId=%s owner=%s", session_key, user.id)
-    return session
-
-
-async def _touch_session(session: Session) -> None:
-    """Increment ``messageCount`` and refresh ``lastActivity`` on a Session.
-
-    Runs after every persisted pocket SESSION entry so the sidebar reflects
-    recency and totals without a separate API-layer hook. Failures log but
-    don't raise — the message row is already committed.
-    """
-    try:
-        session.lastActivity = datetime.now(UTC)
-        session.messageCount = (session.messageCount or 0) + 1
-        await session.save()
-    except Exception:
-        logger.warning("failed to touch Session %s", session.sessionId, exc_info=True)

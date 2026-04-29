@@ -10,8 +10,6 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Protocol, runtime_checkable
 
-from ee.cloud.files.errors import MountNotFound
-from ee.cloud.files.mounts_config import resolve_template
 from ee.cloud.files.dto import (
     FileEntry,
     MountConfig,
@@ -21,6 +19,8 @@ from ee.cloud.files.dto import (
     ResolvedMount,
     SearchQuery,
 )
+from ee.cloud.files.errors import MountNotFound
+from ee.cloud.files.mounts_config import resolve_template
 
 
 @runtime_checkable

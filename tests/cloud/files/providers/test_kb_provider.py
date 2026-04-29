@@ -2,8 +2,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from ee.cloud.files.providers.kb import KbProvider
 from ee.cloud.files.dto import RequestContext
+from ee.cloud.files.providers.kb import KbProvider
 from tests.cloud.files.test_provider_contract import ProviderContract
 
 

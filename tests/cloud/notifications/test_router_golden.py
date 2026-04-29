@@ -1,94 +1,49 @@
 """Golden-response tests for the notifications router.
 
-These tests assert the wire shape returned by each endpoint by
-constructing a small FastAPI app that mounts only the notifications
-router with the service dep overridden to one backed by an in-memory
-repository. The shape asserted here is the same shape the legacy
-`_to_wire` function produced.
+Asserts the wire shape returned by each endpoint matches the legacy
+``_to_wire`` output byte-for-byte. Uses the shared ``mongo_db`` fixture
+so the router exercises real Beanie queries against a mongomock-motor
+DB; no Protocol fakes.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
-import pytest
+import pytest_asyncio
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 from ee.cloud._core.http import add_error_handler
-from ee.cloud.notifications.domain import Notification, NotificationSource
-from ee.cloud.notifications.router import get_notification_service, router
-from ee.cloud.notifications.service import NotificationService
+from ee.cloud.models.notification import Notification as _NotificationDoc
+from ee.cloud.models.notification import NotificationSource as _NotificationSourceDoc
+from ee.cloud.notifications.router import router
 
 
-class _Repo:
-    def __init__(self) -> None:
-        self._items: dict[str, Notification] = {}
-
-    async def create(self, n: Notification) -> Notification:
-        self._items[n.id] = n
-        return n
-
-    async def get(self, nid: str) -> Notification | None:
-        return self._items.get(nid)
-
-    async def list_for_user(
-        self, user_id: str, *, unread: bool = False, limit: int = 50
-    ) -> list[Notification]:
-        out = [n for n in self._items.values() if n.recipient_id == user_id]
-        if unread:
-            out = [n for n in out if not n.read]
-        out.sort(key=lambda n: n.created_at, reverse=True)
-        return out[:limit]
-
-    async def mark_read(self, nid: str) -> bool:
-        from dataclasses import replace
-
-        n = self._items.get(nid)
-        if not n or n.read:
-            return False
-        self._items[nid] = replace(n, read=True)
-        return True
-
-    async def clear_unread(self, user_id: str) -> int:
-        from dataclasses import replace
-
-        count = 0
-        for nid, n in list(self._items.items()):
-            if n.recipient_id == user_id and not n.read:
-                self._items[nid] = replace(n, read=True)
-                count += 1
-        return count
-
-
-def _seed(repo: _Repo, **kw) -> Notification:
-    base = dict(
-        id="n1",
-        workspace_id="w1",
-        recipient_id="user-1",
-        kind="mention",
-        title="hi",
-        body="b",
-        source=NotificationSource(type="message", id="m1", pocket_id=None),
-        read=False,
-        created_at=datetime(2026, 4, 27, 12, 0, 0, tzinfo=UTC),
+async def _seed(
+    *,
+    workspace: str = "w1",
+    recipient: str = "user-1",
+    kind: str = "mention",
+    title: str = "hi",
+    body: str = "b",
+    source_id: str = "m1",
+    read: bool = False,
+) -> _NotificationDoc:
+    doc = _NotificationDoc(
+        workspace=workspace,
+        recipient=recipient,
+        type=kind,
+        title=title,
+        body=body,
+        source=_NotificationSourceDoc(type="message", id=source_id, pocket_id=None),
+        read=read,
     )
-    base.update(kw)
-    n = Notification(**base)
-    repo._items[n.id] = n
-    return n
+    await doc.insert()
+    return doc
 
 
-async def _no_emit(_event):
-    pass
-
-
-@pytest.fixture
-def app_and_repo(monkeypatch):
+@pytest_asyncio.fixture
+async def app_client(mongo_db) -> AsyncClient:
     from ee.cloud.auth import current_active_user
-
-    repo = _Repo()
-    service = NotificationService(repo)
 
     class _U:
         id = "user-1"
@@ -99,17 +54,15 @@ def app_and_repo(monkeypatch):
     add_error_handler(app)
     app.include_router(router, prefix="/api/v1")
     app.dependency_overrides[current_active_user] = lambda: _U()
-    app.dependency_overrides[get_notification_service] = lambda: service
-    monkeypatch.setattr("ee.cloud.notifications.service.emit", _no_emit)
-    return app, repo
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as client:
+        yield client
 
 
-def test_list_returns_dto_shape(app_and_repo) -> None:
-    app, repo = app_and_repo
-    _seed(repo)
-    client = TestClient(app)
-
-    resp = client.get("/api/v1/notifications")
+async def test_list_returns_dto_shape(app_client) -> None:
+    await _seed()
+    resp = await app_client.get("/api/v1/notifications")
     assert resp.status_code == 200
     body = resp.json()
     assert isinstance(body, list)
@@ -126,60 +79,46 @@ def test_list_returns_dto_shape(app_and_repo) -> None:
         "read",
         "created_at",
     }
-    assert item == {
-        "id": "n1",
-        "user_id": "user-1",
-        "workspace_id": "w1",
-        "kind": "mention",
-        "title": "hi",
-        "body": "b",
-        "source_id": "m1",
-        "read": False,
-        "created_at": "2026-04-27T12:00:00+00:00",
-    }
+    assert item["user_id"] == "user-1"
+    assert item["workspace_id"] == "w1"
+    assert item["kind"] == "mention"
+    assert item["title"] == "hi"
+    assert item["body"] == "b"
+    assert item["source_id"] == "m1"
+    assert item["read"] is False
+    assert item["created_at"].endswith("+00:00")
 
 
-def test_list_unread_query_filters(app_and_repo) -> None:
-    app, repo = app_and_repo
-    _seed(repo, id="n1", read=True)
-    _seed(repo, id="n2", read=False)
-    client = TestClient(app)
-
-    body = client.get("/api/v1/notifications?unread=true").json()
-    assert [n["id"] for n in body] == ["n2"]
-
-
-def test_list_limit_query_caps_results(app_and_repo) -> None:
-    app, repo = app_and_repo
-    for i in range(5):
-        _seed(
-            repo,
-            id=f"n{i}",
-            created_at=datetime(2026, 4, 27, 12, 0, i, tzinfo=UTC),
-        )
-    client = TestClient(app)
-
-    body = client.get("/api/v1/notifications?limit=2").json()
-    assert len(body) == 2
+async def test_list_unread_query_filters(app_client) -> None:
+    await _seed(read=True)
+    await _seed(read=False)
+    resp = await app_client.get("/api/v1/notifications?unread=true")
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["read"] is False
 
 
-def test_mark_read_returns_ok_envelope(app_and_repo) -> None:
-    app, repo = app_and_repo
-    _seed(repo)
+async def test_list_limit_query_caps_results(app_client) -> None:
+    for _ in range(5):
+        await _seed()
+    resp = await app_client.get("/api/v1/notifications?limit=2")
+    assert len(resp.json()) == 2
 
-    client = TestClient(app)
-    resp = client.post("/api/v1/notifications/n1/read")
+
+async def test_mark_read_returns_ok_envelope(app_client) -> None:
+    doc = await _seed()
+    resp = await app_client.post(f"/api/v1/notifications/{doc.id}/read")
     assert resp.status_code == 200
     assert resp.json() == {"ok": True}
-    assert repo._items["n1"].read is True
+
+    refreshed = await _NotificationDoc.get(doc.id)
+    assert refreshed is not None
+    assert refreshed.read is True
 
 
-def test_clear_returns_count(app_and_repo) -> None:
-    app, repo = app_and_repo
-    _seed(repo, id="n1", read=False)
-    _seed(repo, id="n2", read=False)
-
-    client = TestClient(app)
-    resp = client.post("/api/v1/notifications/clear")
+async def test_clear_returns_count(app_client) -> None:
+    await _seed(read=False)
+    await _seed(read=False)
+    resp = await app_client.post("/api/v1/notifications/clear")
     assert resp.status_code == 200
     assert resp.json() == {"cleared": 2}

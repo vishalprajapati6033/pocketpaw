@@ -16,11 +16,13 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from starlette.responses import Response
 
+from ee.cloud._core.errors import CloudError
 from ee.cloud.license import require_license
+from ee.cloud.pockets import service as pockets_service
 from ee.cloud.pockets.dto import (
     AddCollaboratorRequest,
     AddWidgetRequest,
@@ -37,7 +39,6 @@ from ee.cloud.pockets.layouts import (
     get_user_template_store,
     parse_layout_yaml,
 )
-from ee.cloud.pockets.service import PocketService
 from ee.cloud.sessions.dto import CreateSessionRequest
 from ee.cloud.shared.deps import (
     current_user_id,
@@ -114,7 +115,7 @@ async def export_layout(
     """
 
     body = body or ExportLayoutRequest()
-    pocket = await PocketService.get(pocket_id, user_id)
+    pocket = await pockets_service.get(pocket_id, user_id)
     widgets_dump = pocket.get("widgets") or []
     yaml_text = export_layout_yaml(
         pocket_id=pocket_id,
@@ -145,7 +146,7 @@ async def create_user_template(
     try:
         spec = parse_layout_yaml(body.yaml_source)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from None
+        raise CloudError(400, "layout.invalid_yaml", str(exc)) from None
 
     row = store.save(
         UserPocketTemplate(
@@ -182,7 +183,7 @@ async def create_pocket(
     workspace_id: str = Depends(current_workspace_id),
     user_id: str = Depends(current_user_id),
 ) -> dict:
-    return await PocketService.create(workspace_id, user_id, body)
+    return await pockets_service.create(workspace_id, user_id, body)
 
 
 @router.get("")
@@ -190,7 +191,7 @@ async def list_pockets(
     workspace_id: str = Depends(current_workspace_id),
     user_id: str = Depends(current_user_id),
 ) -> list[dict]:
-    return await PocketService.list_pockets(workspace_id, user_id)
+    return await pockets_service.list_pockets(workspace_id, user_id)
 
 
 @router.get("/{pocket_id}")
@@ -198,7 +199,7 @@ async def get_pocket(
     pocket_id: str,
     user_id: str = Depends(current_user_id),
 ) -> dict:
-    return await PocketService.get(pocket_id, user_id)
+    return await pockets_service.get(pocket_id, user_id)
 
 
 @router.patch("/{pocket_id}", dependencies=[Depends(require_pocket_edit)])
@@ -207,7 +208,7 @@ async def update_pocket(
     body: UpdatePocketRequest,
     user_id: str = Depends(current_user_id),
 ) -> dict:
-    return await PocketService.update(pocket_id, user_id, body)
+    return await pockets_service.update(pocket_id, user_id, body)
 
 
 @router.delete("/{pocket_id}", status_code=204, dependencies=[Depends(require_pocket_owner)])
@@ -215,7 +216,7 @@ async def delete_pocket(
     pocket_id: str,
     user_id: str = Depends(current_user_id),
 ) -> Response:
-    await PocketService.delete(pocket_id, user_id)
+    await pockets_service.delete(pocket_id, user_id)
     return Response(status_code=204)
 
 
@@ -230,7 +231,7 @@ async def add_widget(
     body: AddWidgetRequest,
     user_id: str = Depends(current_user_id),
 ) -> dict:
-    return await PocketService.add_widget(pocket_id, user_id, body)
+    return await pockets_service.add_widget(pocket_id, user_id, body)
 
 
 @router.patch("/{pocket_id}/widgets/{widget_id}")
@@ -240,7 +241,7 @@ async def update_widget(
     body: UpdateWidgetRequest,
     user_id: str = Depends(current_user_id),
 ) -> dict:
-    return await PocketService.update_widget(pocket_id, widget_id, user_id, body)
+    return await pockets_service.update_widget(pocket_id, widget_id, user_id, body)
 
 
 @router.delete("/{pocket_id}/widgets/{widget_id}", status_code=204)
@@ -249,7 +250,7 @@ async def remove_widget(
     widget_id: str,
     user_id: str = Depends(current_user_id),
 ) -> Response:
-    await PocketService.remove_widget(pocket_id, widget_id, user_id)
+    await pockets_service.remove_widget(pocket_id, widget_id, user_id)
     return Response(status_code=204)
 
 
@@ -259,7 +260,7 @@ async def reorder_widgets(
     body: ReorderWidgetsRequest,
     user_id: str = Depends(current_user_id),
 ) -> dict:
-    return await PocketService.reorder_widgets(pocket_id, user_id, body.widget_ids)
+    return await pockets_service.reorder_widgets(pocket_id, user_id, body.widget_ids)
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +274,7 @@ async def add_team_member(
     body: dict,
     user_id: str = Depends(current_user_id),
 ) -> dict:
-    return await PocketService.add_team_member(pocket_id, user_id, body["member_id"])
+    return await pockets_service.add_team_member(pocket_id, user_id, body["member_id"])
 
 
 @router.delete("/{pocket_id}/team/{member_id}", status_code=204)
@@ -282,7 +283,7 @@ async def remove_team_member(
     member_id: str,
     user_id: str = Depends(current_user_id),
 ) -> Response:
-    await PocketService.remove_team_member(pocket_id, user_id, member_id)
+    await pockets_service.remove_team_member(pocket_id, user_id, member_id)
     return Response(status_code=204)
 
 
@@ -298,7 +299,7 @@ async def add_agent(
     user_id: str = Depends(current_user_id),
 ) -> dict:
     agent_id = body.get("agentId") or body.get("agent_id")
-    return await PocketService.add_agent(pocket_id, user_id, agent_id)
+    return await pockets_service.add_agent(pocket_id, user_id, agent_id)
 
 
 @router.delete("/{pocket_id}/agents/{agent_id}", status_code=204)
@@ -307,7 +308,7 @@ async def remove_agent(
     agent_id: str,
     user_id: str = Depends(current_user_id),
 ) -> Response:
-    await PocketService.remove_agent(pocket_id, user_id, agent_id)
+    await pockets_service.remove_agent(pocket_id, user_id, agent_id)
     return Response(status_code=204)
 
 
@@ -322,7 +323,7 @@ async def generate_share_link(
     body: ShareLinkRequest,
     user_id: str = Depends(current_user_id),
 ) -> dict:
-    return await PocketService.generate_share_link(pocket_id, user_id, body.access)
+    return await pockets_service.generate_share_link(pocket_id, user_id, body.access)
 
 
 @router.delete("/{pocket_id}/share", status_code=204, dependencies=[Depends(require_pocket_owner)])
@@ -330,7 +331,7 @@ async def revoke_share_link(
     pocket_id: str,
     user_id: str = Depends(current_user_id),
 ) -> Response:
-    await PocketService.revoke_share_link(pocket_id, user_id)
+    await pockets_service.revoke_share_link(pocket_id, user_id)
     return Response(status_code=204)
 
 
@@ -340,12 +341,12 @@ async def update_share_link_access(
     body: ShareLinkRequest,
     user_id: str = Depends(current_user_id),
 ) -> dict:
-    return await PocketService.update_share_link(pocket_id, user_id, body.access)
+    return await pockets_service.update_share_link(pocket_id, user_id, body.access)
 
 
 @router.get("/shared/{token}")
 async def access_via_share_link(token: str) -> dict:
-    return await PocketService.access_via_share_link(token)
+    return await pockets_service.access_via_share_link(token)
 
 
 # ---------------------------------------------------------------------------
@@ -363,7 +364,7 @@ async def add_collaborator(
     body: AddCollaboratorRequest,
     user_id: str = Depends(current_user_id),
 ) -> Response:
-    await PocketService.add_collaborator(pocket_id, user_id, body)
+    await pockets_service.add_collaborator(pocket_id, user_id, body)
     return Response(status_code=204)
 
 
@@ -377,7 +378,7 @@ async def remove_collaborator(
     target_user_id: str,
     user_id: str = Depends(current_user_id),
 ) -> Response:
-    await PocketService.remove_collaborator(pocket_id, user_id, target_user_id)
+    await pockets_service.remove_collaborator(pocket_id, user_id, target_user_id)
     return Response(status_code=204)
 
 
@@ -393,9 +394,19 @@ async def create_pocket_session(
     workspace_id: str = Depends(current_workspace_id),
     user_id: str = Depends(current_user_id),
 ) -> dict:
-    from ee.cloud.sessions.service import SessionService
+    from ee.cloud.sessions import service as sessions_service
+    from ee.cloud.sessions.dto import session_to_wire_dict
 
-    return await SessionService.create_for_pocket_default(workspace_id, user_id, pocket_id, body)
+    body_with_pocket = CreateSessionRequest(
+        title=body.title,
+        pocket_id=pocket_id,
+        group_id=body.group_id,
+        agent_id=body.agent_id,
+        session_id=body.session_id,
+    )
+    ctx = sessions_service.legacy_ctx(user_id, workspace_id)
+    session = await sessions_service.create(ctx, workspace_id, body_with_pocket)
+    return session_to_wire_dict(session)
 
 
 @router.get("/{pocket_id}/sessions")
@@ -403,6 +414,9 @@ async def list_pocket_sessions(
     pocket_id: str,
     user_id: str = Depends(current_user_id),
 ) -> list[dict]:
-    from ee.cloud.sessions.service import SessionService
+    from ee.cloud.sessions import service as sessions_service
+    from ee.cloud.sessions.dto import session_to_wire_dict
 
-    return await SessionService.list_for_pocket_default(pocket_id, user_id)
+    ctx = sessions_service.legacy_ctx(user_id)
+    items = await sessions_service.list_for_pocket(ctx, pocket_id)
+    return [session_to_wire_dict(s) for s in items]

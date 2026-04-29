@@ -3,9 +3,9 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from ee.cloud.files.abac_config import AbacRuleSet
+from ee.cloud.files.dto import MountConfig, RequestContext
 from ee.cloud.files.registry import ProviderRegistry
 from ee.cloud.files.router import build_router
-from ee.cloud.files.dto import MountConfig, RequestContext
 from ee.cloud.files.tree import invalidate_tree_cache
 from tests.cloud.files.conftest import FakeProvider
 

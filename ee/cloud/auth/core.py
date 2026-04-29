@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Any
 
 from beanie import PydanticObjectId
 from fastapi import Depends, Request
@@ -31,8 +32,7 @@ from fastapi_users.authentication import (
 )
 from fastapi_users_db_beanie import BeanieUserDatabase, ObjectIDIDMixin
 
-from ee.cloud.models.user import OAuthAccount, User, WorkspaceMembership
-from ee.cloud.models.workspace import Workspace, WorkspaceSettings
+from ee.cloud.models.user import OAuthAccount, User
 
 logger = logging.getLogger(__name__)
 
@@ -178,12 +178,16 @@ async def seed_admin(
         return None
 
 
-async def seed_workspace(admin: User | None = None) -> Workspace | None:
-    """Create a default workspace and General chat group if none exist.
+async def seed_workspace(admin: User | None = None) -> Any | None:
+    """Bootstrap a default workspace, General chat group, and pocketpaw
+    agent on first boot. Idempotent — skips if a workspace already exists.
 
-    Called after seed_admin() on startup. Skips if any workspace already exists.
+    Thin orchestrator: each entity's seed lives in its own service module
+    so this file doesn't touch other entities' Beanie docs directly.
     """
-    from datetime import UTC, datetime
+    from ee.cloud.agents import service as agents_service
+    from ee.cloud.chat import group_service
+    from ee.cloud.workspace import service as workspace_service
 
     if admin is None:
         admin = await User.find_one(User.is_superuser == True)  # noqa: E712
@@ -191,139 +195,39 @@ async def seed_workspace(admin: User | None = None) -> Workspace | None:
             logger.debug("No admin user found — skipping workspace seed")
             return None
 
-    # Skip if admin already has a workspace
-    if admin.workspaces:
-        logger.debug("Admin already has workspace(s) — skipping seed")
-        return None
-
-    # Also skip if any workspace exists at all
-    existing = await Workspace.find_one()
-    if existing:
-        logger.debug("Workspace already exists — skipping seed")
-        return None
-
     ws_name = os.environ.get("DEFAULT_WORKSPACE_NAME", "PocketPaw")
     ws_slug = os.environ.get("DEFAULT_WORKSPACE_SLUG", "pocketpaw")
 
-    try:
-        ws = Workspace(
-            name=ws_name,
-            slug=ws_slug,
-            owner=str(admin.id),
-            plan="enterprise",
-            seats=50,
-            settings=WorkspaceSettings(),
-        )
-        await ws.insert()
-
-        admin.workspaces.append(
-            WorkspaceMembership(
-                workspace=str(ws.id),
-                role="owner",
-                joined_at=datetime.now(UTC),
-            )
-        )
-        admin.active_workspace = str(ws.id)
-        await admin.save()
-
-        logger.info(
-            "Default workspace created: %s (slug: %s, id: %s)",
-            ws_name,
-            ws_slug,
-            ws.id,
-        )
-
-        # Create a default "General" chat group
-        try:
-            from ee.cloud.models.group import Group
-
-            group = Group(
-                workspace=str(ws.id),
-                name="General",
-                slug="general",
-                description="Default channel for team discussion",
-                type="public",
-                owner=str(admin.id),
-                members=[str(admin.id)],
-            )
-            await group.insert()
-            logger.info("Default 'General' group created in workspace %s", ws_name)
-        except Exception as exc:
-            logger.warning("Failed to create default group (non-fatal): %s", exc)
-
-        # Seed the default "pocketpaw" agent — the agent that users DM
-        # through the runtime SSE chat endpoint. Gives DMs a stable
-        # identity so sessions can be keyed by agent_id.
-        try:
-            await seed_default_agent(str(ws.id), str(admin.id))
-        except Exception as exc:
-            logger.warning("Failed to seed default agent (non-fatal): %s", exc)
-
-        return ws
-    except Exception as exc:
-        logger.error("Failed to seed workspace: %s", exc)
+    ws = await workspace_service.seed_default_workspace(
+        str(admin.id), name=ws_name, slug=ws_slug
+    )
+    if ws is None:
+        # Skipped or failed — service logged the reason.
         return None
+
+    # Default "General" chat group — best-effort.
+    await group_service.seed_default_group(str(ws.id), str(admin.id))
+
+    # Default "pocketpaw" agent — the agent that users DM through the
+    # runtime SSE chat endpoint. Gives DMs a stable identity so sessions
+    # can be keyed by agent_id.
+    try:
+        await agents_service.seed_default_agent(str(ws.id), str(admin.id))
+    except Exception as exc:
+        logger.warning("Failed to seed default agent (non-fatal): %s", exc)
+
+    return ws
 
 
 async def ensure_default_agent_all_workspaces() -> int:
-    """Back-fill the pocketpaw agent for every existing workspace.
+    """Compatibility re-export — agents own this back-fill now."""
+    from ee.cloud.agents import service as agents_service
 
-    ``seed_workspace`` only runs on fresh installs — workspaces that predate
-    agent seeding never got one. Call this on every boot so the DM target
-    exists regardless of install age. Returns the number of agents actually
-    created this run (existing rows are not counted), so a second boot
-    reports ``0`` instead of misleadingly echoing the workspace count.
-    """
-    seeded = 0
-    async for ws in Workspace.find_all():
-        try:
-            _, created = await seed_default_agent(str(ws.id), str(ws.owner))
-            if created:
-                seeded += 1
-        except Exception as exc:
-            logger.warning("Failed to back-fill pocketpaw agent for ws=%s: %s", ws.id, exc)
-    return seeded
+    return await agents_service.ensure_default_agent_all_workspaces()
 
 
-async def seed_default_agent(
-    workspace_id: str, owner_id: str
-) -> tuple[Agent, bool] | tuple[None, bool]:  # noqa: F821
-    """Create the default "pocketpaw" Agent for a workspace if missing.
+async def seed_default_agent(workspace_id: str, owner_id: str):
+    """Compatibility re-export — agents own the seed now."""
+    from ee.cloud.agents import service as agents_service
 
-    The frontend uses this agent's id as the DM room identifier (replacing
-    the legacy ``__paw-runtime-dm__`` sentinel), and Session docs for DMs
-    carry ``agent=<this agent's id>`` so per-agent history works.
-
-    Idempotent. Returns ``(agent, created)`` — ``created`` is ``True`` only
-    when this call inserted a new row, so back-fill paths can report
-    accurate counts. Returns ``(None, False)`` if an exception would have
-    been raised on insert (callers wrap in try/except).
-    """
-    from ee.cloud.models.agent import Agent, AgentConfig
-
-    existing = await Agent.find_one(Agent.workspace == workspace_id, Agent.slug == "pocketpaw")
-    if existing is not None:
-        return existing, False
-
-    agent = Agent(
-        workspace=workspace_id,
-        name="PocketPaw",
-        slug="pocketpaw",
-        avatar="",
-        owner=owner_id,
-        visibility="workspace",
-        config=AgentConfig(
-            system_prompt=(
-                "You are PocketPaw — the default assistant in this workspace. "
-                "Help the user with their tasks. Be concise, accurate, and honest."
-            ),
-            soul_persona="PocketPaw",
-        ),
-    )
-    await agent.insert()
-    logger.info(
-        "Default 'pocketpaw' agent seeded in workspace %s (id: %s)",
-        workspace_id,
-        agent.id,
-    )
-    return agent, True
+    return await agents_service.seed_default_agent(workspace_id, owner_id)

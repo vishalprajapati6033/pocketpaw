@@ -1,19 +1,20 @@
 """Auth domain — FastAPI router.
 
-Profile endpoints (Phase 3 refactor) use ``Depends(request_context)``,
-``Depends(get_auth_service)``, and return Pydantic ``ProfileOut`` DTOs.
-The fastapi-users sub-routers (login/logout/register) and the avatar
-file-serving / upload endpoints stay in this module unchanged in
-behavior; the upload endpoint now persists via the service.
+Profile endpoints use ``Depends(request_context)`` and call into
+``ee.cloud.auth.service`` module functions directly. The fastapi-users
+sub-routers (login/logout/register) and the avatar file-serving / upload
+endpoints stay here unchanged in behavior.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from ee.cloud._core.context import RequestContext, request_context
+from ee.cloud.auth import service as auth_service
 from ee.cloud.auth.core import (
     UserCreate,
     UserRead,
@@ -28,12 +29,6 @@ from ee.cloud.auth.dto import (
     SetWorkspaceRequest,
     auth_user_to_profile_out,
 )
-from ee.cloud.auth.repositories import (
-    IAuthRepository,
-    get_default_repository,
-)
-from ee.cloud.auth.service import AuthService
-from ee.cloud.models.user import User
 
 router = APIRouter(tags=["Auth"])
 
@@ -42,16 +37,6 @@ _AVATAR_DIR = Path.home() / ".pocketpaw" / "avatars"
 _AVATAR_DIR.mkdir(parents=True, exist_ok=True)
 _ALLOWED_AVATAR_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
 _MAX_AVATAR_SIZE = 5 * 1024 * 1024  # 5 MB
-
-
-def get_auth_repository() -> IAuthRepository:
-    return get_default_repository()
-
-
-def get_auth_service(
-    repo: IAuthRepository = Depends(get_auth_repository),
-) -> AuthService:
-    return AuthService(repo)
 
 
 # ---------------------------------------------------------------------------
@@ -80,9 +65,8 @@ router.include_router(
 @router.get("/auth/me", response_model=ProfileOut)
 async def get_me(
     ctx: RequestContext = Depends(request_context),
-    service: AuthService = Depends(get_auth_service),
 ) -> ProfileOut:
-    user = await service.get_profile(ctx)
+    user = await auth_service.get_profile(ctx)
     return auth_user_to_profile_out(user)
 
 
@@ -90,9 +74,8 @@ async def get_me(
 async def update_me(
     body: ProfileUpdateRequest,
     ctx: RequestContext = Depends(request_context),
-    service: AuthService = Depends(get_auth_service),
 ) -> ProfileOut:
-    user = await service.update_profile(
+    user = await auth_service.update_profile(
         ctx,
         full_name=body.full_name,
         avatar=body.avatar,
@@ -105,9 +88,8 @@ async def update_me(
 async def set_active_workspace(
     body: SetWorkspaceRequest,
     ctx: RequestContext = Depends(request_context),
-    service: AuthService = Depends(get_auth_service),
 ) -> dict:
-    await service.set_active_workspace(ctx, body.workspace_id)
+    await auth_service.set_active_workspace(ctx, body.workspace_id)
     return {"ok": True, "activeWorkspace": body.workspace_id}
 
 
@@ -119,9 +101,8 @@ async def set_active_workspace(
 @router.post("/auth/avatar", response_model=ProfileOut)
 async def upload_avatar(
     file: UploadFile = File(...),
-    user: User = Depends(current_active_user),
+    user: Any = Depends(current_active_user),
     ctx: RequestContext = Depends(request_context),
-    service: AuthService = Depends(get_auth_service),
 ) -> ProfileOut:
     """Upload a profile picture. Returns the updated profile with the avatar URL."""
     if file.content_type not in _ALLOWED_AVATAR_TYPES:
@@ -154,7 +135,7 @@ async def upload_avatar(
     dest.write_bytes(content)
 
     avatar_path = f"/api/v1/auth/avatar/{filename}"
-    updated = await service.set_avatar_path(ctx, avatar_path)
+    updated = await auth_service.set_avatar_path(ctx, avatar_path)
     return auth_user_to_profile_out(updated)
 
 
