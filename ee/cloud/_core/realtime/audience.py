@@ -173,6 +173,20 @@ class AudienceResolver:
         }:
             return await self._group(d["group_id"])
 
+        # --- Pockets ------------------------------------------------------------
+        # Audience is computed by the service (it's the only layer that knows
+        # the pocket's visibility + shared_with) and shipped on the event:
+        #   - ``recipient_ids``: explicit list, used for private pockets
+        #   - ``workspace_id``: present for workspace-visible pockets;
+        #     fanned out to every workspace member
+        # ``pocket.deleted`` always carries ``recipient_ids`` (the service
+        # captures it before the doc is dropped).
+        if t in {"pocket.created", "pocket.updated", "pocket.deleted"}:
+            recipients = list(d.get("recipient_ids") or [])
+            if wid := d.get("workspace_id"):
+                recipients.extend(await self._workspace(wid))
+            return list(set(recipients))
+
         # --- Notifications ------------------------------------------------------
         if t in {"notification.new", "notification.read", "notification.cleared"}:
             return [d["user_id"]]

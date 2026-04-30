@@ -101,6 +101,13 @@ desktop = [
 openai-agents = [
     "openai-agents>=0.2.0",
 ]
+codex-sdk = [
+    # Official OpenAI Codex Python SDK — typed events + abort signal,
+    # replaces our subprocess + NDJSON parsing wrapper. The wheel does
+    # not bundle the codex binary; users supply it via ``npm install -g
+    # @openai/codex`` (auto-discovered) or ``Codex.install(version=...)``.
+    "openai-codex-sdk>=0.1.11",
+]
 google-adk = [
     "google-adk>=1.0.0",
 ]

@@ -271,6 +271,22 @@ class AgentToolUse(Event):
     EVENT_TYPE: ClassVar[str] = "agent.tool_use"
 
 
+# Pockets
+@dataclass
+class PocketCreated(Event):
+    EVENT_TYPE: ClassVar[str] = "pocket.created"
+
+
+@dataclass
+class PocketUpdated(Event):
+    EVENT_TYPE: ClassVar[str] = "pocket.updated"
+
+
+@dataclass
+class PocketDeleted(Event):
+    EVENT_TYPE: ClassVar[str] = "pocket.deleted"
+
+
 # Notifications
 @dataclass
 class NotificationNew(Event):

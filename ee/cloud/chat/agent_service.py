@@ -565,94 +565,191 @@ When to use:
 </ripple>"""
 
 
-_CLOUD_POCKET_TOOL_PREAMBLE = """\
-<cloud-pocket-tools>
-This conversation runs in cloud mode. Pocket operations go through these
-in-process MCP tools — NOT the Bash ``python -m pocketpaw.tools.cli``
-bridge mentioned below. The CLI bridge does not persist in cloud mode;
-the MCP tools do. Same operations, typed JSON arguments, no shell
-escaping headaches:
+_CLOUD_POCKET_INTERACTION_PROMPT = """\
+<pocket-scope>
+A "Pocket" in this conversation is a workspace dashboard — a MongoDB
+document whose **only renderable surface is ``rippleSpec.ui``**, a
+UISpec node tree (``{{type, props, children}}``). Its id is
+``{pocket_id}``.
 
-- ``mcp__pocketpaw_pocket__get_pocket(pocket_id)`` — replaces
-  ``cli get_pocket``. Returns the full pocket document.
-- ``mcp__pocketpaw_pocket__create_pocket(name, description, type, icon,
-  color, ripple_spec)`` — replaces ``cli create_pocket``. ``ripple_spec``
-  takes either a UISpec node tree (``{{type, props, children}}``) or a
-  ``{{ui: <node>, ...}}`` envelope; the server normalizes either form.
-- ``mcp__pocketpaw_pocket__update_pocket(pocket_id, name?, description?,
-  icon?, color?, ripple_spec?)`` — replaces ``cli create_pocket``-as-
-  rebuild for an existing pocket. Patch only the fields you pass.
-- ``mcp__pocketpaw_pocket__add_widget(pocket_id, widget)`` — replaces
-  ``cli add_widget``.
-- ``mcp__pocketpaw_pocket__update_widget(pocket_id, widget_id, fields)``
-  — patch one widget.
-- ``mcp__pocketpaw_pocket__remove_widget(pocket_id, widget_id)`` —
-  replaces ``cli remove_widget``.
+When the user says "pocket", "this pocket", "edit the pocket", "add a
+widget", "more widgets", they mean THIS dashboard (id ``{pocket_id}``)
+— the live document on their screen. They do NOT mean:
 
-The ``<current-pocket>`` id for this conversation (when one is attached)
-is in the ``<scope>`` tag at the top of this prompt: ``pocket {pocket_id}``.
-Pass that id verbatim as ``pocket_id``. Wherever the guidance below says
-"echo '...' | python -m pocketpaw.tools.cli X", call the matching MCP
-tool with the same JSON fields instead.
-</cloud-pocket-tools>
+- The PocketPaw application or its source code on disk.
+- Any file under ``D:\\\\paw``, ``backend/``, or ``ee/cloud/``.
+- The ``pocketpaw`` Python package itself.
+
+Use the shell commands below through your built-in ``shell`` tool and
+stop — do NOT grep the repo, read source files, or explore the codebase
+to satisfy a pocket request.
+</pocket-scope>
+
+<rippleSpec-is-the-canvas>
+**rippleSpec.ui is the entire visible canvas. Nothing else renders.**
+
+The pocket document still has a legacy embedded ``widgets`` array, but
+the desktop client renders straight from ``rippleSpec.ui``. Mutating
+the legacy array (via ``cloud_add_widget`` / ``cloud_update_widget`` /
+``cloud_remove_widget``) writes data the user will NEVER see. Don't
+use those commands.
+
+To make any visible change, you must rewrite ``rippleSpec`` and pass it
+to ``cloud_update_pocket``. There are no shortcuts.
+</rippleSpec-is-the-canvas>
+
+<pocket-cli>
+Pocket reads/writes happen through ``python -m pocketpaw.tools.cli
+cloud_<command>``. Pipe JSON via stdin (the ``-`` arg) so the shell
+doesn't mangle ``$``-prefixed values like ``$74.30``:
+
+  echo '<json>' | python -m pocketpaw.tools.cli cloud_<command> -
+
+Read (always call this first before a write):
+  echo '{{"pocket_id":"{pocket_id}"}}' | python -m pocketpaw.tools.cli cloud_get_pocket -
+    → ``{{"ok": true, "pocket": {{...full document including rippleSpec...}}}}``
+
+Write — there is exactly ONE write you should ever issue:
+
+  cloud_update_pocket
+    JSON: {{"pocket_id", "ripple_spec": {{ ...full new UISpec tree... }}}}
+    Optional cosmetic fields: name?, description?, icon?, color?.
+    ``ripple_spec`` accepts a bare UISpec node tree
+    (``{{type, props, children}}``) OR a ``{{ui: <node>, ...}}`` envelope;
+    both normalize on the server.
+
+Windows: PowerShell here-strings keep JSON literal —
+  @'<json>'@ | python -m pocketpaw.tools.cli cloud_update_pocket -
+
+Each write returns the new state inline. Don't re-run
+``cloud_get_pocket`` to "verify" — the write echoes the result.
+</pocket-cli>
+
+<pocket-workflow>
+Step 1 — classify intent
+- READ: "what's in this", "show me", "summarize", "explain", "where
+  is X". → call ``cloud_get_pocket`` once, answer from
+  ``rippleSpec.ui`` in the returned JSON.
+- WRITE: "add", "remove", "change", "rename", "make it X", "more
+  widgets", "another chart". → call ``cloud_get_pocket`` first to read
+  the current ``rippleSpec.ui`` tree, build the FULL updated tree
+  locally, then call ``cloud_update_pocket`` once with the new
+  ``ripple_spec``.
+- CHAT: message doesn't reference the pocket / widgets / layout. →
+  reply directly; do not call any cloud_* command.
+
+Step 2 — build the new rippleSpec
+- Start from the existing ``rippleSpec.ui`` tree returned by
+  ``cloud_get_pocket``. Preserve everything the user didn't ask to
+  change.
+- Insert / replace / remove only the nodes the user asked about. Don't
+  rewrite untouched panes, headings, charts, or tables.
+- Reference real values from the existing tree (metric numbers, chart
+  points, table rows). Do NOT invent content. No "N/A", "TBD",
+  "...", null. If estimating, prefix with "~" (e.g. "~$5B").
+- Allowed node types: ``flex``, ``grid``, ``heading``, ``text``,
+  ``badge``, ``metric``, ``chart``, ``table``, ``feed``, ``workflow``,
+  ``image``, ``card``, ``tabs``, ``callout``, ``container``,
+  ``button``, ``input``, ``select``, ``checkbox``, ``switch``,
+  ``avatar``, ``progress``.
+- Colors: ``#30D158`` green, ``#FF453A`` red, ``#FF9F0A`` orange,
+  ``#0A84FF`` blue, ``#BF5AF2`` purple, ``#5E5CE6`` indigo.
+
+Step 3 — hard rules
+- NEVER call ``cloud_add_widget`` / ``cloud_update_widget`` /
+  ``cloud_remove_widget``. They mutate the legacy embedded widgets
+  array which is dead code on the client; the change won't render.
+- NEVER call ``cloud_create_pocket`` to fulfill an edit request. The
+  pocket already exists; creating another spawns a duplicate.
+- NEVER read source files, grep the repo, or run web_search to figure
+  out a pocket operation. The two commands above are the whole
+  interface.
+- NEVER write files to disk or generate HTML to "demonstrate" a
+  change. The client renders the new rippleSpec automatically.
+- If ``cloud_update_pocket`` returns ``{{"ok": false, "error": "..."}}``,
+  surface the error and stop. Do NOT shell-grep the codebase to debug.
+</pocket-workflow>
 
 """
 
 
-_POCKET_TOOLS_HINT_TEMPLATE = """\
-{preamble}{interaction_context}"""
+_CLOUD_POCKET_CREATION_PROMPT = """\
+<pocket-creation>
+The user wants to create a NEW pocket — a workspace dashboard.
 
+**The dashboard renders only from ``rippleSpec.ui``.** A pocket without
+a ``ripple_spec`` is an empty dashboard. Build the full UISpec node
+tree up front and pass it as ``ripple_spec``. Do NOT pass a separate
+``widgets`` array — that field exists for legacy reasons and the
+client doesn't render from it.
 
-def _load_oss_pocket_contexts() -> tuple[str, str]:
-    """Lazy-import the OSS pocket system prompts so this module stays
-    independent of ``pocketpaw.api.v1.pockets`` import order. Falls back
-    to empty strings if the OSS path isn't reachable (build_context_block
-    will simply render without the rich guidance)."""
-    try:
-        from pocketpaw.api.v1.pockets import (
-            _POCKET_CREATION_CONTEXT,
-            _POCKET_INTERACTION_CONTEXT,
-        )
+Use the cloud CLI command via your ``shell`` tool, piping JSON via
+stdin so currency / ``$`` values survive the shell:
 
-        return _POCKET_INTERACTION_CONTEXT, _POCKET_CREATION_CONTEXT
-    except Exception:  # noqa: BLE001
-        logger.debug("OSS pocket prompts unavailable", exc_info=True)
-        return "", ""
+  echo '<json>' | python -m pocketpaw.tools.cli cloud_create_pocket -
+
+JSON body:
+  {{
+    "name": "<short title>",            // required
+    "description": "<one-line summary>",
+    "type": "research|business|data|mission|deep-work|custom|hospitality",
+    "icon": "<icon name>",
+    "color": "#0A84FF",
+    "ripple_spec": {{ ... UISpec tree — REQUIRED, this is the canvas ... }}
+  }}
+
+Allowed UISpec node types: ``flex``, ``grid``, ``heading``, ``text``,
+``badge``, ``metric``, ``chart``, ``table``, ``feed``, ``workflow``,
+``image``, ``card``, ``tabs``, ``callout``, ``container``, ``button``,
+``input``, ``select``, ``checkbox``, ``switch``, ``avatar``,
+``progress``.
+
+Each node: ``{{type, props, children?, style?}}``. Nest with
+``children`` arrays in ``flex``/``grid``.
+
+Hard rules:
+- NEVER read source files or grep the repo to figure out the schema —
+  the docs above are the contract.
+- NEVER pass a ``widgets`` array. Put everything inside ``ripple_spec``.
+- All values must be concrete — no "TBD", "...", null. If estimating,
+  prefix with "~".
+- Colors: ``#30D158`` green, ``#FF453A`` red, ``#FF9F0A`` orange,
+  ``#0A84FF`` blue, ``#BF5AF2`` purple, ``#5E5CE6`` indigo.
+
+The command returns ``{{"ok": true, "pocket": {{...}}, "pocket_id":
+"..."}}``. The new pocket mounts in the user's sidebar automatically;
+do not follow up with ``cloud_get_pocket``.
+</pocket-creation>
+
+"""
 
 
 def build_context_block(ctx: ScopeContext) -> str:
-    """Compact string the agent prompt embeds so the model knows who is here
-    and how to render rich UI back to the client.
+    """Compact string the agent prompt embeds so the model knows who is
+    here and how to render rich UI back to the client.
 
-    Three pocket modes drive different prompt blocks:
-    - ``pocket_create`` intent → emit the OSS pocket-creation prompt
-      (intent classification, formats, hard rules) prefixed with a
-      cloud-mode preamble that maps the CLI bridge invocations to the
-      MCP tools.
-    - Active pocket attached → emit the OSS pocket-interaction prompt
-      with the same cloud-mode preamble + the ripple-inline hint.
-    - Plain chat (DM, group, free session) → ripple-inline hint only.
+    Three pocket modes drive different prompt blocks. The cloud-mode
+    blocks are self-contained — they used to be assembled by stacking
+    a cloud-tools preamble on top of the OSS desktop pocket prompts,
+    but the OSS prompts told the agent to invoke
+    ``python -m pocketpaw.tools.cli ...`` over Bash, which the cloud
+    runtime can't actually execute. Codex (and any other tool-using
+    backend) then dutifully tried to spawn the CLI, hit empty results,
+    and spiralled into reading the source tree to "figure out" the
+    operation. The replacement prompts below are MCP-only and lead
+    with a hard pocket-vs-PocketPaw scope clarification.
     """
-    interaction_ctx, creation_ctx = _load_oss_pocket_contexts()
-
     member_list = ", ".join(ctx.members) if ctx.members else "(none)"
     parts = [
         f"<scope>{ctx.kind.value} {ctx.scope_id}</scope>",
         f"<participants>{member_list}</participants>",
     ]
     if ctx.intent == "pocket_create":
-        preamble = _CLOUD_POCKET_TOOL_PREAMBLE.format(pocket_id="<new-pocket>")
-        parts.append(preamble + (creation_ctx or ""))
+        parts.append(_CLOUD_POCKET_CREATION_PROMPT)
         return "\n".join(parts)
     if ctx.pocket_id:
-        if interaction_ctx:
-            parts.append(
-                _POCKET_TOOLS_HINT_TEMPLATE.format(
-                    preamble=_CLOUD_POCKET_TOOL_PREAMBLE.format(pocket_id=ctx.pocket_id),
-                    interaction_context=interaction_ctx,
-                )
-            )
-            parts.append(f"<current-pocket id=\"{ctx.pocket_id}\" />")
+        parts.append(_CLOUD_POCKET_INTERACTION_PROMPT.format(pocket_id=ctx.pocket_id))
+        parts.append(f"<current-pocket id=\"{ctx.pocket_id}\" />")
     parts.append(_RIPPLE_HINT)
     return "\n".join(parts)
 

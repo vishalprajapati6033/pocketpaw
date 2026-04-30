@@ -393,8 +393,10 @@ def test_build_context_block_pocket_create_intent_uses_creation_context():
         intent="pocket_create",
     )
     block = build_context_block(ctx)
-    # Sanity: cloud preamble is present and didn't crash on format-braces.
-    assert "<cloud-pocket-tools>" in block
+    # Sanity: cloud creation prompt is present and points at the CLI command
+    # the agent will invoke through its built-in shell tool.
+    assert "<pocket-creation>" in block
+    assert "cloud_create_pocket" in block
 
 
 def test_normalizer_lifts_raw_ui_node_under_ui_field():
