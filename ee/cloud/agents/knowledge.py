@@ -25,12 +25,46 @@ import json
 import logging
 import mimetypes
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-KB_BIN = os.environ.get("POCKETPAW_KB_BIN", "kb-go")
+
+def _resolve_kb_bin() -> str:
+    """Find the kb binary, in order of preference.
+
+    1. ``POCKETPAW_KB_BIN`` env var (explicit override).
+    2. ``kb-go`` on PATH (preferred name).
+    3. ``kb`` on PATH (alternate name; kb-go releases ship the binary as
+       ``kb`` from a build step).
+    4. Workspace-local checkout at ``<paw-workspace>/kb-go/kb`` — the
+       common dev layout where the kb-go repo sits next to pocketpaw.
+
+    Returns the literal string ``"kb-go"`` when nothing resolves so the
+    error message stays informative ("kb binary not found at 'kb-go'").
+
+    Resolved at import time; override via env if your binary moves.
+    """
+    explicit = os.environ.get("POCKETPAW_KB_BIN")
+    if explicit:
+        return explicit
+    for name in ("kb-go", "kb"):
+        path = shutil.which(name)
+        if path:
+            return path
+    # Workspace-local fallback — pocketpaw lives at <ws>/pocketpaw and
+    # kb-go at <ws>/kb-go in the canonical OCEAN-workspace layout. Walk
+    # up from this file looking for any ancestor that contains kb-go/kb.
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "kb-go" / "kb"
+        if candidate.exists():
+            return str(candidate)
+    return "kb-go"
+
+
+KB_BIN = _resolve_kb_bin()
 
 
 def _kb(*args: str, input_text: str | None = None, timeout: int = 120) -> dict | list | str:
@@ -48,9 +82,10 @@ def _kb(*args: str, input_text: str | None = None, timeout: int = 120) -> dict |
         )
     except FileNotFoundError:
         raise RuntimeError(
-            f"kb binary not found at '{KB_BIN}'. "
-            "Install: go install github.com/qbtrix/kb-go@latest "
-            "or set POCKETPAW_KB_BIN to the binary path (e.g. kb-go)."
+            f"kb binary not found at {KB_BIN!r}. "
+            "Install: go install github.com/qbtrix/kb-go@latest, "
+            "or set POCKETPAW_KB_BIN to the binary path (e.g. /path/to/kb-go/kb), "
+            "or place the workspace-local checkout at <paw-workspace>/kb-go/kb."
         )
     if result.returncode != 0:
         logger.warning("kb failed (exit %d): %s", result.returncode, result.stderr[:200])
