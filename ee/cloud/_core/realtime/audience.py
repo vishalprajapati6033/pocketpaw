@@ -151,7 +151,14 @@ class AudienceResolver:
 
         # --- Files --------------------------------------------------------------
         if t in {"file.ready", "file.deleted"}:
-            return await self._group(d["group_id"])
+            # Chat-scoped uploads broadcast to the chat group's members so the
+            # timeline updates live. Workspace-only uploads (no chat_id) don't
+            # have a chat audience — local subscribers (e.g. the KB indexer)
+            # still fire via the bus's in-process handlers.
+            gid = d.get("group_id")
+            if not gid:
+                return []
+            return await self._group(gid)
 
         # --- Agent --------------------------------------------------------------
         if t in {

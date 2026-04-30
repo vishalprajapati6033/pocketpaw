@@ -1,3 +1,8 @@
+# test_upload_emits.py — emit-time behaviour for EEUploadService.
+# Updated: 2026-04-30 — Stage 1.B "Files as Knowledge". FileReady now
+#   emits for every successful upload (chat-scoped or workspace-only)
+#   and always carries workspace_id + storage_key. Tests updated to
+#   match.
 """Tests that EEUploadService emits file.ready / file.deleted."""
 
 from __future__ import annotations
@@ -57,14 +62,18 @@ async def test_upload_many_emits_file_ready_when_chat_scoped(monkeypatch):
     assert file_ids == {"f1", "f2"}
     for e in file_events:
         assert e.data["group_id"] == "g1"
+        assert e.data["workspace_id"] == "w1"
         assert e.data["filename"] == "hello.txt"
         assert e.data["mime"] == "text/plain"
         assert e.data["size"] == 11
         assert "url" in e.data
+        assert "storage_key" in e.data
 
 
 @pytest.mark.asyncio
-async def test_upload_many_no_emit_when_chat_id_is_none(monkeypatch):
+async def test_upload_many_emits_file_ready_for_workspace_only(monkeypatch):
+    """Workspace-only uploads (no chat_id) still emit FileReady so the KB
+    indexer fires; the broadcast just skips the chat audience."""
     inner_result = BulkUploadResult(uploaded=[_rec("f1", chat_id=None)], failed=[])
 
     recorded, fake_emit = _capture_emits()
@@ -78,7 +87,12 @@ async def test_upload_many_no_emit_when_chat_id_is_none(monkeypatch):
 
     await svc.upload_many([], owner_id="u1", chat_id=None, workspace="w1")
 
-    assert not any(isinstance(e, FileReady) for e in recorded)
+    file_events = [e for e in recorded if isinstance(e, FileReady)]
+    assert len(file_events) == 1
+    ev = file_events[0]
+    assert ev.data["workspace_id"] == "w1"
+    assert ev.data["file_id"] == "f1"
+    assert "group_id" not in ev.data
 
 
 @pytest.mark.asyncio
@@ -99,11 +113,16 @@ async def test_delete_emits_file_deleted_when_chat_scoped(monkeypatch):
 
     file_events = [e for e in recorded if isinstance(e, FileDeleted)]
     assert len(file_events) == 1
-    assert file_events[0].data == {"group_id": "g1", "file_id": "f1"}
+    assert file_events[0].data == {
+        "group_id": "g1",
+        "file_id": "f1",
+        "workspace_id": "w1",
+    }
 
 
 @pytest.mark.asyncio
-async def test_delete_no_emit_when_file_not_chat_scoped(monkeypatch):
+async def test_delete_emits_file_deleted_for_workspace_only(monkeypatch):
+    """Workspace-only delete still emits so KB-side cleanup can react."""
     recorded, fake_emit = _capture_emits()
 
     rec = _rec("f1", chat_id=None)
@@ -118,4 +137,7 @@ async def test_delete_no_emit_when_file_not_chat_scoped(monkeypatch):
 
     await svc.delete("f1", requester_id="u1", workspace="w1")
 
-    assert not any(isinstance(e, FileDeleted) for e in recorded)
+    file_events = [e for e in recorded if isinstance(e, FileDeleted)]
+    assert len(file_events) == 1
+    ev = file_events[0]
+    assert ev.data == {"file_id": "f1", "workspace_id": "w1"}

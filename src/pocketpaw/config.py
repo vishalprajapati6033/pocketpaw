@@ -1,6 +1,10 @@
 """Configuration management for PocketPaw.
 
 Changes:
+  - 2026-04-30: Added ``kb_scopes`` (list[str]) for multi-scope KB queries.
+    ``kb_scope`` (single string) is now a deprecation shim — when set and
+    ``kb_scopes`` is empty, it copies forward and emits DeprecationWarning.
+    Stage 1.B of "Files as Knowledge".
   - 2026-04-16: SSRF guard on URL config fields — opencode_base_url,
     litellm_api_base, openai_compatible_base_url, mem0_ollama_base_url,
     embedding_base_url, signal_api_url, mcp_client_metadata_url are now
@@ -21,11 +25,12 @@ from __future__ import annotations
 import json
 import logging
 import re
+import warnings
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, Field
+from pydantic import AfterValidator, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from pocketpaw.security.url_validators import validate_external_url
@@ -876,9 +881,20 @@ class Settings(BaseSettings):
     kb_scope: str = Field(
         default="",
         description=(
-            "Knowledge base scope to query via the `kb` CLI (github.com/qbtrix/kb-go). "
-            "When set and the kb binary is on PATH, relevant articles are injected "
-            "into the agent system prompt alongside soul memories. Empty = disabled."
+            "DEPRECATED: single-scope back-compat shim. Prefer ``kb_scopes`` "
+            "(list). When ``kb_scopes`` is empty and ``kb_scope`` is set, "
+            "the value is copied into ``kb_scopes`` and a DeprecationWarning "
+            "is emitted. Set via POCKETPAW_KB_SCOPE."
+        ),
+    )
+    kb_scopes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Ordered list of kb-go scopes to query when building the agent "
+            "system prompt. Each scope receives a slice of the total limit; "
+            "results are concatenated under per-scope headers. Set via "
+            "POCKETPAW_KB_SCOPES as a JSON array (e.g. "
+            '["workspace:w1","agent:a1"]).'
         ),
     )
     kb_binary: str = Field(
@@ -969,6 +985,26 @@ class Settings(BaseSettings):
     max_concurrent_conversations: int = Field(
         default=5, gt=0, description="Max parallel conversations processed simultaneously"
     )
+
+    @model_validator(mode="after")
+    def _migrate_kb_scope(self) -> Settings:
+        """Copy deprecated single ``kb_scope`` into ``kb_scopes`` once.
+
+        When a host has only the legacy ``POCKETPAW_KB_SCOPE`` set we keep
+        their KB injection working: the string is appended to ``kb_scopes``
+        and a :class:`DeprecationWarning` nudges them to switch. If both
+        keys are populated the new list wins and the legacy string is
+        ignored (no surprise merging).
+        """
+        if not self.kb_scopes and self.kb_scope:
+            warnings.warn(
+                "POCKETPAW_KB_SCOPE is deprecated; use POCKETPAW_KB_SCOPES "
+                "(list, e.g. POCKETPAW_KB_SCOPES='[\"workspace:w1\"]')",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self.kb_scopes = [self.kb_scope]
+        return self
 
     def save(self) -> None:
         """Save settings to config file.

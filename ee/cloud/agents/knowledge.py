@@ -1,4 +1,9 @@
 # knowledge.py — Agent knowledge service via the kb-go binary.
+# Updated: 2026-04-30 — Stage 1.B of "Files as Knowledge". Added
+#   ingest_text_to_scope so callers (notably the FileReady listener) can
+#   target arbitrary kb-go scopes (workspace:{wid}, pocket:{pid}) without
+#   shoehorning everything through agent:{aid}. Existing ingest_text and
+#   ingest_file are now thin wrappers over the new entry point.
 # Updated: 2026-04-30 — File extraction routed through the pluggable
 #   ee/cloud/extraction chain (LocalExtractor preserves the previous pypdf
 #   / python-docx / pytesseract behaviour; cloud adapters slot in via
@@ -57,24 +62,38 @@ def _kb(*args: str, input_text: str | None = None, timeout: int = 120) -> dict |
 
 
 class KnowledgeService:
-    """Agent-scoped knowledge operations via the kb Go binary."""
+    """Knowledge operations via the kb Go binary.
+
+    All ingest paths funnel through :meth:`ingest_text_to_scope` so the
+    scope shape (``agent:{id}``, ``workspace:{id}``, ``pocket:{id}``) is
+    decided by the caller, not by this class.
+    """
+
+    @staticmethod
+    async def ingest_text_to_scope(
+        scope: str, text: str, source: str = "manual"
+    ) -> dict:
+        """Ingest ``text`` into an arbitrary kb-go scope.
+
+        ``scope`` is the literal scope string the kb binary understands
+        (e.g. ``"workspace:w1"``, ``"agent:a1"``, ``"pocket:p1"``). No
+        validation here — kb-go rejects unknown scope shapes itself.
+        """
+        return _kb("ingest", "--scope", scope, "--source", source, input_text=text)
 
     @staticmethod
     async def ingest_text(agent_id: str, text: str, source: str = "manual") -> dict:
-        return _kb("ingest", "--scope", f"agent:{agent_id}", "--source", source, input_text=text)
+        return await KnowledgeService.ingest_text_to_scope(
+            f"agent:{agent_id}", text, source
+        )
 
     @staticmethod
     async def ingest_url(agent_id: str, url: str) -> dict:
         """Fetch URL with trafilatura (Python), pipe text to kb."""
         try:
             text = await _extract_url(url)
-            return _kb(
-                "ingest",
-                "--scope",
-                f"agent:{agent_id}",
-                "--source",
-                url,
-                input_text=text,
+            return await KnowledgeService.ingest_text_to_scope(
+                f"agent:{agent_id}", text, url
             )
         except Exception as exc:
             return {"error": str(exc), "url": url}
@@ -90,15 +109,10 @@ class KnowledgeService:
         label = source or path.name
         if path.suffix.lower() in (".pdf", ".docx", ".doc", ".png", ".jpg", ".jpeg"):
             text = await _extract_file(file_path)
-            return _kb(
-                "ingest",
-                "--scope",
-                f"agent:{agent_id}",
-                "--source",
-                label,
-                input_text=text,
+            return await KnowledgeService.ingest_text_to_scope(
+                f"agent:{agent_id}", text, label
             )
-        # Text/code files go directly to kb
+        # Text/code files go directly to kb (without intermediate extraction)
         return _kb("ingest", file_path, "--scope", f"agent:{agent_id}", "--source", label)
 
     @staticmethod

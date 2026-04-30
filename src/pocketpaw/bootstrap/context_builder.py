@@ -1,6 +1,12 @@
 """
 Builder for assembling the full agent context.
 Created: 2026-02-02
+Updated: 2026-04-30 - Multi-scope KB injection (Stage 1.B "Files as
+Knowledge"). _get_kb_context now reads ``settings.kb_scopes`` (list) and
+queries each scope independently, dividing the token budget by scope count
+and concatenating the results under ``### From <scope>`` headers. The
+deprecated ``kb_scope`` (string) feeds in via a back-compat shim in
+``Settings``.
 Updated: 2026-04-08 - kb injection: query kb-go for structured knowledge
 alongside soul memories
 Updated: 2026-04-01 - Context window budget tracking: priority-based injection with per-block caps
@@ -379,16 +385,19 @@ class AgentContextBuilder:
 
     @staticmethod
     async def _get_kb_context(user_query: str | None) -> str:
-        """Fetch relevant articles from the kb-go CLI.
+        """Fetch relevant articles from the kb-go CLI across configured scopes.
 
-        Uses `kb search <query> --scope <scope> --context` to get pre-formatted
-        text ready for prompt injection. Runs the kb binary as a subprocess so
-        kb stays a standalone tool and paw-runtime never takes a hard dependency
-        on it.
+        Each scope in ``settings.kb_scopes`` is queried independently with
+        ``kb search <query> --scope <s> --context --limit M`` where
+        ``M = max(1, total_limit // len(scopes))``. Results are concatenated
+        under ``### From <scope>`` headers so the model can attribute hits.
+        Per-scope failures are logged at debug and skipped so one missing
+        scope cannot break the prompt build.
 
-        Returns empty string on any failure (missing binary, missing scope,
-        empty query, timeout, non-zero exit). Failures never break prompt
-        building — kb is a nice-to-have, not a critical path.
+        Returns an empty string when ``user_query`` is empty, when no scopes
+        are configured (or only the deprecated ``kb_scope`` is set, see the
+        ``_migrate_kb_scope`` validator on ``Settings``), or when every
+        scope errors / returns nothing.
         """
         if not user_query:
             return ""
@@ -396,23 +405,49 @@ class AgentContextBuilder:
         from pocketpaw.config import get_settings
 
         settings = get_settings()
-        scope = (settings.kb_scope or "").strip()
-        if not scope:
+        # ``kb_scopes`` is the canonical list. The deprecated single
+        # ``kb_scope`` is folded into the list by the model validator, so
+        # by the time we read settings here we only ever see the list.
+        scopes = [s.strip() for s in (settings.kb_scopes or []) if s and s.strip()]
+        if not scopes:
             return ""
 
         binary = settings.kb_binary or "kb"
-        limit = str(settings.kb_limit or 3)
+        total_limit = settings.kb_limit or 3
+        per_scope_limit = max(1, total_limit // len(scopes))
 
+        sections: list[str] = []
+        for scope in scopes:
+            section = await AgentContextBuilder._fetch_kb_scope(
+                binary=binary,
+                query=user_query,
+                scope=scope,
+                limit=per_scope_limit,
+            )
+            if section:
+                sections.append(f"### From {scope}\n{section}")
+
+        return "\n\n".join(sections)
+
+    @staticmethod
+    async def _fetch_kb_scope(
+        *,
+        binary: str,
+        query: str,
+        scope: str,
+        limit: int,
+    ) -> str:
+        """Run ``kb search ... --scope <scope>`` once. Empty on any failure."""
         try:
             proc = await asyncio.create_subprocess_exec(
                 binary,
                 "search",
-                user_query,
+                query,
                 "--scope",
                 scope,
                 "--context",
                 "--limit",
-                limit,
+                str(limit),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -421,20 +456,19 @@ class AgentContextBuilder:
             except TimeoutError:
                 proc.kill()
                 await proc.wait()
-                logger.debug("kb context fetch timed out after 3s")
+                logger.debug("kb context fetch for scope %s timed out after 3s", scope)
                 return ""
         except FileNotFoundError:
             logger.debug("kb binary not found at %s — skipping kb injection", binary)
             return ""
         except Exception as exc:  # noqa: BLE001
-            logger.debug("kb context fetch failed (non-fatal): %s", exc)
+            logger.debug("kb context fetch for scope %s failed (non-fatal): %s", scope, exc)
             return ""
 
         if proc.returncode != 0:
             return ""
 
-        output = stdout.decode("utf-8", errors="replace").strip()
-        return output
+        return stdout.decode("utf-8", errors="replace").strip()
 
     @staticmethod
     def _load_channel_instructions(channel: Channel) -> str:
