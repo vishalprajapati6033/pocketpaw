@@ -239,6 +239,23 @@ class Settings(BaseSettings):
     codex_cli_max_turns: int = Field(
         default=100, description="Max turns per query in Codex CLI backend (0 = unlimited)"
     )
+    codex_cli_api_key: str | None = Field(
+        default=None,
+        description=(
+            "Optional API key for the Codex CLI backend. Falls back to "
+            "openai_api_key when unset; useful when the user wants Codex "
+            "talking to a different account than the rest of OpenAI tooling."
+        ),
+    )
+    codex_cli_base_url: str | None = Field(
+        default=None,
+        description=(
+            "Optional base URL for the Codex CLI backend (sets OPENAI_BASE_URL "
+            "for the codex subprocess). Lets you point Codex at an "
+            "OpenAI-compatible proxy (LiteLLM, Azure, etc.) without changing "
+            "the global OpenAI base URL."
+        ),
+    )
 
     # Copilot SDK Settings
     copilot_sdk_provider: str = Field(

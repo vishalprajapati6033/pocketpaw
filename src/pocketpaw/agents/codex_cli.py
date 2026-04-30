@@ -307,8 +307,23 @@ class CodexCLIBackend:
             )
 
             subprocess_env = _build_subprocess_env(instructions)
+            # Per-backend API key + base URL overrides — let the user
+            # point Codex at a separate account or an OpenAI-compatible
+            # proxy without flipping the global ``openai_api_key`` /
+            # ``openai_compatible_base_url`` settings.
+            codex_api_key = (
+                getattr(self.settings, "codex_cli_api_key", None)
+                or self.settings.openai_api_key
+                or None
+            )
+            codex_base_url = getattr(self.settings, "codex_cli_base_url", None) or None
             codex = Codex(
-                CodexOptions(codex_path_override=self._codex_path, env=subprocess_env)
+                CodexOptions(
+                    codex_path_override=self._codex_path,
+                    env=subprocess_env,
+                    api_key=codex_api_key,
+                    base_url=codex_base_url,
+                )
             )
 
             # Codex 0.125 on Windows sometimes leaks non-JSON lines into
