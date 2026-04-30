@@ -310,6 +310,35 @@ class CodexCLIBackend:
             codex = Codex(
                 CodexOptions(codex_path_override=self._codex_path, env=subprocess_env)
             )
+
+            # Codex 0.125 on Windows sometimes leaks non-JSON lines into
+            # its --experimental-json stdout — most reliably reproduced
+            # is the ``codex-command-runner.exe`` shutdown printing
+            # ``SUCCESS: The process with PID <n> ... has been
+            # terminated.`` from its internal ``taskkill`` invocation.
+            # The SDK's parser then raises ``EventParseError`` and the
+            # whole stream dies. Wrap ``CodexExec.run`` so non-JSON
+            # lines are dropped at the source — codex's actual JSONL
+            # frames always start with ``{``. Guarded with hasattr
+            # because tests can replace ``Codex`` with a stub that
+            # doesn't carry an ``_exec`` attribute.
+            _exec = getattr(codex, "_exec", None)
+            if _exec is not None and hasattr(_exec, "run"):
+                _orig_exec_run = _exec.run
+
+                async def _filtered_run(args):  # type: ignore[no-redef]
+                    async for line in _orig_exec_run(args):
+                        stripped = line.lstrip() if line else ""
+                        if stripped.startswith("{"):
+                            yield line
+                        elif stripped:
+                            logger.debug(
+                                "Dropped non-JSON line from codex stdout: %r",
+                                line[:120],
+                            )
+
+                _exec.run = _filtered_run
+
             thread = codex.start_thread(
                 ThreadOptions(
                     model=model,
