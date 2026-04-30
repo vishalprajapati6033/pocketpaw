@@ -280,7 +280,14 @@ class CodexCLIBackend:
             return
 
         self._stop_flag = False
-        model = self.settings.codex_cli_model or "gpt-5.4"
+        # Pass through whatever the user configured. When unset, leave it
+        # ``None`` so the SDK omits ``--model`` and codex falls back to
+        # the user's ``~/.codex/config.toml`` ``model = "..."`` entry.
+        # Hardcoding a default here breaks ChatGPT-plan accounts whose
+        # available model set doesn't match ours (e.g. plans that only
+        # authorize gpt-5.5 when we default to gpt-5.4 → exit 1 with
+        # nothing useful on stderr).
+        model = self.settings.codex_cli_model or None
 
         # AGENTS.md sandbox: a temp directory whose only content is the
         # PocketPaw system prompt. Codex auto-loads ``AGENTS.md`` from cwd
@@ -457,7 +464,7 @@ class CodexCLIBackend:
                             "cached_input_tokens": getattr(
                                 usage, "cached_input_tokens", 0
                             ),
-                            "model": model,
+                            "model": model or "(codex-config)",
                             "backend": "codex_cli",
                         },
                     )
@@ -472,7 +479,25 @@ class CodexCLIBackend:
 
         except CodexExecError as exc:
             logger.error("Codex SDK exec failure: %s", exc)
-            yield AgentEvent(type="error", content=f"Codex CLI error: {exc}")
+            msg = str(exc)
+            # Codex's rollout-flush error after a hard failure is the only
+            # thing on stderr most of the time — it tells the user nothing
+            # about the actual cause. Add a hint pointing at the usual
+            # culprit (model not authorised on this account / plan).
+            if (
+                "failed to record rollout items" in msg
+                or "Reading prompt from stdin" in msg
+            ) and "invalid" not in msg.lower():
+                msg += (
+                    "\n\nHint: this stderr usually means codex bailed before "
+                    "running the prompt. The most common cause is the model "
+                    f"({model or 'config-default'}) not being authorised on "
+                    "your codex account — check ``~/.codex/config.toml`` "
+                    "(``model = \"...\"``) and ensure the value is one your "
+                    "ChatGPT plan supports. Run `codex exec --json --model "
+                    "<your-model> -` outside PocketPaw to confirm."
+                )
+            yield AgentEvent(type="error", content=f"Codex CLI error: {msg}")
             yield AgentEvent(type="done", content="")
         except Exception as exc:  # noqa: BLE001 — surface to the agent loop.
             logger.exception("Unexpected Codex SDK failure")
@@ -498,5 +523,5 @@ class CodexCLIBackend:
             "backend": "codex_cli",
             "cli_available": self._cli_available,
             "running": self._abort_controller is not None,
-            "model": self.settings.codex_cli_model or "gpt-5.4",
+            "model": self.settings.codex_cli_model or "(codex-config)",
         }
