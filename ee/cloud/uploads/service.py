@@ -1,3 +1,8 @@
+# service.py — EEUploadService: workspace-scoped upload pipeline on top of OSS.
+# Updated: 2026-04-30 — Stage 1.B "Files as Knowledge". FileReady now fires
+#   for every successful upload (chat-scoped or workspace-only) and always
+#   carries workspace_id so downstream subscribers (the KB indexer) can route
+#   the file into the right scope without a follow-up Mongo lookup.
 """EEUploadService — workspace-scoped upload pipeline on top of the OSS service."""
 
 from __future__ import annotations
@@ -138,24 +143,25 @@ class EEUploadService:
     ) -> BulkUploadResult:
         # Delegate validation + adapter writes; metadata is discarded inside OSS
         result = await self._oss.upload_many(files, owner_id, chat_id)
-        # Persist each successful record in Mongo with workspace scoping
+        # Persist each successful record in Mongo with workspace scoping.
         for rec in result.uploaded:
             await self._meta.save_scoped(rec, workspace=workspace, folder_path=folder_path)
-            # Only chat-scoped uploads are realtime-broadcastable; avatars
-            # and knowledge uploads aren't rendered in chat timelines.
+            # Emit FileReady for every successful upload. Chat-scoped rows
+            # carry ``group_id`` so the timeline broadcast still works;
+            # workspace-only uploads (avatars, KB files) skip the broadcast
+            # but still fire local subscribers (the KB indexer).
+            data: dict = {
+                "workspace_id": workspace,
+                "file_id": rec.id,
+                "filename": rec.filename,
+                "mime": rec.mime,
+                "size": rec.size,
+                "storage_key": rec.storage_key,
+                "url": f"/api/v1/uploads/{rec.id}",
+            }
             if rec.chat_id:
-                await emit(
-                    FileReady(
-                        data={
-                            "group_id": rec.chat_id,
-                            "file_id": rec.id,
-                            "filename": rec.filename,
-                            "mime": rec.mime,
-                            "size": rec.size,
-                            "url": f"/api/v1/uploads/{rec.id}",
-                        }
-                    )
-                )
+                data["group_id"] = rec.chat_id
+            await emit(FileReady(data=data))
         return result
 
     async def stream(
@@ -200,12 +206,13 @@ class EEUploadService:
         # future cleanup job) rather than silently surviving visibility.
         await self._meta.soft_delete_scoped(file_id, workspace=workspace)
         await self._adapter.delete(rec.storage_key)
+        # Emit FileDeleted on every delete so subscribers can prune cached
+        # state (KB index, search caches). Chat-scoped rows include group_id
+        # for the timeline broadcast; workspace-only rows skip it.
+        data: dict = {
+            "workspace_id": workspace,
+            "file_id": rec.id,
+        }
         if rec.chat_id:
-            await emit(
-                FileDeleted(
-                    data={
-                        "group_id": rec.chat_id,
-                        "file_id": rec.id,
-                    }
-                )
-            )
+            data["group_id"] = rec.chat_id
+        await emit(FileDeleted(data=data))

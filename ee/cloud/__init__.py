@@ -1,5 +1,8 @@
 """PocketPaw Enterprise Cloud — domain-driven architecture.
 
+Updated: 2026-04-30 — Stage 1.B of "Files as Knowledge". Wires
+    ``register_upload_listeners`` into ``mount_cloud`` so the FileReady
+    bus subscriber drives KB indexing for every workspace upload.
 Updated: Added kb (knowledge base) domain router to mount_cloud().
 Updated: 2026-04-19 (Cluster C / PR1) — Mounted ee.cloud.kb.knowledge_router,
     which exposes GET /api/v1/knowledge/articles as a workspace-level aggregate.
@@ -306,6 +309,14 @@ def mount_cloud(app: FastAPI) -> None:
     # first service that calls ``emit(...)`` fails with "EventBus not
     # initialized".
     init_realtime()
+
+    # Register in-process bus subscribers (Stage 1.B "Files as Knowledge").
+    # The FileReady listener drives KB indexing for every workspace upload.
+    # Must run after ``init_realtime`` because subscriptions go on the
+    # singleton bus that init_realtime installs.
+    from ee.cloud.uploads.listeners import register_upload_listeners
+
+    register_upload_listeners()
 
     # Start/stop agent pool with app lifecycle.
     #

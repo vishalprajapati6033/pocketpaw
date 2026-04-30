@@ -32,7 +32,8 @@ class RecordingBus:
     """Test EventBus that records published events instead of fanning out.
 
     Drop-in replacement for the production bus. Tests assert on
-    ``bus.events`` to verify emit-time behavior.
+    ``bus.events`` to verify emit-time behavior. ``subscribe`` is a no-op
+    so the bus satisfies the same Protocol shape as :class:`InProcessBus`.
     """
 
     def __init__(self) -> None:
@@ -40,6 +41,11 @@ class RecordingBus:
 
     async def publish(self, event: Event) -> None:
         self.events.append(event)
+
+    def subscribe(self, event_type: str, handler) -> None:  # noqa: ARG002
+        # Tests can install their own subscribers via the real InProcessBus
+        # in a dedicated fixture; the recording bus stays inert by design.
+        return
 
 
 @pytest.fixture(autouse=True)
