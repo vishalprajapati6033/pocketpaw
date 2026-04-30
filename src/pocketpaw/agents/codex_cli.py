@@ -483,23 +483,56 @@ class CodexCLIBackend:
             # Codex's rollout-flush error after a hard failure is the only
             # thing on stderr most of the time — it tells the user nothing
             # about the actual cause. Add a hint pointing at the usual
-            # culprit (model not authorised on this account / plan).
+            # culprit (model not authorised on this account / plan, or the
+            # 0.124.0+ TTY-detached regression — openai/codex#19945).
             if (
                 "failed to record rollout items" in msg
                 or "Reading prompt from stdin" in msg
             ) and "invalid" not in msg.lower():
                 msg += (
                     "\n\nHint: this stderr usually means codex bailed before "
-                    "running the prompt. The most common cause is the model "
-                    f"({model or 'config-default'}) not being authorised on "
-                    "your codex account — check ``~/.codex/config.toml`` "
-                    "(``model = \"...\"``) and ensure the value is one your "
-                    "ChatGPT plan supports. Run `codex exec --json --model "
-                    "<your-model> -` outside PocketPaw to confirm."
+                    "running the prompt. Two likely causes:\n"
+                    f"  1. Model ({model or 'config-default'}) not authorised "
+                    "on your account — check ``~/.codex/config.toml`` "
+                    "(``model = \"...\"``).\n"
+                    "  2. codex-cli 0.124.0/0.125.0 regression (openai/codex"
+                    "#19945) — long prompts crash on Windows with stdio "
+                    "piped. Workaround: ``npm install -g "
+                    "@openai/codex@0.123.0``."
                 )
             yield AgentEvent(type="error", content=f"Codex CLI error: {msg}")
             yield AgentEvent(type="done", content="")
         except Exception as exc:  # noqa: BLE001 — surface to the agent loop.
+            # Specifically catch the SDK's JSONL parser failure when the
+            # codex binary leaks non-JSON garbage into stdout (e.g. the
+            # Windows elevated sandbox shutdown leaking ``taskkill``
+            # output: ``SUCCESS: The process with PID ... terminated``).
+            exc_class = type(exc).__name__
+            exc_msg = str(exc)
+            if exc_class == "EventParseError" or (
+                "Failed to parse JSONL" in exc_msg
+                and "SUCCESS: The process with PID" in exc_msg
+            ):
+                logger.error("Codex stdout-leak detected: %s", exc_msg)
+                yield AgentEvent(
+                    type="error",
+                    content=(
+                        "Codex CLI error: non-JSON line leaked into codex "
+                        "stdout, breaking the SDK's event parser:\n\n"
+                        f"  {exc_msg}\n\n"
+                        "On Windows this is almost always the elevated "
+                        "sandbox (``codex-windows-sandbox-setup.exe``) "
+                        "leaking ``taskkill`` output during shutdown. "
+                        "Workaround: edit ``~/.codex/config.toml`` and set\n"
+                        "    [windows]\n"
+                        "    sandbox = \"none\"\n"
+                        "(or downgrade codex-cli to 0.123.0). The codex-CLI "
+                        "sandbox we pass via ``--sandbox workspace-write`` "
+                        "is independent of this OS-level setting."
+                    ),
+                )
+                yield AgentEvent(type="done", content="")
+                return
             logger.exception("Unexpected Codex SDK failure")
             yield AgentEvent(type="error", content=f"Codex CLI error: {exc}")
             yield AgentEvent(type="done", content="")
