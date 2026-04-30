@@ -407,18 +407,52 @@ class AgentLoop:
         self._running = False
 
     def _get_router(self) -> AgentRouter:
-        """Get or create the agent router (lazy initialization).
+        """Get or create the agent router.
 
         Per-agent loops honour their captured ``self.settings`` (which
         already carries the agent's backend/model overrides) so we don't
         reload from disk and clobber them on first router access.
+
+        Default loops reload settings on every call and rebuild the
+        router when ``agent_backend`` changes. Without this the user can
+        flip ``agent_backend`` from claude_agent_sdk to codex_cli (or
+        vice-versa) in the dashboard and the running loop keeps using
+        the previously-cached backend until the process restarts.
         """
         if self._router is None:
             if self.agent_id:
                 self._router = AgentRouter(self.settings)
             else:
-                # Default loop: reload settings to pick up config changes.
                 self._router = AgentRouter(Settings.load())
+            return self._router
+
+        # Per-agent loop: don't second-guess agent-specific overrides.
+        if self.agent_id:
+            return self._router
+
+        # Default loop: detect backend changes since last call.
+        fresh_settings = Settings.load()
+        active = getattr(self._router, "_active_backend_name", None)
+        if active != fresh_settings.agent_backend:
+            old = self._router
+            logger.info(
+                "Backend changed: %s -> %s; rebuilding router",
+                active,
+                fresh_settings.agent_backend,
+            )
+            self.settings = fresh_settings
+            self._router = AgentRouter(fresh_settings)
+            # Best-effort cleanup of the previous backend (may own a
+            # subprocess like Codex). Fire-and-forget so we don't block
+            # the next ``run()``.
+            try:
+                task = asyncio.create_task(old.stop())
+                self._bg_tasks.add(task)
+                task.add_done_callback(self._bg_tasks.discard)
+            except RuntimeError:
+                # No running loop (sync caller during shutdown).
+                pass
+
         return self._router
 
     async def _generate_and_emit_title(self, session_key: str, first_message: str) -> None:
