@@ -36,8 +36,8 @@ _RIPPLE_KB_SCOPE = "ripple"
 _RIPPLE_KB_LIMIT = 3
 
 
-async def _get_ripple_widget_context(user_message: str) -> str:
-    """Search the 'ripple' kb scope for widget docs relevant to the user's request.
+async def _get_ripple_widget_context_via_kb(user_message: str) -> str:
+    """Search the local 'ripple' kb scope for widget docs (legacy fallback path).
 
     Returns pre-formatted markdown articles about the specific Ripple widgets
     the agent will need. Falls back to empty string on any failure — this is
@@ -92,6 +92,30 @@ async def _get_ripple_widget_context(user_message: str) -> str:
     )
 
 
+async def _get_ripple_widget_context_via_manifest() -> str:
+    """Fetch the Ripple widget manifest from CDN and render as a prompt block.
+
+    Returns "" on any failure — caller falls back to kb search.
+    """
+    from ee.ripple.manifest import format_for_prompt, get_manifest
+    from pocketpaw.config import get_settings
+
+    settings = get_settings()
+    manifest = await get_manifest(
+        settings.ripple_manifest_url,
+        ttl_seconds=settings.ripple_manifest_ttl_seconds,
+    )
+    if manifest is None:
+        return ""
+    return format_for_prompt(manifest)
+
+
+async def _get_ripple_widget_context(user_message: str) -> str:
+    """Get widget context for the agent: try CDN manifest first, fall back to kb."""
+    block = await _get_ripple_widget_context_via_manifest()
+    if block:
+        return block
+    return await _get_ripple_widget_context_via_kb(user_message)
 
 
 def _extract_chat_id(session_id: str | None) -> str:
