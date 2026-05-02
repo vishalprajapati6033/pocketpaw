@@ -456,112 +456,163 @@ def assemble_toolset(ctx: ScopeContext, *, base: list[dict[str, Any]]) -> list[d
 
 _RIPPLE_HINT = """\
 <ripple>
-You can render rich, interactive UI inline in your chat responses by emitting
-a JSON spec inside a ```ui-spec``` (or ```json```) fenced code block. The
-client renders it as live components in the message bubble.
+You can render rich UI inline in your chat responses by emitting a JSON
+spec inside a ```ui-spec``` fenced code block. The client renders it as
+live components in the message bubble.
 
-Spec shape (UISpec v1.0):
-```ui-spec
-{
-  "version": "1.0",
-  "ui": {
-    "type": "flex",
-    "props": { "direction": "column", "gap": "16px" },
-    "children": [
-      { "type": "heading", "props": { "text": "Overview", "level": 2 } },
-      { "type": "text", "props": { "text": "Summary line.", "size": "sm" } },
-      {
-        "type": "grid",
-        "props": { "columns": 3, "gap": 3 },
-        "children": [
-          { "type": "stat", "props": { "label": "Revenue", "value": 12450, "format": "currency", "deltaPercent": 3.4, "direction": "up-good" } },
-          { "type": "stat", "props": { "label": "Signups", "value": 247, "deltaPercent": 18.2, "direction": "up-good" } },
-          { "type": "stat", "props": { "label": "Churn", "value": 0.034, "format": "percent", "deltaPercent": -0.8, "direction": "down-good" } }
-        ]
-      }
-    ]
-  }
-}
-```
+Spec shape (UISpec v1.0). Top-level keys MUST be `version` and `ui`. The
+root `ui` is a single node; nest with `children` arrays for `flex`/`grid`:
 
-Allowed node types in chat-inline specs: `flex`, `grid`, `heading`, `text`,
-`stat`, `chart`, `table`.
+  { "version": "1.0", "ui": { "type": <widget>, "props": {...}, "children": [...] } }
 
-Stat:
-- `stat.format`: "currency" | "percent" (omit for plain numbers).
-- `stat.direction`: "up-good" | "down-good" — controls delta color.
+# USE-THE-WIDGET RULE — read this first
 
-Chart:
-```ui-spec
-{
-  "version": "1.0",
-  "ui": {
-    "type": "chart",
-    "props": {
+If the user names a UI pattern below, emit ONE node of that widget
+type. Do NOT rebuild it out of flex+grid+text — every "kanban as four
+columns of text rows" rebuild looks worse than the real widget.
+
+  kanban / board / sprint board       → kanban
+  gantt / roadmap / sprint plan       → gantt
+  calendar / month view               → calendar
+  timeline / event history            → timeline
+  heatmap / cohort grid               → heatmap
+  treemap / breakdown rectangles      → treemap
+  sankey / flow diagram               → sankey
+  funnel / conversion funnel          → funnel
+  org chart / team tree               → org-chart
+  pricing / plans / tiers             → pricing-table
+  compare X vs Y / feature compare    → comparison-table
+  sortable table / data grid          → data-grid
+  audit log / activity log            → audit-log
+  comments / discussion thread        → comment-thread
+  command palette / cmd-k             → command-palette
+
+# Widget catalog (names; use the canonical shapes below for the common ones)
+
+layout      flex, grid, card, container, tabs, accordion, split,
+            master-detail, collapsible, separator, page-header, hero,
+            section, app-shell, sidebar, breadcrumb
+display     heading, text, badge, metric, stat, progress, progress-ring,
+            avatar, image, feed, markdown, code-block, code, kbd, icon,
+            quote, highlight, definition-list, comparison-table,
+            pros-cons, steps, status-dot, trend, link-preview, qr,
+            diff, copy, chip, empty-state, loading
+data        chart, table, data-grid, kanban, gantt, calendar, timeline,
+            tree, tree-table, virtual-list, sparkline, gauge, funnel,
+            heatmap, sankey, treemap
+overlay     alert, callout, tooltip, popover, hover-card, dropdown-menu,
+            toast, command-palette, context-menu, notification-center,
+            error-state
+research    source-card, citation, sources-bar, discover-card, follow-up,
+            kv-table, news-card, ticker
+vertical    pricing-table, settings-list, comment-thread, audit-log,
+            api-key, people-picker, permission-matrix, org-chart,
+            invoice-lines
+
+# Canonical shapes — copy these EXACTLY (most-misused widgets)
+
+`stat` (small KPI tile):
+  { "type": "stat", "props": { "label": "Revenue", "value": 12450,
+    "format": "currency", "deltaPercent": 3.4, "direction": "up-good" } }
+  - format: "currency" | "percent" (omit for plain numbers)
+  - direction: "up-good" | "down-good" (controls delta color)
+
+`chart` — the prop is `type`, NOT `chartType`. The donut variant is
+spelled `donut`, NOT `doughnut`:
+  { "type": "chart", "props": {
       "type": "line",
       "title": "Monthly Revenue",
       "data": [
         { "label": "Jan", "value": 12000 },
         { "label": "Feb", "value": 15400 },
         { "label": "Mar", "value": 13200 }
-      ],
-      "colors": ["#3b82f6"],
-      "height": 220
-    }
-  }
-}
-```
-- `type` (chart kind): one of
-  `bar | line | area | pie | donut | candlestick | sparkline | heatmap | gauge | radar`.
-  (You may also write `chartType` at the node level — the renderer
-  translates both, but `props.type` is the canonical Ripple shape.)
-- `data`: array of `{label, value}` for most chart types.
-  - For `candlestick`: each point is `{label, open, high, low, close}`.
-  - For `heatmap` / multi-series: each point may include `series: {a: 1, b: 2}`.
-  - The renderer also accepts Chart.js `{labels, datasets}` and
-    `series: [{name, color, data: [{x, y}]}]`, but `[{label, value}]` is
-    simplest and preferred.
-- `colors`, `height`, `tooltip` optional. `bullColor` / `bearColor` for
-  candlestick.
+      ]
+  }}
+  - type: bar | line | area | pie | donut | candlestick | sparkline | heatmap | gauge | radar
+  - data: [{label, value}] for most kinds. candlestick: {label, open, high, low, close}.
 
-Table:
-```ui-spec
-{
-  "version": "1.0",
-  "ui": {
-    "type": "table",
-    "props": {
-      "columns": ["Customer", "MRR", "Status"],
+`table` — `columns` are objects with accessorKey, `data` is an array of
+OBJECTS keyed by accessorKey. NEVER pass `columns: [str]` + `rows: [[]]` —
+the cells silently render empty:
+  { "type": "table", "props": {
+      "columns": [
+        { "accessorKey": "page",  "header": "Page" },
+        { "accessorKey": "views", "header": "Views" },
+        { "accessorKey": "time",  "header": "Avg. Time" }
+      ],
       "data": [
-        { "Customer": "Acme",   "MRR": "$2,400", "Status": "Active" },
-        { "Customer": "Globex", "MRR": "$1,180", "Status": "Trial"  }
+        { "page": "/home",    "views": "8,421", "time": "2m 15s" },
+        { "page": "/pricing", "views": "5,312", "time": "3m 42s" }
+      ]
+  }}
+
+`kanban` — columns are headers ONLY; cards live in a flat `value` array
+and a `columnKey` field on each card identifies which column it goes in.
+Do NOT nest cards inside columns:
+  { "type": "kanban", "props": {
+      "columns": [
+        { "id": "todo",   "title": "To do" },
+        { "id": "doing",  "title": "In progress" },
+        { "id": "review", "title": "Review" },
+        { "id": "done",   "title": "Done" }
       ],
-      "variant": "default"
-    }
-  }
-}
-```
-- `data`: array of objects keyed by column name (preferred). The renderer
-  also accepts `rows: [["Acme", "$2,400", "Active"], ...]` (array-of-
-  arrays) and zips it against `columns`.
-- `columns`: array of strings, OR objects with
-  `{accessorKey | key, header | label}`.
-- `variant`: `default | compact | striped | minimal`.
-- `statusKey`: optional column key whose value drives a status-dot color.
-- For a titled table, wrap in a `flex` with a `heading` above the table —
-  the Table widget does not render its own title.
+      "value": [
+        { "id": "c1", "title": "Wire up auth",   "status": "todo" },
+        { "id": "c2", "title": "Migrate DB",     "status": "doing" },
+        { "id": "c3", "title": "Schema review",  "status": "review" },
+        { "id": "c4", "title": "Set up repo",    "status": "done" }
+      ],
+      "columnKey": "status"
+  }}
 
-Notes:
-- Do NOT include `button` or interactive nodes — chat-inline specs are for
-  display only; interactive surfaces belong on a pocket canvas, not in chat.
+`gantt`:
+  { "type": "gantt", "props": { "tasks": [
+      { "id": "t1", "name": "Design", "start": "2026-04-01", "end": "2026-04-08" },
+      { "id": "t2", "name": "Build",  "start": "2026-04-08", "end": "2026-04-22" },
+      { "id": "t3", "name": "Ship",   "start": "2026-04-22", "end": "2026-04-25" }
+  ]}}
 
-When to use:
-- Numeric summaries, dashboards, time-series, comparisons, structured lists.
-- Don't force it for plain text answers — only when visual structure helps.
-- You can mix prose and one ui-spec block in the same response.
-- Top-level keys MUST be `version` and `ui`. The root `ui` is a single node;
-  nest with `children` arrays for `flex`/`grid`. Single-node specs (a lone
-  chart or table) work too — wrap in `flex` if you need a heading + chart.
+`timeline`:
+  { "type": "timeline", "props": { "items": [
+      { "title": "Kicked off",  "subtitle": "2026-04-01" },
+      { "title": "Beta launch", "subtitle": "2026-05-15" },
+      { "title": "GA",          "subtitle": "2026-07-01" }
+  ]}}
+
+`calendar`:
+  { "type": "calendar", "props": { "events": [
+      { "date": "2026-05-02", "title": "Standup" },
+      { "date": "2026-05-04", "title": "Launch review" }
+  ]}}
+
+`feed`:
+  { "type": "feed", "props": { "items": [
+      { "text": "Brute-force detected", "type": "error" },
+      { "text": "New IP flagged",       "type": "warning" },
+      { "text": "Backup completed",     "type": "info" }
+  ]}}
+
+For widgets NOT shown above, fall back to the canonical pattern:
+`{"type": "<name>", "props": {...}}` — keep prop names short and
+descriptive; never invent props prefixed with the widget name (no
+`chartType`, no `tableColumns`, etc.).
+
+# Rules
+
+- One `ui-spec` fence per reply, max. Text outside the fence is your
+  conversation; fence content must be valid JSON with `version` + `ui`.
+- Do NOT include `button` or interactive nodes inside chat-inline specs
+  — interactive surfaces belong on a pocket canvas.
+- Do NOT set `style.backgroundColor`, `style.borderRadius`, or
+  `style.padding` on `flex` / `grid` / `card` / `container` nodes —
+  Tailwind theme tokens drive those, inline overrides clash with the
+  user's theme. Explicit colors on data elements (chart series, badge
+  variants, metric trend) are fine.
+- Use ui-spec only when visual structure helps (KPI tiles, charts,
+  tables, comparisons, lists with structure). Don't force it for plain
+  text answers.
+- All values must be concrete — no "TBD", "...", null. If estimating,
+  prefix with "~" (e.g. "~$5B").
 </ripple>"""
 
 
@@ -647,13 +698,43 @@ Step 2 — build the new rippleSpec
 - Reference real values from the existing tree (metric numbers, chart
   points, table rows). Do NOT invent content. No "N/A", "TBD",
   "...", null. If estimating, prefix with "~" (e.g. "~$5B").
-- Allowed node types: ``flex``, ``grid``, ``heading``, ``text``,
-  ``badge``, ``metric``, ``chart``, ``table``, ``feed``, ``workflow``,
-  ``image``, ``card``, ``tabs``, ``callout``, ``container``,
-  ``button``, ``input``, ``select``, ``checkbox``, ``switch``,
-  ``avatar``, ``progress``.
-- Colors: ``#30D158`` green, ``#FF453A`` red, ``#FF9F0A`` orange,
-  ``#0A84FF`` blue, ``#BF5AF2`` purple, ``#5E5CE6`` indigo.
+- Widget vocabulary (use the canonical shapes shown in the
+  ``<ripple>`` block — same chart/table/kanban/gantt/timeline rules
+  apply here). Useful node types:
+    layout    flex, grid, card, container, tabs, accordion, split,
+              section, separator
+    display   heading, text, badge, metric, stat, progress, avatar,
+              image, feed, markdown, code-block, status-dot, trend,
+              callout, comparison-table, definition-list, steps
+    data      chart, table, data-grid, kanban, gantt, calendar,
+              timeline, tree, sparkline, gauge, funnel, heatmap,
+              treemap, sankey
+    research  source-card, sources-bar, citation, news-card, kv-table
+    vertical  pricing-table, comment-thread, audit-log, org-chart,
+              people-picker
+    workflow  workflow
+- USE-THE-WIDGET RULE: if the user names a UI pattern (kanban, gantt,
+  calendar, timeline, heatmap, treemap, sankey, funnel, org-chart,
+  comparison, pricing) → emit ONE node of that widget type. NEVER
+  rebuild it out of flex+grid+text.
+- THEME RULE: do NOT set ``style.backgroundColor`` /
+  ``style.borderRadius`` / ``style.padding`` on ``flex`` / ``grid`` /
+  ``card`` / ``container`` nodes — Tailwind theme tokens drive those,
+  inline overrides clash with the user's theme. Explicit colors on
+  data elements (chart series, badge variants, metric trend) are fine.
+- CHART/TABLE/KANBAN CONTRACTS: see the canonical shapes in the
+  ``<ripple>`` block. Common mistakes to avoid:
+    * chart prop is ``type``, NOT ``chartType``. Donut variant is
+      ``donut``, NOT ``doughnut``.
+    * table ``columns`` are objects with ``accessorKey``; ``data`` is
+      an array of OBJECTS keyed by accessorKey (NOT a 2D ``rows`` array).
+    * kanban ``columns`` are headers ONLY; cards live in a flat
+      ``value`` array with a ``status`` (or other ``columnKey``) field.
+    * Drop ``metric.trendDirection`` — Metric infers direction from the
+      ``+``/``-`` prefix on ``trend``.
+- Colors (when an accent is genuinely needed): ``#30D158`` green,
+  ``#FF453A`` red, ``#FF9F0A`` orange, ``#0A84FF`` blue, ``#BF5AF2``
+  purple, ``#5E5CE6`` indigo.
 
 Step 3 — hard rules
 - NEVER call ``cloud_add_widget`` / ``cloud_update_widget`` /
@@ -698,23 +779,53 @@ JSON body:
     "ripple_spec": {{ ... UISpec tree — REQUIRED, this is the canvas ... }}
   }}
 
-Allowed UISpec node types: ``flex``, ``grid``, ``heading``, ``text``,
-``badge``, ``metric``, ``chart``, ``table``, ``feed``, ``workflow``,
-``image``, ``card``, ``tabs``, ``callout``, ``container``, ``button``,
-``input``, ``select``, ``checkbox``, ``switch``, ``avatar``,
-``progress``.
-
 Each node: ``{{type, props, children?, style?}}``. Nest with
 ``children`` arrays in ``flex``/``grid``.
 
+UISpec widget vocabulary (same as the ``<ripple>`` chat-inline block —
+same canonical shapes apply for chart, table, kanban, gantt, timeline):
+  layout    flex, grid, card, container, tabs, accordion, split,
+            section, separator
+  display   heading, text, badge, metric, stat, progress, avatar,
+            image, feed, markdown, code-block, status-dot, trend,
+            callout, comparison-table, definition-list, steps
+  data      chart, table, data-grid, kanban, gantt, calendar,
+            timeline, tree, sparkline, gauge, funnel, heatmap,
+            treemap, sankey
+  research  source-card, sources-bar, citation, news-card, kv-table
+  vertical  pricing-table, comment-thread, audit-log, org-chart,
+            people-picker
+  workflow  workflow
+
+USE-THE-WIDGET RULE: if the user names a UI pattern (kanban, gantt,
+calendar, timeline, heatmap, treemap, sankey, funnel, org-chart,
+comparison, pricing) → emit ONE node of that widget type. NEVER
+rebuild it out of flex+grid+text.
+
+CHART/TABLE/KANBAN CONTRACTS: see the canonical shapes in the
+``<ripple>`` block. Common mistakes to avoid:
+- chart prop is ``type``, NOT ``chartType``. Donut variant is
+  ``donut``, NOT ``doughnut``.
+- table ``columns`` are objects with ``accessorKey``; ``data`` is an
+  array of OBJECTS keyed by accessorKey (NOT a 2D ``rows`` array).
+- kanban ``columns`` are headers ONLY; cards live in a flat ``value``
+  array with a ``status`` (or other ``columnKey``) field.
+
+THEME RULE: do NOT set ``style.backgroundColor`` /
+``style.borderRadius`` / ``style.padding`` on ``flex`` / ``grid`` /
+``card`` / ``container`` nodes — Tailwind theme tokens drive those.
+Explicit colors on data elements (chart series, badge variants, metric
+trend) are fine.
+
 Hard rules:
 - NEVER read source files or grep the repo to figure out the schema —
-  the docs above are the contract.
+  the canonical shapes in the ``<ripple>`` block are the contract.
 - NEVER pass a ``widgets`` array. Put everything inside ``ripple_spec``.
 - All values must be concrete — no "TBD", "...", null. If estimating,
   prefix with "~".
-- Colors: ``#30D158`` green, ``#FF453A`` red, ``#FF9F0A`` orange,
-  ``#0A84FF`` blue, ``#BF5AF2`` purple, ``#5E5CE6`` indigo.
+- Colors (when an accent is genuinely needed): ``#30D158`` green,
+  ``#FF453A`` red, ``#FF9F0A`` orange, ``#0A84FF`` blue, ``#BF5AF2``
+  purple, ``#5E5CE6`` indigo.
 
 The command returns ``{{"ok": true, "pocket": {{...}}, "pocket_id":
 "..."}}``. The new pocket mounts in the user's sidebar automatically;

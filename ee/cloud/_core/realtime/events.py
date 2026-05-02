@@ -178,6 +178,18 @@ class MessageRead(Event):
 
 
 @dataclass
+class MessageUiStateUpdated(Event):
+    """Emitted when a message's inline-Ripple UI state is patched.
+
+    Carries ``message_id``, ``spec_id``, ``state``, plus the routing keys
+    needed by the audience resolver (``group_id`` for group messages,
+    ``user_id`` for session/pocket messages).
+    """
+
+    EVENT_TYPE: ClassVar[str] = "message.ui_state.updated"
+
+
+@dataclass
 class UnreadUpdate(Event):
     EVENT_TYPE: ClassVar[str] = "unread.update"
 

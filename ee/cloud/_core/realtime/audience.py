@@ -117,6 +117,16 @@ class AudienceResolver:
             return await self._group(d["group_id"])
         if t == "message.sent":
             return [d["sender_id"]]
+        if t == "message.ui_state.updated":
+            # Group-context messages fan out to every group member so a peer
+            # viewing the same room sees the kanban update live. Pocket /
+            # session-context messages are single-owner — the event carries
+            # ``user_id`` and routes only to that user's other tabs.
+            if gid := d.get("group_id"):
+                return await self._group(gid)
+            if uid := d.get("user_id"):
+                return [uid]
+            return []
 
         # --- Workspace ----------------------------------------------------------
         if t in {"workspace.updated", "workspace.deleted", "workspace.member_role"}:
