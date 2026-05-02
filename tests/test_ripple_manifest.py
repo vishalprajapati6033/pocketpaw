@@ -156,3 +156,51 @@ def test_format_for_prompt_empty_widgets_returns_empty_string():
 
     empty = {"schema": "ripple.manifest/v1", "version": "1", "widgets": []}
     assert m.format_for_prompt(empty) == ""
+
+
+async def test_orchestrator_uses_manifest_when_available(monkeypatch):
+    from pocketpaw.api.v1 import pockets
+
+    async def fake_manifest():
+        return "<ripple-widget-reference>FROM-MANIFEST</ripple-widget-reference>"
+
+    async def fake_kb(_msg):
+        raise AssertionError("should not fall back to kb when manifest succeeded")
+
+    monkeypatch.setattr(pockets, "_get_ripple_widget_context_via_manifest", fake_manifest)
+    monkeypatch.setattr(pockets, "_get_ripple_widget_context_via_kb", fake_kb)
+
+    result = await pockets._get_ripple_widget_context("show me a kpi dashboard")
+    assert "FROM-MANIFEST" in result
+
+
+async def test_orchestrator_falls_back_to_kb_when_manifest_empty(monkeypatch):
+    from pocketpaw.api.v1 import pockets
+
+    async def fake_manifest():
+        return ""
+
+    async def fake_kb(msg):
+        return f"<ripple-widget-reference>FROM-KB:{msg}</ripple-widget-reference>"
+
+    monkeypatch.setattr(pockets, "_get_ripple_widget_context_via_manifest", fake_manifest)
+    monkeypatch.setattr(pockets, "_get_ripple_widget_context_via_kb", fake_kb)
+
+    result = await pockets._get_ripple_widget_context("show me a kpi dashboard")
+    assert "FROM-KB:show me a kpi dashboard" in result
+
+
+async def test_orchestrator_returns_empty_when_both_fail(monkeypatch):
+    from pocketpaw.api.v1 import pockets
+
+    async def fake_manifest():
+        return ""
+
+    async def fake_kb(_msg):
+        return ""
+
+    monkeypatch.setattr(pockets, "_get_ripple_widget_context_via_manifest", fake_manifest)
+    monkeypatch.setattr(pockets, "_get_ripple_widget_context_via_kb", fake_kb)
+
+    result = await pockets._get_ripple_widget_context("anything")
+    assert result == ""
