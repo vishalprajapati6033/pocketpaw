@@ -922,6 +922,14 @@ class Settings(BaseSettings):
         default=3,
         description="Number of top articles to inject from kb search (default: 3)",
     )
+    ripple_manifest_url: str = Field(
+        default="https://cdn.jsdelivr.net/npm/@ripple-ui/svelte@latest/dist/manifest.json",
+        description="CDN URL to the Ripple UI manifest (widget specs)",
+    )
+    ripple_manifest_ttl_seconds: int = Field(
+        default=86400,
+        description="TTL in seconds for cached Ripple manifest (default: 24h)",
+    )
 
     # File extraction chain (Phase 1, "Files as Knowledge")
     extraction_chain: list[str] = Field(
