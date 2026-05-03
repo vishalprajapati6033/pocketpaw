@@ -32,72 +32,20 @@ _WS_PREFIX = "websocket_"
 # Match the JSON arg passed to create_pocket in a Bash command (legacy fallback)
 _CREATE_POCKET_RE = re.compile(r"create_pocket\s+'(.*?)'", re.DOTALL)
 
-_RIPPLE_KB_SCOPE = "ripple"
-_RIPPLE_KB_LIMIT = 3
+async def _get_ripple_widget_context(_user_message: str) -> str:
+    """Inject the list of available Ripple widget *type names* into the prompt,
+    plus a hint that the agent should call the ``get_widget_spec`` MCP tool to
+    fetch full props/examples on demand.
 
+    Replaces the previous "inject the full widget reference" model — that put
+    ~30k tokens into every pocket-creation request. Now the agent sees only
+    what's available (~1k tokens of names) and pulls details lazily, paying
+    the prompt cost only for widgets it actually composes with.
 
-async def _get_ripple_widget_context_via_kb(user_message: str) -> str:
-    """Search the local 'ripple' kb scope for widget docs (legacy fallback path).
-
-    Returns pre-formatted markdown articles about the specific Ripple widgets
-    the agent will need. Falls back to empty string on any failure — this is
-    a nice-to-have enhancement, never a blocker.
+    Returns "" if the manifest is unreachable; the agent can still attempt
+    ``get_widget_spec`` calls which will surface a clearer error.
     """
-    if not user_message:
-        return ""
-
-    from pocketpaw.config import get_settings
-
-    settings = get_settings()
-    binary = settings.kb_binary or "kb"
-
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            binary,
-            "search",
-            user_message,
-            "--scope",
-            _RIPPLE_KB_SCOPE,
-            "--context",
-            "--limit",
-            str(_RIPPLE_KB_LIMIT),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=3.0)
-        except TimeoutError:
-            proc.kill()
-            await proc.wait()
-            return ""
-    except FileNotFoundError:
-        logger.debug("kb binary not found — skipping ripple widget context")
-        return ""
-    except Exception:  # noqa: BLE001
-        return ""
-
-    if proc.returncode != 0:
-        return ""
-
-    output = stdout.decode("utf-8", errors="replace").strip()
-    if not output:
-        return ""
-
-    return (
-        "\n\n<ripple-widget-reference>\n"
-        "The following Ripple widget documentation is relevant to this request. "
-        "Use these props, types, and examples when building the UI spec.\n\n"
-        + output
-        + "\n</ripple-widget-reference>"
-    )
-
-
-async def _get_ripple_widget_context_via_manifest() -> str:
-    """Fetch the Ripple widget manifest from CDN and render as a prompt block.
-
-    Returns "" on any failure — caller falls back to kb search.
-    """
-    from ee.ripple.manifest import format_for_prompt, get_manifest
+    from ee.ripple.manifest import get_manifest
     from pocketpaw.config import get_settings
 
     settings = get_settings()
@@ -107,15 +55,21 @@ async def _get_ripple_widget_context_via_manifest() -> str:
     )
     if manifest is None:
         return ""
-    return format_for_prompt(manifest)
 
+    widgets = manifest.get("widgets") or []
+    types = sorted({w.get("type", "") for w in widgets if w.get("type")})
+    if not types:
+        return ""
 
-async def _get_ripple_widget_context(user_message: str) -> str:
-    """Get widget context for the agent: try CDN manifest first, fall back to kb."""
-    block = await _get_ripple_widget_context_via_manifest()
-    if block:
-        return block
-    return await _get_ripple_widget_context_via_kb(user_message)
+    return (
+        "\n\n<ripple-widgets>\n"
+        f"The following Ripple widget types are available ({len(types)} total):\n"
+        f"{', '.join(types)}\n\n"
+        "Call the `get_widget_spec` MCP tool with `{types: [...]}` to fetch "
+        "full props, types, and example ui-spec for any subset BEFORE composing "
+        "a ui-spec. Do NOT guess prop names or shapes.\n"
+        "</ripple-widgets>"
+    )
 
 
 def _extract_chat_id(session_id: str | None) -> str:

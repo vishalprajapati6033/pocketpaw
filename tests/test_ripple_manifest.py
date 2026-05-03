@@ -6,7 +6,6 @@ from __future__ import annotations
 import httpx
 import pytest
 
-
 pytestmark = pytest.mark.asyncio
 
 
@@ -158,49 +157,112 @@ def test_format_for_prompt_empty_widgets_returns_empty_string():
     assert m.format_for_prompt(empty) == ""
 
 
-async def test_orchestrator_uses_manifest_when_available(monkeypatch):
+async def test_widget_context_injects_type_names(monkeypatch):
+    """The pocket-prompt context block should list every widget type plus a
+    pointer to the get_widget_spec MCP tool — NOT the full reference."""
+    from ee.ripple import manifest as m
     from pocketpaw.api.v1 import pockets
 
-    async def fake_manifest():
-        return "<ripple-widget-reference>FROM-MANIFEST</ripple-widget-reference>"
+    async def fake_get(self, url, timeout):
+        return httpx.Response(200, json=VALID_MANIFEST, request=httpx.Request("GET", url))
 
-    async def fake_kb(_msg):
-        raise AssertionError("should not fall back to kb when manifest succeeded")
-
-    monkeypatch.setattr(pockets, "_get_ripple_widget_context_via_manifest", fake_manifest)
-    monkeypatch.setattr(pockets, "_get_ripple_widget_context_via_kb", fake_kb)
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    m._cache.clear()
 
     result = await pockets._get_ripple_widget_context("show me a kpi dashboard")
-    assert "FROM-MANIFEST" in result
+    assert "<ripple-widgets>" in result
+    assert "</ripple-widgets>" in result
+    assert "metric" in result
+    assert "get_widget_spec" in result
+    # Should NOT include the full prop reference (that's the tool's job)
+    assert "**Props:**" not in result
 
 
-async def test_orchestrator_falls_back_to_kb_when_manifest_empty(monkeypatch):
+async def test_widget_context_returns_empty_when_manifest_unavailable(monkeypatch):
+    from ee.ripple import manifest as m
     from pocketpaw.api.v1 import pockets
 
-    async def fake_manifest():
-        return ""
+    async def fake_get(self, url, timeout):
+        raise httpx.TimeoutException("simulated timeout")
 
-    async def fake_kb(msg):
-        return f"<ripple-widget-reference>FROM-KB:{msg}</ripple-widget-reference>"
-
-    monkeypatch.setattr(pockets, "_get_ripple_widget_context_via_manifest", fake_manifest)
-    monkeypatch.setattr(pockets, "_get_ripple_widget_context_via_kb", fake_kb)
-
-    result = await pockets._get_ripple_widget_context("show me a kpi dashboard")
-    assert "FROM-KB:show me a kpi dashboard" in result
-
-
-async def test_orchestrator_returns_empty_when_both_fail(monkeypatch):
-    from pocketpaw.api.v1 import pockets
-
-    async def fake_manifest():
-        return ""
-
-    async def fake_kb(_msg):
-        return ""
-
-    monkeypatch.setattr(pockets, "_get_ripple_widget_context_via_manifest", fake_manifest)
-    monkeypatch.setattr(pockets, "_get_ripple_widget_context_via_kb", fake_kb)
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    m._cache.clear()
 
     result = await pockets._get_ripple_widget_context("anything")
     assert result == ""
+
+
+async def test_get_widget_spec_handler_returns_matched_entries(monkeypatch):
+    """The get_widget_spec MCP tool returns a formatted reference for the
+    requested types, sourced from the manifest."""
+    from ee.ripple import manifest as m
+    from pocketpaw.agents.sdk_mcp_pocket import _get_widget_spec_handler
+
+    async def fake_get(self, url, timeout):
+        return httpx.Response(200, json=VALID_MANIFEST, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    m._cache.clear()
+
+    result = await _get_widget_spec_handler({"types": ["metric"]})
+    assert result.get("is_error") is not True
+    text = result["content"][0]["text"]
+    assert "metric" in text
+    assert "KPI tile." in text
+    assert "**Props:**" in text
+
+
+async def test_get_widget_spec_handler_errors_on_empty_types():
+    from pocketpaw.agents.sdk_mcp_pocket import _get_widget_spec_handler
+
+    result = await _get_widget_spec_handler({"types": []})
+    assert result["is_error"] is True
+    assert "non-empty" in result["content"][0]["text"]
+
+
+async def test_get_widget_spec_handler_errors_on_unknown_only(monkeypatch):
+    from ee.ripple import manifest as m
+    from pocketpaw.agents.sdk_mcp_pocket import _get_widget_spec_handler
+
+    async def fake_get(self, url, timeout):
+        return httpx.Response(200, json=VALID_MANIFEST, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    m._cache.clear()
+
+    result = await _get_widget_spec_handler({"types": ["nonexistent-widget"]})
+    assert result["is_error"] is True
+    assert "Unknown types" in result["content"][0]["text"]
+
+
+async def test_get_widget_spec_handler_partial_match_includes_warning(monkeypatch):
+    from ee.ripple import manifest as m
+    from pocketpaw.agents.sdk_mcp_pocket import _get_widget_spec_handler
+
+    async def fake_get(self, url, timeout):
+        return httpx.Response(200, json=VALID_MANIFEST, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    m._cache.clear()
+
+    result = await _get_widget_spec_handler({"types": ["metric", "not-a-real-widget"]})
+    assert result.get("is_error") is not True
+    text = result["content"][0]["text"]
+    assert "metric" in text
+    assert "unknown types skipped" in text
+    assert "not-a-real-widget" in text
+
+
+async def test_get_widget_spec_handler_errors_when_manifest_unavailable(monkeypatch):
+    from ee.ripple import manifest as m
+    from pocketpaw.agents.sdk_mcp_pocket import _get_widget_spec_handler
+
+    async def fake_get(self, url, timeout):
+        raise httpx.TimeoutException("simulated timeout")
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    m._cache.clear()
+
+    result = await _get_widget_spec_handler({"types": ["metric"]})
+    assert result["is_error"] is True
+    assert "unavailable" in result["content"][0]["text"]

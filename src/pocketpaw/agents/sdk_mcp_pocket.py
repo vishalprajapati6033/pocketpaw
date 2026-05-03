@@ -31,6 +31,7 @@ UPDATE_POCKET_TOOL_ID = f"mcp__{SERVER_NAME}__update_pocket"
 ADD_WIDGET_TOOL_ID = f"mcp__{SERVER_NAME}__add_widget"
 UPDATE_WIDGET_TOOL_ID = f"mcp__{SERVER_NAME}__update_widget"
 REMOVE_WIDGET_TOOL_ID = f"mcp__{SERVER_NAME}__remove_widget"
+GET_WIDGET_SPEC_TOOL_ID = f"mcp__{SERVER_NAME}__get_widget_spec"
 
 POCKET_TOOL_IDS = (
     GET_POCKET_TOOL_ID,
@@ -39,6 +40,7 @@ POCKET_TOOL_IDS = (
     ADD_WIDGET_TOOL_ID,
     UPDATE_WIDGET_TOOL_ID,
     REMOVE_WIDGET_TOOL_ID,
+    GET_WIDGET_SPEC_TOOL_ID,
 )
 
 
@@ -123,6 +125,63 @@ async def _remove_widget_handler(args: dict) -> dict:
     return _result_payload(
         await remove_widget_for_agent(args.get("pocket_id", ""), args.get("widget_id", ""))
     )
+
+
+async def _get_widget_spec_handler(args: dict) -> dict:
+    """Fetch the manifest, filter to requested widget types, and return a
+    formatted markdown reference. Backs the ``get_widget_spec`` MCP tool."""
+    from ee.ripple.manifest import format_for_prompt, get_manifest
+    from pocketpaw.config import get_settings
+
+    raw_types = args.get("types") or []
+    if isinstance(raw_types, str):
+        raw_types = [raw_types]
+    requested = [t for t in raw_types if isinstance(t, str) and t]
+    if not requested:
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Error: pass `types` as a non-empty array of widget type names.",
+                }
+            ],
+            "is_error": True,
+        }
+
+    settings = get_settings()
+    manifest = await get_manifest(
+        settings.ripple_manifest_url,
+        ttl_seconds=settings.ripple_manifest_ttl_seconds,
+    )
+    if manifest is None:
+        return {
+            "content": [
+                {"type": "text", "text": "Error: ripple manifest unavailable."}
+            ],
+            "is_error": True,
+        }
+
+    widgets = manifest.get("widgets") or []
+    by_type = {w.get("type"): w for w in widgets if w.get("type")}
+    matched = [by_type[t] for t in requested if t in by_type]
+    missing = [t for t in requested if t not in by_type]
+
+    if not matched:
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"No matching widgets. Unknown types: {', '.join(missing)}",
+                }
+            ],
+            "is_error": True,
+        }
+
+    block = format_for_prompt({"widgets": matched})
+    if missing:
+        block += f"\n\n_Note: unknown types skipped: {', '.join(missing)}_"
+
+    return {"content": [{"type": "text", "text": block}]}
 
 
 def build_pocket_context_server() -> tuple[str, Any] | None:
@@ -229,6 +288,22 @@ def build_pocket_context_server() -> tuple[str, Any] | None:
     async def remove_widget(args):  # type: ignore[no-untyped-def]
         return await _remove_widget_handler(args)
 
+    @tool(
+        "get_widget_spec",
+        (
+            "Get full props, types, and example ui-spec for one or more "
+            "Ripple widgets. Pass ``types`` as an array of widget type names "
+            "(e.g. ``['metric', 'kanban', 'chart']``). Returns a markdown "
+            "reference with each widget's props schema and a runnable example. "
+            "Always call this BEFORE composing a ui-spec — never guess prop "
+            "names or shapes. Available types are listed in the "
+            "``<ripple-widgets>`` block in the system prompt."
+        ),
+        {"types": list},
+    )
+    async def get_widget_spec(args):  # type: ignore[no-untyped-def]
+        return await _get_widget_spec_handler(args)
+
     server = create_sdk_mcp_server(
         name=SERVER_NAME,
         version="1.0.0",
@@ -239,6 +314,7 @@ def build_pocket_context_server() -> tuple[str, Any] | None:
             add_widget,
             update_widget,
             remove_widget,
+            get_widget_spec,
         ],
     )
     return SERVER_NAME, server
