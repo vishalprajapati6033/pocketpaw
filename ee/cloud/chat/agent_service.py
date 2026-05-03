@@ -20,6 +20,7 @@ from enum import StrEnum
 from typing import Any
 
 from ee.cloud.shared.errors import CloudError, NotFound
+from ee.ripple import INLINE_RIPPLE_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -454,206 +455,6 @@ def assemble_toolset(ctx: ScopeContext, *, base: list[dict[str, Any]]) -> list[d
 # ---------------------------------------------------------------------------
 
 
-_RIPPLE_HINT = """\
-<ripple>
-You can render rich UI inline in your chat responses by emitting a JSON
-spec inside a ```ui-spec``` fenced code block. The client renders it as
-live components in the message bubble.
-
-Spec shape (UISpec v1.0). Top-level keys MUST be `version` and `ui`. The
-root `ui` is a single node; nest with `children` arrays for `flex`/`grid`:
-
-  { "version": "1.0", "ui": { "type": <widget>, "props": {...}, "children": [...] } }
-
-# USE-THE-WIDGET RULE — read this first
-
-If the user names a UI pattern below, emit ONE node of that widget
-type. Do NOT rebuild it out of flex+grid+text — every "kanban as four
-columns of text rows" rebuild looks worse than the real widget.
-
-  kanban / board / sprint board       → kanban
-  gantt / roadmap / sprint plan       → gantt
-  calendar / month view               → calendar
-  timeline / event history            → timeline
-  heatmap / cohort grid               → heatmap
-  treemap / breakdown rectangles      → treemap
-  sankey / flow diagram               → sankey
-  funnel / conversion funnel          → funnel
-  org chart / team tree               → org-chart
-  pricing / plans / tiers             → pricing-table
-  compare X vs Y / feature compare    → comparison-table
-  sortable table / data grid          → data-grid
-  audit log / activity log            → audit-log
-  comments / discussion thread        → comment-thread
-  command palette / cmd-k             → command-palette
-
-# Widget catalog (names; use the canonical shapes below for the common ones)
-
-layout      flex, grid, card, container, tabs, accordion, split,
-            master-detail, collapsible, separator, page-header, hero,
-            section, app-shell, sidebar, breadcrumb
-display     heading, text, badge, metric, stat, progress, progress-ring,
-            avatar, image, feed, markdown, code-block, code, kbd, icon,
-            quote, highlight, definition-list, comparison-table,
-            pros-cons, steps, status-dot, trend, link-preview, qr,
-            diff, copy, chip, empty-state, loading
-data        chart, table, data-grid, kanban, gantt, calendar, timeline,
-            tree, tree-table, virtual-list, sparkline, gauge, funnel,
-            heatmap, sankey, treemap
-overlay     alert, callout, tooltip, popover, hover-card, dropdown-menu,
-            toast, command-palette, context-menu, notification-center,
-            error-state
-research    source-card, citation, sources-bar, discover-card, follow-up,
-            kv-table, news-card, ticker
-vertical    pricing-table, settings-list, comment-thread, audit-log,
-            api-key, people-picker, permission-matrix, org-chart,
-            invoice-lines
-
-# Canonical shapes — copy these EXACTLY (most-misused widgets)
-
-`stat` (small KPI tile):
-  { "type": "stat", "props": { "label": "Revenue", "value": 12450,
-    "format": "currency", "deltaPercent": 3.4, "direction": "up-good" } }
-  - format: "currency" | "percent" (omit for plain numbers)
-  - direction: "up-good" | "down-good" (controls delta color)
-
-`chart` — the prop is `type`, NOT `chartType`. The donut variant is
-spelled `donut`, NOT `doughnut`:
-  { "type": "chart", "props": {
-      "type": "line",
-      "title": "Monthly Revenue",
-      "data": [
-        { "label": "Jan", "value": 12000 },
-        { "label": "Feb", "value": 15400 },
-        { "label": "Mar", "value": 13200 }
-      ]
-  }}
-  - type: bar | line | area | pie | donut | candlestick | sparkline | heatmap | gauge | radar
-  - data: [{label, value}] for most kinds. candlestick: {label, open, high, low, close}.
-
-`table` — `columns` are objects with accessorKey, `data` is an array of
-OBJECTS keyed by accessorKey. NEVER pass `columns: [str]` + `rows: [[]]` —
-the cells silently render empty:
-  { "type": "table", "props": {
-      "columns": [
-        { "accessorKey": "page",  "header": "Page" },
-        { "accessorKey": "views", "header": "Views" },
-        { "accessorKey": "time",  "header": "Avg. Time" }
-      ],
-      "data": [
-        { "page": "/home",    "views": "8,421", "time": "2m 15s" },
-        { "page": "/pricing", "views": "5,312", "time": "3m 42s" }
-      ]
-  }}
-
-`kanban` — columns are headers ONLY; cards live in a flat `value` array
-and a `columnKey` field on each card identifies which column it goes in.
-Do NOT nest cards inside columns:
-  { "type": "kanban", "props": {
-      "columns": [
-        { "id": "todo",   "title": "To do" },
-        { "id": "doing",  "title": "In progress" },
-        { "id": "review", "title": "Review" },
-        { "id": "done",   "title": "Done" }
-      ],
-      "value": [
-        { "id": "c1", "title": "Wire up auth",   "status": "todo" },
-        { "id": "c2", "title": "Migrate DB",     "status": "doing" },
-        { "id": "c3", "title": "Schema review",  "status": "review" },
-        { "id": "c4", "title": "Set up repo",    "status": "done" }
-      ],
-      "columnKey": "status"
-  }}
-
-`gantt`:
-  { "type": "gantt", "props": { "tasks": [
-      { "id": "t1", "name": "Design", "start": "2026-04-01", "end": "2026-04-08" },
-      { "id": "t2", "name": "Build",  "start": "2026-04-08", "end": "2026-04-22" },
-      { "id": "t3", "name": "Ship",   "start": "2026-04-22", "end": "2026-04-25" }
-  ]}}
-
-`timeline`:
-  { "type": "timeline", "props": { "items": [
-      { "title": "Kicked off",  "subtitle": "2026-04-01" },
-      { "title": "Beta launch", "subtitle": "2026-05-15" },
-      { "title": "GA",          "subtitle": "2026-07-01" }
-  ]}}
-
-`calendar`:
-  { "type": "calendar", "props": { "events": [
-      { "date": "2026-05-02", "title": "Standup" },
-      { "date": "2026-05-04", "title": "Launch review" }
-  ]}}
-
-`feed`:
-  { "type": "feed", "props": { "items": [
-      { "text": "Brute-force detected", "type": "error" },
-      { "text": "New IP flagged",       "type": "warning" },
-      { "text": "Backup completed",     "type": "info" }
-  ]}}
-
-For widgets NOT shown above, fall back to the canonical pattern:
-`{"type": "<name>", "props": {...}}` — keep prop names short and
-descriptive; never invent props prefixed with the widget name (no
-`chartType`, no `tableColumns`, etc.).
-
-# Composition cookbook — pick the recipe that matches the intent
-
-When the answer has structure, pick a recipe below before falling back
-to free-form layout. These are the high-value shapes; reach past them
-only when none fits.
-
-  status / health check        → flex(row, gap 8px) of [status-dot, text]
-                                  e.g. service up/down, build green/red
-  single KPI                    → one `stat` (currency/percent/number)
-  KPI dashboard (2–6 numbers)   → grid(columns 2|3|4) of `stat` cells
-  list of items with state     → `kv-table` (key + value rows) OR
-                                  `table` if >3 columns
-  comparison X vs Y            → `comparison-table`
-  ranked list / leaderboard    → `table` with rank + name + metric
-  code + explanation           → flex(column, gap 12px) of
-                                  [code-block, callout(variant=info)]
-  link / URL summary           → `link-preview` (title + description)
-  numeric trend over time      → `chart` (line/area) for >5 points,
-                                  `sparkline` for inline ≤20 values
-  category breakdown           → `chart` (donut/pie) for ≤6 slices,
-                                  `chart` (bar) otherwise
-  status across many items     → `kanban` if columns are workflow stages,
-                                  else `table` with a status badge column
-  step-by-step / how-to         → `steps` widget (NOT numbered text)
-  pros vs cons                 → `pros-cons`
-  attribution / citations      → `source-card` per source, or
-                                  `sources-bar` for ≤4 inline sources
-  short label callout          → `badge` or `chip` inline; `callout`
-                                  for a 1–2 line note with title
-
-If two recipes both fit, prefer the one with the typed widget
-(`comparison-table` over a hand-built `table`; `steps` over a flex of
-text rows). The catalog is the toolkit — compose with it, don't rebuild
-its widgets out of flex+text.
-
-# Rules
-
-- One `ui-spec` fence per reply, max. Text outside the fence is your
-  conversation; fence content must be valid JSON with `version` + `ui`.
-- Do NOT include `button` or interactive nodes inside chat-inline specs
-  — interactive surfaces belong on a pocket canvas.
-- Do NOT set `style.backgroundColor`, `style.borderRadius`, or
-  `style.padding` on `flex` / `grid` / `card` / `container` nodes —
-  Tailwind theme tokens drive those, inline overrides clash with the
-  user's theme. Explicit colors on data elements (chart series, badge
-  variants, metric trend) are fine.
-- Default to ui-spec whenever the answer has structure — status,
-  KPI, list, comparison, ranked items, code+explanation, link/URL
-  summary, numeric trend, category breakdown, step-by-step, pros/cons,
-  citations. Match the cookbook recipe above. Use prose-only for
-  discussion, clarifying questions, narrative explanation, or when the
-  user asked a yes/no.
-- All values must be concrete — no "TBD", "...", null. If estimating,
-  prefix with "~" (e.g. "~$5B").
-</ripple>"""
-
-
 _CLOUD_POCKET_INTERACTION_PROMPT = """\
 <pocket-scope>
 A "Pocket" in this conversation is a workspace dashboard — a MongoDB
@@ -899,7 +700,7 @@ def build_context_block(ctx: ScopeContext) -> str:
     if ctx.pocket_id:
         parts.append(_CLOUD_POCKET_INTERACTION_PROMPT.format(pocket_id=ctx.pocket_id))
         parts.append(f"<current-pocket id=\"{ctx.pocket_id}\" />")
-    parts.append(_RIPPLE_HINT)
+    parts.append(INLINE_RIPPLE_SYSTEM_PROMPT)
     return "\n".join(parts)
 
 
