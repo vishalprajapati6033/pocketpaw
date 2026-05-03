@@ -264,6 +264,25 @@ columns:
       { "text": "Backup completed",     "type": "info" }
   ]}}
 
+`tabs` — labels go in `props.tabs`; CONTENT goes in the node's
+`children` array, one child node per tab, by index. Do NOT put
+content inside `props.tabs[i].content` — that field is ignored:
+  { "type": "tabs",
+    "props": {
+      "tabs": [
+        { "value": "overview", "label": "Overview" },
+        { "value": "activity", "label": "Activity" }
+      ],
+      "defaultValue": "overview"
+    },
+    "children": [
+      { "type": "text", "props": { "text": "Overview content here" } },
+      { "type": "feed", "props": { "items": [
+          { "text": "Deployed", "type": "info" }
+      ]}}
+    ]
+  }
+
 For widgets NOT shown above, fall back to:
 `{"type": "<name>", "props": {...}}` — keep prop names short and
 descriptive. Never invent widget-prefixed props (no `chartType`,
