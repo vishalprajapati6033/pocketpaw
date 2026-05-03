@@ -13,6 +13,12 @@
 #   `kb ingest --vec <path>` surface. Cap-tracking via CostTracker keeps
 #   a runaway loop from draining the budget. Vector failures are
 #   contained — text-only KB still wins.
+# Updated: 2026-05-03 — Stage 3.E of "Files as Knowledge". The listener
+#   now reads ``pocket_id`` off the FileReady payload and routes the
+#   article into ``pocket:{id}`` instead of the workspace pool. The
+#   vector path inherits the same scope variable so embeddings land in
+#   the same kb-go scope as the text article. Workspace uploads (no
+#   ``pocket_id``) keep the previous ``workspace:{wid}`` behaviour.
 """Upload bus subscribers.
 
 The upload pipeline emits :class:`FileReady` on every successful upload.
@@ -60,6 +66,7 @@ async def index_uploaded_file(event: Event) -> None:
     """
     data = event.data or {}
     workspace_id = data.get("workspace_id") or data.get("workspace")
+    pocket_id = data.get("pocket_id")
     file_id = data.get("file_id")
     filename = data.get("filename") or "upload"
     mime = data.get("mime") or "application/octet-stream"
@@ -101,7 +108,13 @@ async def index_uploaded_file(event: Event) -> None:
             )
             return
 
-        scope = f"workspace:{workspace_id}"
+        # Stage 3.E scope routing: pocket-scoped uploads land in
+        # ``pocket:{id}``; workspace-scoped uploads keep the original
+        # ``workspace:{wid}`` shape. Most-specific wins.
+        if pocket_id:
+            scope = f"pocket:{pocket_id}"
+        else:
+            scope = f"workspace:{workspace_id}"
         try:
             from ee.cloud.agents.knowledge import KnowledgeService
 

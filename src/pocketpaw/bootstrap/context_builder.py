@@ -1,6 +1,12 @@
 """
 Builder for assembling the full agent context.
 Created: 2026-02-02
+Updated: 2026-05-03 - Stage 3.E "Files as Knowledge". Added ``KbContext``
+dataclass + ``_resolve_kb_scopes`` so per-request callers (the cloud chat
+path) can prioritise pocket > agent > workspace ahead of the static
+``settings.kb_scopes`` fallback. ``_get_kb_context`` accepts an optional
+``kb_ctx``; the existing channel + CLI paths continue to use the static
+list with no change in behaviour.
 Updated: 2026-04-30 - Stage 2.D "Files as Knowledge". _get_kb_context now
 accepts ``image_bytes`` for the chat-with-image path. When set and a
 multimodal embedder is configured, it embeds (text + image) once,
@@ -28,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import enum
 import logging
+from dataclasses import dataclass
 
 from pocketpaw.bootstrap.default_provider import DefaultBootstrapProvider
 from pocketpaw.bootstrap.protocol import BootstrapProviderProtocol
@@ -36,6 +43,43 @@ from pocketpaw.bus.format import CHANNEL_FORMAT_HINTS
 from pocketpaw.memory.manager import MemoryManager, get_memory_manager
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class KbContext:
+    """Per-request context for ``_get_kb_context`` scope resolution.
+
+    Stage 3.E "Files as Knowledge". Cloud chat builds one of these from a
+    ``ScopeContext`` and threads it into the system-prompt builder so KB
+    queries hit the most-specific scope available. Channels and CLI keep
+    using the static ``settings.kb_scopes`` fallback.
+    """
+
+    pocket_id: str | None = None
+    agent_id: str | None = None
+    workspace_id: str | None = None
+
+
+def _resolve_kb_scopes(ctx: KbContext | None, settings) -> list[str]:
+    """Build the prioritised scope list for a request.
+
+    Priority: pocket > agent > workspace > whatever's in ``settings.kb_scopes``.
+    Most-specific wins. The static settings list is the fallback for runtime
+    paths that don't carry a context (CLI, channels without ee/cloud) and for
+    requests that arrive with an empty ``KbContext``.
+    """
+    if ctx is None:
+        return list(settings.kb_scopes or [])
+    scopes: list[str] = []
+    if ctx.pocket_id:
+        scopes.append(f"pocket:{ctx.pocket_id}")
+    if ctx.agent_id:
+        scopes.append(f"agent:{ctx.agent_id}")
+    if ctx.workspace_id:
+        scopes.append(f"workspace:{ctx.workspace_id}")
+    if not scopes:
+        scopes = list(settings.kb_scopes or [])
+    return scopes
 
 
 class _Priority(enum.IntEnum):
@@ -100,6 +144,7 @@ class AgentContextBuilder:
         metadata: dict | None = None,
         budget_chars: int = _DEFAULT_BUDGET_CHARS,
         image_bytes: bytes | None = None,
+        kb_ctx: KbContext | None = None,
     ) -> str:
         """Build the complete system prompt.
 
@@ -119,6 +164,12 @@ class AgentContextBuilder:
                 (BM25 + vector cosine fused via RRF). Phase 2 of "Files as
                 Knowledge". When None the call shape is identical to the
                 Phase 1 BM25-only path.
+            kb_ctx: Optional per-request scope context. When set, KB queries
+                resolve scope priority pocket > agent > workspace before
+                falling through to ``settings.kb_scopes``. Stage 3.E of
+                "Files as Knowledge". When None, the static settings list
+                is used unchanged — channel and CLI paths keep working
+                without changes.
         """
         blocks: list[tuple[str, _Priority, str]] = []
 
@@ -133,12 +184,12 @@ class AgentContextBuilder:
             context, memory_context, kb_context = await asyncio.gather(
                 self.bootstrap.get_context(),
                 memory_coro,
-                self._get_kb_context(user_query, image_bytes=image_bytes),
+                self._get_kb_context(user_query, image_bytes=image_bytes, kb_ctx=kb_ctx),
             )
         else:
             context, kb_context = await asyncio.gather(
                 self.bootstrap.get_context(),
-                self._get_kb_context(user_query, image_bytes=image_bytes),
+                self._get_kb_context(user_query, image_bytes=image_bytes, kb_ctx=kb_ctx),
             )
             memory_context = ""
 
@@ -401,15 +452,21 @@ class AgentContextBuilder:
         user_query: str | None,
         *,
         image_bytes: bytes | None = None,
+        kb_ctx: KbContext | None = None,
     ) -> str:
         """Fetch relevant articles from the kb-go CLI across configured scopes.
 
-        Each scope in ``settings.kb_scopes`` is queried independently with
+        Each scope in the resolved scope list is queried independently with
         ``kb search <query> --scope <s> --context --limit M`` where
         ``M = max(1, total_limit // len(scopes))``. Results are concatenated
         under ``### From <scope>`` headers so the model can attribute hits.
         Per-scope failures are logged at debug and skipped so one missing
         scope cannot break the prompt build.
+
+        When ``kb_ctx`` is provided (Stage 3.E), scope priority is
+        ``pocket:{id} > agent:{id} > workspace:{id}`` — most-specific wins.
+        Without a ``kb_ctx`` (channel paths, CLI), the static
+        ``settings.kb_scopes`` list is used unchanged.
 
         When ``image_bytes`` is set and a multimodal embedder is configured,
         the call shape switches to hybrid mode: a single embedding pass
@@ -429,10 +486,13 @@ class AgentContextBuilder:
         from pocketpaw.config import get_settings
 
         settings = get_settings()
-        # ``kb_scopes`` is the canonical list. The deprecated single
-        # ``kb_scope`` is folded into the list by the model validator, so
-        # by the time we read settings here we only ever see the list.
-        scopes = [s.strip() for s in (settings.kb_scopes or []) if s and s.strip()]
+        # Stage 3.E: per-request scope resolution wins over the static list.
+        # ``kb_scopes`` (the static list) is the canonical fallback. The
+        # deprecated single ``kb_scope`` is folded into ``kb_scopes`` by
+        # the model validator, so by the time we read settings here we
+        # only ever see the list.
+        raw_scopes = _resolve_kb_scopes(kb_ctx, settings)
+        scopes = [s.strip() for s in raw_scopes if s and s.strip()]
         if not scopes:
             return ""
 
