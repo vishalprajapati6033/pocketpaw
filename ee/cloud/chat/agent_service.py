@@ -597,6 +597,41 @@ For widgets NOT shown above, fall back to the canonical pattern:
 descriptive; never invent props prefixed with the widget name (no
 `chartType`, no `tableColumns`, etc.).
 
+# Composition cookbook — pick the recipe that matches the intent
+
+When the answer has structure, pick a recipe below before falling back
+to free-form layout. These are the high-value shapes; reach past them
+only when none fits.
+
+  status / health check        → flex(row, gap 8px) of [status-dot, text]
+                                  e.g. service up/down, build green/red
+  single KPI                    → one `stat` (currency/percent/number)
+  KPI dashboard (2–6 numbers)   → grid(columns 2|3|4) of `stat` cells
+  list of items with state     → `kv-table` (key + value rows) OR
+                                  `table` if >3 columns
+  comparison X vs Y            → `comparison-table`
+  ranked list / leaderboard    → `table` with rank + name + metric
+  code + explanation           → flex(column, gap 12px) of
+                                  [code-block, callout(variant=info)]
+  link / URL summary           → `link-preview` (title + description)
+  numeric trend over time      → `chart` (line/area) for >5 points,
+                                  `sparkline` for inline ≤20 values
+  category breakdown           → `chart` (donut/pie) for ≤6 slices,
+                                  `chart` (bar) otherwise
+  status across many items     → `kanban` if columns are workflow stages,
+                                  else `table` with a status badge column
+  step-by-step / how-to         → `steps` widget (NOT numbered text)
+  pros vs cons                 → `pros-cons`
+  attribution / citations      → `source-card` per source, or
+                                  `sources-bar` for ≤4 inline sources
+  short label callout          → `badge` or `chip` inline; `callout`
+                                  for a 1–2 line note with title
+
+If two recipes both fit, prefer the one with the typed widget
+(`comparison-table` over a hand-built `table`; `steps` over a flex of
+text rows). The catalog is the toolkit — compose with it, don't rebuild
+its widgets out of flex+text.
+
 # Rules
 
 - One `ui-spec` fence per reply, max. Text outside the fence is your
@@ -608,9 +643,12 @@ descriptive; never invent props prefixed with the widget name (no
   Tailwind theme tokens drive those, inline overrides clash with the
   user's theme. Explicit colors on data elements (chart series, badge
   variants, metric trend) are fine.
-- Use ui-spec only when visual structure helps (KPI tiles, charts,
-  tables, comparisons, lists with structure). Don't force it for plain
-  text answers.
+- Default to ui-spec whenever the answer has structure — status,
+  KPI, list, comparison, ranked items, code+explanation, link/URL
+  summary, numeric trend, category breakdown, step-by-step, pros/cons,
+  citations. Match the cookbook recipe above. Use prose-only for
+  discussion, clarifying questions, narrative explanation, or when the
+  user asked a yes/no.
 - All values must be concrete — no "TBD", "...", null. If estimating,
   prefix with "~" (e.g. "~$5B").
 </ripple>"""
