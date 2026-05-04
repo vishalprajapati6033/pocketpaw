@@ -255,6 +255,27 @@ async def _cloud_remove_widget(args: dict) -> dict:
     return await remove_widget_for_agent(pocket_id, args.get("widget_id", ""))
 
 
+async def _cloud_list_pockets(args: dict) -> dict:
+    import os
+
+    from ee.cloud.pockets import service as pockets_service
+
+    workspace_id = args.get("workspace_id") or os.environ.get(
+        "POCKETPAW_WORKSPACE_ID", ""
+    )
+    user_id = args.get("user_id") or os.environ.get("POCKETPAW_USER_ID", "")
+    if not workspace_id or not user_id:
+        return {
+            "ok": False,
+            "error": (
+                "workspace_id / user_id missing — the agent backend must export "
+                "POCKETPAW_WORKSPACE_ID + POCKETPAW_USER_ID before spawning."
+            ),
+        }
+    pockets = await pockets_service.agent_list(workspace_id, user_id)
+    return {"ok": True, "pockets": pockets}
+
+
 async def _cloud_create_pocket(args: dict) -> dict:
     import os
 
@@ -288,6 +309,7 @@ async def _cloud_create_pocket(args: dict) -> dict:
 
 
 _CLOUD_HANDLERS: dict[str, Any] = {
+    "cloud_list_pockets": _cloud_list_pockets,
     "cloud_get_pocket": _cloud_get_pocket,
     "cloud_update_pocket": _cloud_update_pocket,
     "cloud_add_widget": _cloud_add_widget,

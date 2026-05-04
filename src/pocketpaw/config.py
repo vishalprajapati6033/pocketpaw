@@ -923,8 +923,14 @@ class Settings(BaseSettings):
         description="Number of top articles to inject from kb search (default: 3)",
     )
     ripple_manifest_url: str = Field(
-        default="https://cdn.jsdelivr.net/npm/@ripple-ui/svelte@latest/dist/manifest.json",
-        description="CDN URL to the Ripple UI manifest (widget specs)",
+        default="http://localhost:5174/manifest.json",
+        description=(
+            "URL to the Ripple UI manifest (widget specs). Defaults to the "
+            "local ripple dev server while @ripple-ui/svelte is unreleased; "
+            "swap to "
+            "https://cdn.jsdelivr.net/npm/@ripple-ui/svelte@latest/dist/manifest.json "
+            "(or any pinned version) once published."
+        ),
     )
     ripple_manifest_ttl_seconds: int = Field(
         default=86400,

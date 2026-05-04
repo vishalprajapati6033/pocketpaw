@@ -26,6 +26,7 @@ SERVER_NAME = "pocketpaw_pocket"
 # Claude Code namespaces in-process MCP tools as ``mcp__<server>__<tool>``.
 # Allowlist entries must use this exact form.
 GET_POCKET_TOOL_ID = f"mcp__{SERVER_NAME}__get_pocket"
+LIST_POCKETS_TOOL_ID = f"mcp__{SERVER_NAME}__list_pockets"
 CREATE_POCKET_TOOL_ID = f"mcp__{SERVER_NAME}__create_pocket"
 UPDATE_POCKET_TOOL_ID = f"mcp__{SERVER_NAME}__update_pocket"
 ADD_WIDGET_TOOL_ID = f"mcp__{SERVER_NAME}__add_widget"
@@ -35,6 +36,7 @@ GET_WIDGET_SPEC_TOOL_ID = f"mcp__{SERVER_NAME}__get_widget_spec"
 
 POCKET_TOOL_IDS = (
     GET_POCKET_TOOL_ID,
+    LIST_POCKETS_TOOL_ID,
     CREATE_POCKET_TOOL_ID,
     UPDATE_POCKET_TOOL_ID,
     ADD_WIDGET_TOOL_ID,
@@ -67,6 +69,27 @@ async def _get_pocket_handler(args: dict) -> dict:
     from ee.cloud.pockets.agent_context import fetch_pocket_for_agent
 
     return _result_payload(await fetch_pocket_for_agent(args.get("pocket_id", "")))
+
+
+async def _list_pockets_handler(args: dict) -> dict:
+    from ee.cloud.pockets.agent_context import list_pockets_for_agent
+
+    result = await list_pockets_for_agent()
+    if not result.get("ok"):
+        return {
+            "content": [{"type": "text", "text": f"Error: {result.get('error')}"}],
+            "is_error": True,
+        }
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": json.dumps(
+                    {"pockets": result.get("pockets", [])}, separators=(",", ":")
+                ),
+            }
+        ]
+    }
 
 
 async def _update_pocket_handler(args: dict) -> dict:
@@ -205,6 +228,23 @@ def build_pocket_context_server() -> tuple[str, Any] | None:
         return await _get_pocket_handler(args)
 
     @tool(
+        "list_pockets",
+        (
+            "List every pocket in the user's workspace they can access "
+            "(owned, shared, or workspace-visible). Returns id + name + "
+            "description + type + icon + color per pocket — no rippleSpec, "
+            "so the call is cheap. CALL THIS BEFORE ``create_pocket`` to "
+            "see if a similar pocket already exists; the system prompt "
+            "tells you to prefer extending an existing pocket over "
+            "spawning a duplicate. No arguments — workspace identity is "
+            "inferred from the active stream."
+        ),
+        {},
+    )
+    async def list_pockets(args):  # type: ignore[no-untyped-def]
+        return await _list_pockets_handler(args)
+
+    @tool(
         "create_pocket",
         (
             "Materialize a brand-new pocket (themed dashboard / canvas) "
@@ -293,11 +333,13 @@ def build_pocket_context_server() -> tuple[str, Any] | None:
         (
             "Get full props, types, and example ui-spec for one or more "
             "Ripple widgets. Pass ``types`` as an array of widget type names "
-            "(e.g. ``['metric', 'kanban', 'chart']``). Returns a markdown "
+            "(e.g. ``['feed', 'timeline', 'stat']``). Returns a markdown "
             "reference with each widget's props schema and a runnable example. "
-            "Always call this BEFORE composing a ui-spec — never guess prop "
-            "names or shapes. Available types are listed in the "
-            "``<ripple-widgets>`` block in the system prompt."
+            "MANDATORY before composing a ui-spec for any widget not in the "
+            "FREE LIST under WIDGET SPEC TOOL RULE — never guess prop names "
+            "or shapes from the widget name. Batch types in a single call. "
+            "Available types are listed under WIDGET CATALOG in the system "
+            "prompt."
         ),
         {"types": list},
     )
@@ -309,6 +351,7 @@ def build_pocket_context_server() -> tuple[str, Any] | None:
         version="1.0.0",
         tools=[
             get_pocket,
+            list_pockets,
             create_pocket,
             update_pocket,
             add_widget,

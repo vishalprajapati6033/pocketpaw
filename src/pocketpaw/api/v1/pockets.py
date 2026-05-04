@@ -1,8 +1,4 @@
 # Pocket chat router — dedicated endpoint for pocket creation.
-# Updated: 2026-04-12 — Added dynamic Ripple widget knowledge injection via kb-go.
-#   _get_ripple_widget_context() searches the 'ripple' kb scope for widget docs
-#   relevant to the user's request. Results are appended to the static pocket system
-#   context so agents get deep, targeted knowledge about the widgets they need.
 
 from __future__ import annotations
 
@@ -31,51 +27,6 @@ _WS_PREFIX = "websocket_"
 
 # Match the JSON arg passed to create_pocket in a Bash command (legacy fallback)
 _CREATE_POCKET_RE = re.compile(r"create_pocket\s+'(.*?)'", re.DOTALL)
-
-async def _get_ripple_widget_context(_user_message: str) -> str:
-    """Inject the list of available Ripple widget *type names* into the prompt,
-    plus a hint that the agent should call the ``get_widget_spec`` MCP tool to
-    fetch full props/examples on demand.
-
-    Replaces the previous "inject the full widget reference" model — that put
-    ~30k tokens into every pocket-creation request. Now the agent sees only
-    what's available (~1k tokens of names) and pulls details lazily, paying
-    the prompt cost only for widgets it actually composes with.
-
-    Returns "" if the manifest is unreachable; the agent can still attempt
-    ``get_widget_spec`` calls which will surface a clearer error.
-    """
-    from ee.ripple.manifest import get_manifest
-    from pocketpaw.config import get_settings
-
-    settings = get_settings()
-    manifest = await get_manifest(
-        settings.ripple_manifest_url,
-        ttl_seconds=settings.ripple_manifest_ttl_seconds,
-    )
-    if manifest is None:
-        return ""
-
-    widgets = manifest.get("widgets") or []
-    types = sorted({w.get("type", "") for w in widgets if w.get("type")})
-    if not types:
-        return ""
-
-    return (
-        "\n\n<ripple-widgets>\n"
-        f"The following Ripple widget types are available ({len(types)} total):\n"
-        f"{', '.join(types)}\n\n"
-        "Compose with this catalog — prefer typed widgets (kanban, gantt, "
-        "comparison-table, steps, pricing-table, stat, chart, link-preview) "
-        "over rebuilding their behavior out of flex+text. The catalog is your "
-        "toolkit; reach for the matching widget first, fall back to "
-        "flex/grid/card layout only when no typed widget fits.\n\n"
-        "Call the `get_widget_spec` MCP tool with `{types: [...]}` to fetch "
-        "full props, types, and example ui-spec for any subset BEFORE composing "
-        "a ui-spec. Do NOT guess prop names or shapes.\n"
-        "</ripple-widgets>"
-    )
-
 
 def _extract_chat_id(session_id: str | None) -> str:
     """Extract raw chat_id from a client-supplied session_id.
@@ -435,16 +386,7 @@ async def pocket_chat_stream(body: ChatRequest):
     # the agent to respond with "the pocket is empty" and to attempt to
     # re-create pockets from scratch.
     is_interaction = bool(body.pocket_context and body.pocket_context.id)
-    if is_interaction:
-        pocket_ctx = POCKET_INTERACTION_PROMPT
-    else:
-        # Fetch Ripple widget docs only for the creation flow — they're
-        # about picking widget types/props, which the agent only needs when
-        # building a new pocket.
-        widget_context = await _get_ripple_widget_context(body.content)
-        pocket_ctx = POCKET_CREATION_PROMPT
-        if widget_context:
-            pocket_ctx += widget_context
+    pocket_ctx = POCKET_INTERACTION_PROMPT if is_interaction else POCKET_CREATION_PROMPT
 
     meta: dict = {
         "source": "pocket_chat",

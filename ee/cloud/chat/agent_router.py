@@ -318,7 +318,14 @@ async def _run_agent_stream(
     # give the agent scope awareness without changing pool.run's signature.
     from ee.cloud.chat.agent_service import build_context_block
 
-    scope_block = build_context_block(ctx)
+    # Surface the backend name so the prompt picks the right pocket-tool
+    # path (MCP for claude_agent_sdk, shell CLI for codex_cli + others).
+    backend_name: str | None = None
+    try:
+        backend_name = instance.backend.info().name
+    except Exception:
+        logger.debug("backend.info() unavailable on agent %s", ctx.target_agent_id, exc_info=True)
+    scope_block = build_context_block(ctx, backend_name=backend_name)
 
     await _broadcast_agent_typing(ctx, active=True)
 

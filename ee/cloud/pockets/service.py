@@ -677,6 +677,45 @@ async def agent_view(pocket_id: str) -> tuple[dict | None, str | None]:
     return _agent_view_dict(doc), None
 
 
+async def agent_list(workspace_id: str, user_id: str) -> list[dict]:
+    """Compact list of pockets the user can see in this workspace.
+
+    Returned shape per pocket: ``{id, name, description, type, icon,
+    color, owner}``. The full ``rippleSpec`` is intentionally excluded —
+    callers (the in-process MCP ``list_pockets`` tool, the
+    ``cloud_list_pockets`` CLI) hit this on every creation flow as the
+    "have we already got one of these?" check, so the payload stays
+    cheap. Visibility rules mirror ``list_pockets``: owned by the user,
+    explicitly shared, or workspace-visible.
+    """
+    if not workspace_id or not user_id:
+        return []
+    docs = await _PocketDoc.find(
+        {
+            "workspace": workspace_id,
+            "$or": [
+                {"owner": user_id},
+                {"shared_with": user_id},
+                {"visibility": "workspace"},
+            ],
+        }
+    ).to_list()
+    out: list[dict] = []
+    for d in docs:
+        out.append(
+            {
+                "id": str(d.id),
+                "name": d.name,
+                "description": d.description or "",
+                "type": d.type or "",
+                "icon": d.icon or "",
+                "color": d.color or "",
+                "owner": d.owner,
+            }
+        )
+    return out
+
+
 async def agent_update(
     pocket_id: str,
     *,
@@ -824,6 +863,7 @@ __all__ = [
     "add_widget",
     "agent_add_widget",
     "agent_create",
+    "agent_list",
     "agent_remove_widget",
     "agent_update",
     "agent_update_widget",

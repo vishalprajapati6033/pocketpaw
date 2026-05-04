@@ -20,7 +20,11 @@ from enum import StrEnum
 from typing import Any
 
 from ee.cloud.shared.errors import CloudError, NotFound
-from ee.ripple import INLINE_RIPPLE_SYSTEM_PROMPT
+from ee.ripple import (
+    INLINE_RIPPLE_SYSTEM_PROMPT,
+    POCKET_ID_TOKEN,
+    get_pocket_prompts,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -455,251 +459,36 @@ def assemble_toolset(ctx: ScopeContext, *, base: list[dict[str, Any]]) -> list[d
 # ---------------------------------------------------------------------------
 
 
-_CLOUD_POCKET_INTERACTION_PROMPT = """\
-<pocket-scope>
-A "Pocket" in this conversation is a workspace dashboard — a MongoDB
-document whose **only renderable surface is ``rippleSpec.ui``**, a
-UISpec node tree (``{{type, props, children}}``). Its id is
-``{pocket_id}``.
-
-When the user says "pocket", "this pocket", "edit the pocket", "add a
-widget", "more widgets", they mean THIS dashboard (id ``{pocket_id}``)
-— the live document on their screen. They do NOT mean:
-
-- The PocketPaw application or its source code on disk.
-- Any file under ``D:\\\\paw``, ``backend/``, or ``ee/cloud/``.
-- The ``pocketpaw`` Python package itself.
-
-Use the shell commands below through your built-in ``shell`` tool and
-stop — do NOT grep the repo, read source files, or explore the codebase
-to satisfy a pocket request.
-</pocket-scope>
-
-<rippleSpec-is-the-canvas>
-**rippleSpec.ui is the entire visible canvas. Nothing else renders.**
-
-The pocket document still has a legacy embedded ``widgets`` array, but
-the desktop client renders straight from ``rippleSpec.ui``. Mutating
-the legacy array (via ``cloud_add_widget`` / ``cloud_update_widget`` /
-``cloud_remove_widget``) writes data the user will NEVER see. Don't
-use those commands.
-
-To make any visible change, you must rewrite ``rippleSpec`` and pass it
-to ``cloud_update_pocket``. There are no shortcuts.
-</rippleSpec-is-the-canvas>
-
-<pocket-cli>
-Pocket reads/writes happen through ``python -m pocketpaw.tools.cli
-cloud_<command>``. Pipe JSON via stdin (the ``-`` arg) so the shell
-doesn't mangle ``$``-prefixed values like ``$74.30``:
-
-  echo '<json>' | python -m pocketpaw.tools.cli cloud_<command> -
-
-Read (always call this first before a write):
-  echo '{{"pocket_id":"{pocket_id}"}}' | python -m pocketpaw.tools.cli cloud_get_pocket -
-    → ``{{"ok": true, "pocket": {{...full document including rippleSpec...}}}}``
-
-Write — there is exactly ONE write you should ever issue:
-
-  cloud_update_pocket
-    JSON: {{"pocket_id", "ripple_spec": {{ ...full new UISpec tree... }}}}
-    Optional cosmetic fields: name?, description?, icon?, color?.
-    ``ripple_spec`` accepts a bare UISpec node tree
-    (``{{type, props, children}}``) OR a ``{{ui: <node>, ...}}`` envelope;
-    both normalize on the server.
-
-Windows: PowerShell here-strings keep JSON literal —
-  @'<json>'@ | python -m pocketpaw.tools.cli cloud_update_pocket -
-
-Each write returns the new state inline. Don't re-run
-``cloud_get_pocket`` to "verify" — the write echoes the result.
-</pocket-cli>
-
-<pocket-workflow>
-Step 1 — classify intent
-- READ: "what's in this", "show me", "summarize", "explain", "where
-  is X". → call ``cloud_get_pocket`` once, answer from
-  ``rippleSpec.ui`` in the returned JSON.
-- WRITE: "add", "remove", "change", "rename", "make it X", "more
-  widgets", "another chart". → call ``cloud_get_pocket`` first to read
-  the current ``rippleSpec.ui`` tree, build the FULL updated tree
-  locally, then call ``cloud_update_pocket`` once with the new
-  ``ripple_spec``.
-- CHAT: message doesn't reference the pocket / widgets / layout. →
-  reply directly; do not call any cloud_* command.
-
-Step 2 — build the new rippleSpec
-- Start from the existing ``rippleSpec.ui`` tree returned by
-  ``cloud_get_pocket``. Preserve everything the user didn't ask to
-  change.
-- Insert / replace / remove only the nodes the user asked about. Don't
-  rewrite untouched panes, headings, charts, or tables.
-- Reference real values from the existing tree (metric numbers, chart
-  points, table rows). Do NOT invent content. No "N/A", "TBD",
-  "...", null. If estimating, prefix with "~" (e.g. "~$5B").
-- Widget vocabulary (use the canonical shapes shown in the
-  ``<ripple>`` block — same chart/table/kanban/gantt/timeline rules
-  apply here). Useful node types:
-    layout    flex, grid, card, container, tabs, accordion, split,
-              section, separator
-    display   heading, text, badge, metric, stat, progress, avatar,
-              image, feed, markdown, code-block, status-dot, trend,
-              callout, comparison-table, definition-list, steps
-    data      chart, table, data-grid, kanban, gantt, calendar,
-              timeline, tree, sparkline, gauge, funnel, heatmap,
-              treemap, sankey
-    research  source-card, sources-bar, citation, news-card, kv-table
-    vertical  pricing-table, comment-thread, audit-log, org-chart,
-              people-picker
-    workflow  workflow
-- USE-THE-WIDGET RULE: if the user names a UI pattern (kanban, gantt,
-  calendar, timeline, heatmap, treemap, sankey, funnel, org-chart,
-  comparison, pricing) → emit ONE node of that widget type. NEVER
-  rebuild it out of flex+grid+text.
-- THEME RULE: do NOT set ``style.backgroundColor`` /
-  ``style.borderRadius`` / ``style.padding`` on ``flex`` / ``grid`` /
-  ``card`` / ``container`` nodes — Tailwind theme tokens drive those,
-  inline overrides clash with the user's theme. Explicit colors on
-  data elements (chart series, badge variants, metric trend) are fine.
-- CHART/TABLE/KANBAN CONTRACTS: see the canonical shapes in the
-  ``<ripple>`` block. Common mistakes to avoid:
-    * chart prop is ``type``, NOT ``chartType``. Donut variant is
-      ``donut``, NOT ``doughnut``.
-    * table ``columns`` are objects with ``accessorKey``; ``data`` is
-      an array of OBJECTS keyed by accessorKey (NOT a 2D ``rows`` array).
-    * kanban ``columns`` are headers ONLY; cards live in a flat
-      ``value`` array with a ``status`` (or other ``columnKey``) field.
-    * Drop ``metric.trendDirection`` — Metric infers direction from the
-      ``+``/``-`` prefix on ``trend``.
-- Colors (when an accent is genuinely needed): ``#30D158`` green,
-  ``#FF453A`` red, ``#FF9F0A`` orange, ``#0A84FF`` blue, ``#BF5AF2``
-  purple, ``#5E5CE6`` indigo.
-
-Step 3 — hard rules
-- NEVER call ``cloud_add_widget`` / ``cloud_update_widget`` /
-  ``cloud_remove_widget``. They mutate the legacy embedded widgets
-  array which is dead code on the client; the change won't render.
-- NEVER call ``cloud_create_pocket`` to fulfill an edit request. The
-  pocket already exists; creating another spawns a duplicate.
-- NEVER read source files, grep the repo, or run web_search to figure
-  out a pocket operation. The two commands above are the whole
-  interface.
-- NEVER write files to disk or generate HTML to "demonstrate" a
-  change. The client renders the new rippleSpec automatically.
-- If ``cloud_update_pocket`` returns ``{{"ok": false, "error": "..."}}``,
-  surface the error and stop. Do NOT shell-grep the codebase to debug.
-</pocket-workflow>
-
-"""
-
-
-_CLOUD_POCKET_CREATION_PROMPT = """\
-<pocket-creation>
-The user wants to create a NEW pocket — a workspace dashboard.
-
-**The dashboard renders only from ``rippleSpec.ui``.** A pocket without
-a ``ripple_spec`` is an empty dashboard. Build the full UISpec node
-tree up front and pass it as ``ripple_spec``. Do NOT pass a separate
-``widgets`` array — that field exists for legacy reasons and the
-client doesn't render from it.
-
-Use the cloud CLI command via your ``shell`` tool, piping JSON via
-stdin so currency / ``$`` values survive the shell:
-
-  echo '<json>' | python -m pocketpaw.tools.cli cloud_create_pocket -
-
-JSON body:
-  {{
-    "name": "<short title>",            // required
-    "description": "<one-line summary>",
-    "type": "research|business|data|mission|deep-work|custom|hospitality",
-    "icon": "<icon name>",
-    "color": "#0A84FF",
-    "ripple_spec": {{ ... UISpec tree — REQUIRED, this is the canvas ... }}
-  }}
-
-Each node: ``{{type, props, children?, style?}}``. Nest with
-``children`` arrays in ``flex``/``grid``.
-
-UISpec widget vocabulary (same as the ``<ripple>`` chat-inline block —
-same canonical shapes apply for chart, table, kanban, gantt, timeline):
-  layout    flex, grid, card, container, tabs, accordion, split,
-            section, separator
-  display   heading, text, badge, metric, stat, progress, avatar,
-            image, feed, markdown, code-block, status-dot, trend,
-            callout, comparison-table, definition-list, steps
-  data      chart, table, data-grid, kanban, gantt, calendar,
-            timeline, tree, sparkline, gauge, funnel, heatmap,
-            treemap, sankey
-  research  source-card, sources-bar, citation, news-card, kv-table
-  vertical  pricing-table, comment-thread, audit-log, org-chart,
-            people-picker
-  workflow  workflow
-
-USE-THE-WIDGET RULE: if the user names a UI pattern (kanban, gantt,
-calendar, timeline, heatmap, treemap, sankey, funnel, org-chart,
-comparison, pricing) → emit ONE node of that widget type. NEVER
-rebuild it out of flex+grid+text.
-
-CHART/TABLE/KANBAN CONTRACTS: see the canonical shapes in the
-``<ripple>`` block. Common mistakes to avoid:
-- chart prop is ``type``, NOT ``chartType``. Donut variant is
-  ``donut``, NOT ``doughnut``.
-- table ``columns`` are objects with ``accessorKey``; ``data`` is an
-  array of OBJECTS keyed by accessorKey (NOT a 2D ``rows`` array).
-- kanban ``columns`` are headers ONLY; cards live in a flat ``value``
-  array with a ``status`` (or other ``columnKey``) field.
-
-THEME RULE: do NOT set ``style.backgroundColor`` /
-``style.borderRadius`` / ``style.padding`` on ``flex`` / ``grid`` /
-``card`` / ``container`` nodes — Tailwind theme tokens drive those.
-Explicit colors on data elements (chart series, badge variants, metric
-trend) are fine.
-
-Hard rules:
-- NEVER read source files or grep the repo to figure out the schema —
-  the canonical shapes in the ``<ripple>`` block are the contract.
-- NEVER pass a ``widgets`` array. Put everything inside ``ripple_spec``.
-- All values must be concrete — no "TBD", "...", null. If estimating,
-  prefix with "~".
-- Colors (when an accent is genuinely needed): ``#30D158`` green,
-  ``#FF453A`` red, ``#FF9F0A`` orange, ``#0A84FF`` blue, ``#BF5AF2``
-  purple, ``#5E5CE6`` indigo.
-
-The command returns ``{{"ok": true, "pocket": {{...}}, "pocket_id":
-"..."}}``. The new pocket mounts in the user's sidebar automatically;
-do not follow up with ``cloud_get_pocket``.
-</pocket-creation>
-
-"""
-
-
-def build_context_block(ctx: ScopeContext) -> str:
+def build_context_block(ctx: ScopeContext, *, backend_name: str | None = None) -> str:
     """Compact string the agent prompt embeds so the model knows who is
     here and how to render rich UI back to the client.
 
-    Three pocket modes drive different prompt blocks. The cloud-mode
-    blocks are self-contained — they used to be assembled by stacking
-    a cloud-tools preamble on top of the OSS desktop pocket prompts,
-    but the OSS prompts told the agent to invoke
-    ``python -m pocketpaw.tools.cli ...`` over Bash, which the cloud
-    runtime can't actually execute. Codex (and any other tool-using
-    backend) then dutifully tried to spawn the CLI, hit empty results,
-    and spiralled into reading the source tree to "figure out" the
-    operation. The replacement prompts below are MCP-only and lead
-    with a hard pocket-vs-PocketPaw scope clarification.
+    Pocket prompts come from ee.ripple._pockets — the canonical source
+    that backs every pocket surface (cloud chat agent, legacy local
+    pocket router, codex CLI subprocesses). backend_name flips between
+    the in-process MCP variant (claude_agent_sdk) and the shell-CLI
+    variant (codex_cli, opencode, gemini_cli) via get_pocket_prompts.
+    Both variants already embed RIPPLE_DESIGN_RULES at the bottom, so
+    the chat-inline prompt is appended ONLY in plain-chat mode.
     """
+    creation_prompt, interaction_prompt = get_pocket_prompts(backend_name=backend_name)
+
     member_list = ", ".join(ctx.members) if ctx.members else "(none)"
     parts = [
         f"<scope>{ctx.kind.value} {ctx.scope_id}</scope>",
         f"<participants>{member_list}</participants>",
     ]
     if ctx.intent == "pocket_create":
-        parts.append(_CLOUD_POCKET_CREATION_PROMPT)
+        # Creation prompt is self-contained — already includes the design
+        # rules block. The chat-inline prompt does NOT belong here; the
+        # agent is asked to BUILD a pocket, not to emit a chat-inline UI.
+        parts.append(creation_prompt)
         return "\n".join(parts)
     if ctx.pocket_id:
-        parts.append(_CLOUD_POCKET_INTERACTION_PROMPT.format(pocket_id=ctx.pocket_id))
-        parts.append(f"<current-pocket id=\"{ctx.pocket_id}\" />")
+        parts.append(interaction_prompt.replace(POCKET_ID_TOKEN, ctx.pocket_id))
+        parts.append(f'<current-pocket id="{ctx.pocket_id}" />')
+        return "\n".join(parts)
+    # Plain chat — the inline ripple prompt already embeds RIPPLE_DESIGN_RULES.
     parts.append(INLINE_RIPPLE_SYSTEM_PROMPT)
     return "\n".join(parts)
 
