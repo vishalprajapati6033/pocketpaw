@@ -122,14 +122,14 @@ def validate_against_manifest(
 
         {
           "path": "ui.children[2].children[1]",
-          "type": "feed",
+          "type": "timeline",
           "unknown_props": ["maxItem"],          # top-level prop drift
-          "allowed_props": ["items", "maxItems"],
+          "allowed_props": ["events", "maxItems"],
           "item_issues": [                       # inner-item drift
             {
-              "path": "...props.items[0]",
-              "from": "title",
-              "to": "text",
+              "path": "...props.events[0]",
+              "from": "description",
+              "to": "detail",
               "applied": True,
             },
           ],
