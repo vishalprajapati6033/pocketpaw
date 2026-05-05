@@ -242,6 +242,23 @@ class Settings(BaseSettings):
     codex_cli_max_turns: int = Field(
         default=100, description="Max turns per query in Codex CLI backend (0 = unlimited)"
     )
+    codex_cli_api_key: str | None = Field(
+        default=None,
+        description=(
+            "Optional API key for the Codex CLI backend. Falls back to "
+            "openai_api_key when unset; useful when the user wants Codex "
+            "talking to a different account than the rest of OpenAI tooling."
+        ),
+    )
+    codex_cli_base_url: str | None = Field(
+        default=None,
+        description=(
+            "Optional base URL for the Codex CLI backend (sets OPENAI_BASE_URL "
+            "for the codex subprocess). Lets you point Codex at an "
+            "OpenAI-compatible proxy (LiteLLM, Azure, etc.) without changing "
+            "the global OpenAI base URL."
+        ),
+    )
 
     # Copilot SDK Settings
     copilot_sdk_provider: str = Field(
@@ -907,6 +924,20 @@ class Settings(BaseSettings):
     kb_limit: int = Field(
         default=3,
         description="Number of top articles to inject from kb search (default: 3)",
+    )
+    ripple_manifest_url: str = Field(
+        default="http://localhost:5174/manifest.json",
+        description=(
+            "URL to the Ripple UI manifest (widget specs). Defaults to the "
+            "local ripple dev server while @ripple-ui/svelte is unreleased; "
+            "swap to "
+            "https://cdn.jsdelivr.net/npm/@ripple-ui/svelte@latest/dist/manifest.json "
+            "(or any pinned version) once published."
+        ),
+    )
+    ripple_manifest_ttl_seconds: int = Field(
+        default=86400,
+        description="TTL in seconds for cached Ripple manifest (default: 24h)",
     )
 
     # File extraction chain (Phase 1, "Files as Knowledge")
