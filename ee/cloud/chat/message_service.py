@@ -35,6 +35,7 @@ from ee.cloud.models.message import Mention as _MentionDoc
 from ee.cloud.models.message import Message as _MessageDoc
 from ee.cloud.models.message import Reaction as _ReactionDoc
 from ee.cloud.models.notification import NotificationSource
+from ee.cloud.models.user import User as _UserDoc
 from ee.cloud.notifications import service as notifications_service
 from ee.cloud.realtime.emit import emit
 from ee.cloud.realtime.events import (
@@ -427,6 +428,43 @@ async def send_message(group_id: str, user_id: str, body: SendMessageRequest) ->
     if unread_tasks:
         await asyncio.gather(*unread_tasks)
 
+    # --- In-app notification: create for DM and group messages ---
+    group_type = getattr(group, "type", "")
+    is_dm = group_type == "dm"
+
+    # Only create notifications for non-self messages
+    notif_recipients = [m for m in group.members if m != user_id]
+    if notif_recipients:
+        try:
+            sender_doc = await _UserDoc.get(PydanticObjectId(user_id))
+            sender_name = sender_doc.full_name or sender_doc.email or "Someone"
+        except Exception:
+            sender_name = "Someone"
+
+        title = (
+            f"New message from {sender_name}" if is_dm
+            else f"New message in #{group_name}" if group_name
+            else "New message"
+        )
+
+        notif_tasks = [
+            notifications_service.create(
+                workspace_id=str(group.workspace),
+                recipient=member,
+                kind="message",
+                title=title,
+                body=body.content[:200],
+                source=NotificationSource(
+                    type="message",
+                    id=domain_msg.id,
+                    pocket_id=None,
+                    room_id=group_id,
+                ),
+            )
+            for member in notif_recipients
+        ]
+        await asyncio.gather(*notif_tasks)
+
     group_name = getattr(group, "name", "") or ""
     broadcast_types = {"here", "channel", "everyone"}
     recipients: set[str] = set()
@@ -457,6 +495,7 @@ async def send_message(group_id: str, user_id: str, body: SendMessageRequest) ->
                 type="message",
                 id=domain_msg.id,
                 pocket_id=None,
+                room_id=group_id,
             ),
         )
         await unread_service.bump_mention(target, group_id)
@@ -577,7 +616,11 @@ async def toggle_reaction(message_id: str, user_id: str, emoji: str) -> dict:
             kind="reaction",
             title=f"{emoji} on your message",
             body=(domain_msg.content or "")[:200],
-            source=NotificationSource(type="message", id=domain_msg.id),
+            source=NotificationSource(
+                type="message",
+                id=domain_msg.id,
+                room_id=cast(str, domain_msg.group),
+            ),
         )
 
     return message_to_wire_dict(domain_msg)

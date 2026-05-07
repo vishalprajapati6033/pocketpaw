@@ -49,7 +49,9 @@ def _source_to_domain(
 ) -> NotificationSource | None:
     if src is None:
         return None
-    return NotificationSource(type=src.type, id=src.id, pocket_id=src.pocket_id)
+    return NotificationSource(
+        type=src.type, id=src.id, pocket_id=src.pocket_id, room_id=src.room_id
+    )
 
 
 def _source_to_doc(
@@ -60,7 +62,9 @@ def _source_to_doc(
         return None
     if isinstance(src, _NotificationSourceDoc):
         return src
-    return _NotificationSourceDoc(type=src.type, id=src.id, pocket_id=src.pocket_id)
+    return _NotificationSourceDoc(
+        type=src.type, id=src.id, pocket_id=src.pocket_id, room_id=src.room_id
+    )
 
 
 def _to_domain(doc: _NotificationDoc) -> Notification:
