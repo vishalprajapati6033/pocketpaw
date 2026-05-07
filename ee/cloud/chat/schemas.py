@@ -16,6 +16,7 @@ class CreateGroupRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: str = ""
     type: Literal["public", "private", "dm", "channel"] = "private"
+    visibility: Literal["public", "private"] = "public"
     member_ids: list[str] = Field(default_factory=list)
     icon: str = ""
     color: str = ""
@@ -29,6 +30,7 @@ class UpdateGroupRequest(BaseModel):
     # Toggle visibility — "private" (members-only) vs "public"/"channel"
     # (any workspace member can read). DMs cannot be retyped.
     type: Literal["public", "private", "channel"] | None = None
+    visibility: Literal["public", "private"] | None = None
 
 
 class AddGroupMembersRequest(BaseModel):

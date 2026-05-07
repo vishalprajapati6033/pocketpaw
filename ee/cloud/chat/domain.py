@@ -82,6 +82,7 @@ class Group:
     message_count: int
     created_at: datetime
     updated_at: datetime
+    visibility: str = "public"  # "public" | "private" — for channels
 
 
 @dataclass(frozen=True)

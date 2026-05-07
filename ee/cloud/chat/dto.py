@@ -153,6 +153,7 @@ def group_to_wire_dict(
         "slug": group.slug,
         "description": group.description,
         "type": group.type,
+        "visibility": group.visibility,
         "icon": group.icon,
         "color": group.color,
         "owner": group.owner,
