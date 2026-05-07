@@ -25,6 +25,8 @@ from ee.cloud.chat.schemas import (
 from ee.cloud.models.group import Group as _GroupDoc
 from ee.cloud.models.group import GroupAgent as _GroupAgentDoc
 from ee.cloud.models.group import MemberRole
+from ee.cloud.models.notification import NotificationSource
+from ee.cloud.notifications import service as notifications_service
 from ee.cloud.realtime.bus import get_resolver
 from ee.cloud.realtime.emit import emit
 from ee.cloud.realtime.events import (
@@ -795,11 +797,25 @@ async def add_members(
 
     updated, newly_added = await _add_members_doc(group_id, member_ids, role=role)
 
+    group_name = updated.name or ""
+
     for added_user_id in newly_added:
         await emit(
             GroupMemberAdded(
                 data={"group_id": group_id, "user_id": added_user_id, "role": role}
             )
+        )
+        await notifications_service.create(
+            workspace_id=updated.workspace_id,
+            recipient=added_user_id,
+            kind="group_invite",
+            title=f"You were added to {group_name}" if group_name else "You were added to a group",
+            body="",
+            source=NotificationSource(
+                type="message",
+                id=group_id,
+                room_id=group_id,
+            ),
         )
     if newly_added:
         users_by_id, agents_by_id = await _populate_lookups_for_domain_groups([updated])

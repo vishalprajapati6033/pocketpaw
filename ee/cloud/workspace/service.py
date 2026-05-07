@@ -477,7 +477,11 @@ async def create_invite(
             kind="invite",
             title=f"You were invited to join {doc.name}",
             body="",
-            source=NotificationSource(type="invite", id=invite.id),
+            source=NotificationSource(
+                type="invite",
+                id=invite.token,
+                room_id=invite.group_id,
+            ),
         )
 
     return invite
