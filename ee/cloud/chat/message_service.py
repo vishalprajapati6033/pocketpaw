@@ -428,6 +428,8 @@ async def send_message(group_id: str, user_id: str, body: SendMessageRequest) ->
     if unread_tasks:
         await asyncio.gather(*unread_tasks)
 
+    group_name = getattr(group, "name", "") or ""
+
     # --- In-app notification: create for DM and group messages ---
     group_type = getattr(group, "type", "")
     is_dm = group_type == "dm"
@@ -464,8 +466,6 @@ async def send_message(group_id: str, user_id: str, body: SendMessageRequest) ->
             for member in notif_recipients
         ]
         await asyncio.gather(*notif_tasks)
-
-    group_name = getattr(group, "name", "") or ""
     broadcast_types = {"here", "channel", "everyone"}
     recipients: set[str] = set()
 
