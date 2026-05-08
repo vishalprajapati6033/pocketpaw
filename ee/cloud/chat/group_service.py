@@ -154,11 +154,11 @@ def _require_group_admin(group: _GroupDoc, user_id: str) -> None:
     raise Forbidden("group.not_admin", "Only group admins can perform this action")
 
 
-def _role_for(group: _GroupDoc, user_id: str) -> Literal["owner", "admin", "edit", "view", "none"]:
+def _role_for(group: _GroupDoc, user_id: str) -> Literal["owner", "admin", "edit", "post_no_media", "view", "none"]:
     """Return the role of a user in a group.
 
     - "owner" if user_id == group.owner
-    - member_roles[user_id] if present ("admin" | "edit" | "view")
+    - member_roles[user_id] if present ("admin" | "edit" | "post_no_media" | "view")
     - "edit" if user is a member without an explicit role entry (back-compat default)
     - "none" if user is not a member
     """
@@ -167,7 +167,7 @@ def _role_for(group: _GroupDoc, user_id: str) -> Literal["owner", "admin", "edit
     if user_id not in group.members:
         return "none"
     explicit = group.member_roles.get(user_id)
-    if explicit in ("admin", "edit", "view"):
+    if explicit in ("admin", "edit", "post_no_media", "view"):
         return explicit  # type: ignore[return-value]
     return "edit"
 
@@ -180,6 +180,10 @@ def resolve_group_role(group: _GroupDoc, user_id: str) -> GroupRole:
     raw = _role_for(group, user_id)
     if raw == "none":
         raise Forbidden("group.not_member", "You are not a member of this group")
+    # Restriction roles (post_no_media) map to MEMBER for basic access — the
+    # posting restrictions are enforced at send time.
+    if raw == "post_no_media":
+        return GroupRole.MEMBER
     return GroupRole.from_str("edit" if raw == "edit" else raw)
 
 
@@ -532,12 +536,12 @@ async def _add_members_doc(
         if mid not in doc.members:
             doc.members.append(mid)
             newly_added.append(mid)
-        if role in ("admin", "view"):
+        if role in ("admin", "view", "post_no_media"):
             doc.member_roles[mid] = role  # type: ignore[assignment]
         elif role == "edit" and mid in doc.member_roles:
             doc.member_roles.pop(mid, None)
 
-    if newly_added or role in ("admin", "view"):
+    if newly_added or role in ("admin", "view", "post_no_media"):
         await doc.save()
     return _group_doc_to_domain(doc), newly_added
 
@@ -863,10 +867,10 @@ async def set_member_role(
     group_id: str, user_id: str, target_user_id: str, role: MemberRole
 ) -> MemberRole:
     """Set a member's role to "edit" / "view" / "admin". Owner only."""
-    if role not in ("admin", "edit", "view"):
+    if role not in ("admin", "edit", "view", "post_no_media"):
         raise ValidationError(
             "group.invalid_role",
-            f"Role must be one of 'admin', 'edit', 'view'; got {role!r}",
+            f"Role must be one of 'admin', 'edit', 'view', 'post_no_media'; got {role!r}",
         )
 
     group = await _get_group_domain_or_404(group_id)

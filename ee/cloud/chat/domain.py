@@ -20,7 +20,7 @@ from typing import Literal
 # Mirror persistence-layer literals
 ContextType = Literal["pocket", "group", "session"]
 PocketRole = Literal["user", "assistant", "system"]
-MemberRole = Literal["view", "edit", "admin"]
+MemberRole = Literal["view", "edit", "post_no_media", "admin"]
 GroupType = Literal["public", "private", "dm", "channel"]
 
 

@@ -373,6 +373,14 @@ async def send_message(group_id: str, user_id: str, body: SendMessageRequest) ->
     group = await _get_group_or_404(group_id)
     _require_can_post(group, user_id)
 
+    # Enforce per-member posting restrictions
+    member_role = group_service._role_for(group, user_id)
+    if member_role == "post_no_media" and body.attachments:
+        raise Forbidden(
+            "group.attachments_disabled",
+            "Your role does not allow sending file attachments",
+        )
+
     if group.archived:
         raise Forbidden("group.archived", "Cannot send messages to an archived group")
 

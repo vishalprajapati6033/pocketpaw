@@ -35,11 +35,11 @@ class UpdateGroupRequest(BaseModel):
 
 class AddGroupMembersRequest(BaseModel):
     user_ids: list[str]
-    role: Literal["edit", "view"] = "edit"
+    role: Literal["edit", "post_no_media", "view"] = "edit"
 
 
 class UpdateMemberRoleRequest(BaseModel):
-    role: Literal["edit", "view"]
+    role: Literal["edit", "post_no_media", "view"]
 
 
 class AddGroupAgentRequest(BaseModel):

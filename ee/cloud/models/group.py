@@ -11,11 +11,13 @@ from pydantic import BaseModel, Field
 from ee.cloud.models.base import TimestampedDocument
 
 # Group member role tiers (ordered by privilege, ascending):
-#   "view"  — read-only
-#   "edit"  — post/react (the default; absence from member_roles means "edit")
-#   "admin" — can modify group settings, add/remove members & agents
+#   "view"            — read-only
+#   "edit"            — post/react (the default; absence from member_roles means "edit")
+#   "post_no_mention" — can post but @mentions are blocked
+#   "post_no_media"   — can post but file attachments are blocked
+#   "admin"           — can modify group settings, add/remove members & agents
 # The group's `owner` field is the implicit top tier (not stored here).
-MemberRole = Literal["view", "edit", "admin"]
+MemberRole = Literal["view", "edit", "post_no_media", "admin"]
 
 
 class GroupAgent(BaseModel):
