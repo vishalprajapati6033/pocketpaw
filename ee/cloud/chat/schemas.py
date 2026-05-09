@@ -52,11 +52,17 @@ class UpdateGroupAgentRequest(BaseModel):
     respond_mode: str
 
 
+class CreateThreadRequest(BaseModel):
+    """Create a thread from an existing message."""
+    message_id: str = Field(..., description="The message to use as thread parent")
+
+
 class SendMessageRequest(BaseModel):
     content: str = Field(min_length=1, max_length=10_000)
     reply_to: str | None = None
     mentions: list[dict] = Field(default_factory=list)
     attachments: list[dict] = Field(default_factory=list)
+    thread_id: str | None = None  # When set, this message is a reply in a thread
 
 
 class EditMessageRequest(BaseModel):
@@ -94,6 +100,8 @@ class MessageResponse(BaseModel):
     content: str
     mentions: list[dict]
     reply_to: str | None
+    thread_id: str | None = None
+    is_thread_parent: bool = False
     attachments: list[dict]
     reactions: list[dict]
     edited: bool
@@ -148,6 +156,9 @@ class WsInbound(BaseModel):
         "read.ack",
         "room.join",
         "room.leave",
+        "thread.create",
+        "thread.close",
+        "thread.send",
     ]
     group_id: str | None = None
     message_id: str | None = None

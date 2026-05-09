@@ -83,6 +83,7 @@ class Group:
     created_at: datetime
     updated_at: datetime
     visibility: str = "public"  # "public" | "private" — for channels
+    active_threads: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -106,6 +107,8 @@ class Message:
     mentions: tuple[Mention, ...] = field(default_factory=tuple)
     reply_to: str | None = None
     thread_count: int = 0
+    thread_id: str | None = None
+    is_thread_parent: bool = False
     attachments: tuple[Attachment, ...] = field(default_factory=tuple)
     reactions: tuple[Reaction, ...] = field(default_factory=tuple)
     edited: bool = False

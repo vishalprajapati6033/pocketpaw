@@ -72,6 +72,7 @@ def _group_doc_to_domain(doc: _GroupDoc) -> _GroupDomain:
         member_roles=tuple(doc.member_roles.items()),
         agents=tuple(_group_agent_to_domain(a) for a in doc.agents),
         pinned_messages=tuple(doc.pinned_messages),
+        active_threads=tuple(getattr(doc, "active_threads", [])),
         owner=doc.owner,
         archived=doc.archived,
         last_message_at=doc.last_message_at,

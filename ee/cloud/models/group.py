@@ -49,6 +49,9 @@ class Group(TimestampedDocument):
     member_roles: dict[str, MemberRole] = Field(default_factory=dict)
     agents: list[GroupAgent] = Field(default_factory=list)
     pinned_messages: list[str] = Field(default_factory=list)  # Message IDs
+    # Active thread parent message IDs — the "thread list" shown in the sidebar.
+    # When a thread is closed/resolved it's removed from this list.
+    active_threads: list[str] = Field(default_factory=list)
     owner: str  # User ID
     archived: bool = False
     last_message_at: datetime | None = None
