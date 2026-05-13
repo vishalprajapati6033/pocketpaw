@@ -581,6 +581,19 @@ forbidden_modules = [
     "ee.cloud.models.agent",
 ]
 
+[[tool.importlinter.contracts]]
+name = "Tasks — Beanie writes only from service.py"
+type = "forbidden"
+allow_indirect_imports = "true"
+source_modules = [
+    "ee.cloud.tasks.router",
+    "ee.cloud.tasks.dto",
+    "ee.cloud.tasks.domain",
+    "ee.cloud.tasks.listeners",
+]
+forbidden_modules = ["ee.cloud.models.task"]
+
+
 # Mission Control façade — the façade reads through Instinct's store
 # (SQLite) plus the in-process activity buffer; it has no Beanie
 # collection of its own in PR 1. The forbidden contract here keeps the

@@ -14,6 +14,7 @@ from ee.cloud.models.notification import Notification, NotificationSource
 from ee.cloud.models.pocket import Pocket, Widget, WidgetPosition
 from ee.cloud.models.read_state import ReadState
 from ee.cloud.models.session import Session
+from ee.cloud.models.task import Task, TaskAssignee, TaskSource
 from ee.cloud.models.user import OAuthAccount, User, WorkspaceMembership
 from ee.cloud.models.workspace import Workspace, WorkspaceSettings
 
@@ -57,6 +58,9 @@ __all__ = [
     "Reaction",
     "ReadState",
     "Session",
+    "Task",
+    "TaskAssignee",
+    "TaskSource",
     "User",
     "Widget",
     "WidgetPosition",
@@ -86,6 +90,7 @@ def get_all_documents():
         Group,
         Message,
         ReadState,
+        Task,
         Cycle,
     ]
 

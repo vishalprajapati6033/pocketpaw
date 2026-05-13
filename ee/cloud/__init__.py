@@ -1,5 +1,9 @@
 """PocketPaw Enterprise Cloud — domain-driven architecture.
 
+Updated: 2026-05-13 — Mission Control PR 2 of 3. Added the Tasks
+    entity (unified work-item primitive: Nudges + agent tasks +
+    projections) and its in-process listener that fans ``task.proposed``
+    out to human assignees via the existing notifications surface.
 Updated: 2026-05-13 — Mission Control PR 3. Mounts the Cycles router on
     ``mount_cloud()``. The Cycles daily-snapshot job lives at
     ``ee.cloud.cycles.snapshot_job`` and is invoked by the host platform's
@@ -22,7 +26,7 @@ Updated: 2026-05-13 (feat/mission-control-facade) — mounted the Mission
     (PR 3) plug into the same façade in follow-ups.
 
 Domains: auth, workspace, chat, pockets, sessions, agents, kb, knowledge,
-mission_control, cycles.
+mission_control, cycles, tasks.
 Each has router.py (thin), service.py (logic), schemas.py (validation).
 """
 
@@ -132,6 +136,7 @@ def mount_cloud(app: FastAPI) -> None:
     from ee.cloud.kb.router import router as kb_router
     from ee.cloud.mission_control.router import router as mission_control_router
     from ee.cloud.notifications.router import router as notifications_router
+    from ee.cloud.tasks.router import router as tasks_router
     from ee.cloud.uploads.router import router as uploads_router
     from ee.paw_print.router import router as paw_print_router
 
@@ -139,6 +144,7 @@ def mount_cloud(app: FastAPI) -> None:
     app.include_router(knowledge_router, prefix="/api/v1")
     app.include_router(uploads_router, prefix="/api/v1")
     app.include_router(notifications_router, prefix="/api/v1")
+    app.include_router(tasks_router, prefix="/api/v1")
     app.include_router(files_router, prefix="/api/v1")
     app.include_router(mission_control_router, prefix="/api/v1")
 
@@ -356,6 +362,14 @@ def mount_cloud(app: FastAPI) -> None:
     from ee.cloud.uploads.listeners import register_upload_listeners
 
     register_upload_listeners()
+
+    # Tasks → notifications fan-out. When a Task is proposed to a human
+    # assignee, drop an in-app notification so they see it even without
+    # Mission Control open. Agent assignees skip this path — they pick
+    # up work via the claim flow.
+    from ee.cloud.tasks.listeners import register_task_listeners
+
+    register_task_listeners()
 
     # Mission Control activity buffer — per-workspace ring buffer fed by
     # agent.* bus events. Same constraint as the upload listeners: subscribe
