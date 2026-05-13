@@ -150,25 +150,54 @@ class TestBulkRejectEndpoint:
         assert body["rejected"][0]["rejected_reason"] == "no budget"
 
 
-class TestStubEndpoints:
+class TestBulkRoutingStubs:
+    """Skip-only smoke tests — verifies the wire shape (``affected`` +
+    ``skipped`` + ``bulk_id``) and that nudge-prefixed ids never reach
+    the Tasks service. Full Tasks-side coverage lives in
+    ``test_mission_control_bulk_reassign.py`` /
+    ``test_mission_control_bulk_snooze.py`` against the real ``mongo_db``
+    fixture."""
+
     @pytest.mark.asyncio
-    async def test_bulk_reassign_returns_501(self, store: InstinctStore) -> None:
+    async def test_bulk_reassign_skips_nudge_ids(self, store: InstinctStore) -> None:
         with TestClient(_build_app()) as client:
             resp = client.post(
                 "/api/v1/mission-control/items/bulk-reassign",
-                json={"ids": ["x"], "to": {"kind": "agent", "id": "a1"}},
+                json={
+                    "ids": ["nudge:abc", "nudge:def"],
+                    "to": {"kind": "agent", "id": "a1", "name": "claude"},
+                },
             )
-        assert resp.status_code == 501
-        assert resp.json()["error"]["code"] == "mission_control.not_implemented"
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["affected"] == []
+        assert set(body["skipped"]) == {"nudge:abc", "nudge:def"}
+        assert "bulk_id" in body
 
     @pytest.mark.asyncio
-    async def test_bulk_snooze_returns_501(self, store: InstinctStore) -> None:
+    async def test_bulk_snooze_skips_nudge_ids(self, store: InstinctStore) -> None:
         with TestClient(_build_app()) as client:
             resp = client.post(
                 "/api/v1/mission-control/items/bulk-snooze",
-                json={"ids": ["x"], "until_iso": "2026-12-31T00:00:00Z"},
+                json={
+                    "ids": ["nudge:abc"],
+                    "until_iso": "2026-12-31T00:00:00Z",
+                },
             )
-        assert resp.status_code == 501
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["affected"] == []
+        assert body["skipped"] == ["nudge:abc"]
+
+    @pytest.mark.asyncio
+    async def test_bulk_snooze_invalid_iso_returns_422(self, store: InstinctStore) -> None:
+        with TestClient(_build_app()) as client:
+            resp = client.post(
+                "/api/v1/mission-control/items/bulk-snooze",
+                json={"ids": ["task:x"], "until_iso": "not-a-real-iso"},
+            )
+        assert resp.status_code == 422
+        assert resp.json()["error"]["code"] == "mission_control.invalid_until_iso"
 
 
 class TestOutcomesEndpoint:

@@ -3,10 +3,10 @@
 Exercise the service-level API directly against the shared mongomock-motor
 fixture. The ``recording_bus`` autouse fixture captures emitted events.
 
-Tasks-composition assertions (status counters, rollover-on-close) are
-guarded by an availability probe — when PR 2's Tasks entity hasn't merged
-into ``ee`` yet, those branches skip with a clear TODO so the rest of the
-suite stays green.
+Tasks-composition assertions (status counters, rollover-on-close) run
+against the live Tasks service now that PR 2 has merged. The
+``_tasks_available`` probe is kept as a safety net for trunk forks that
+predate PR 2 — those still see the gated paths skip rather than crash.
 """
 
 from __future__ import annotations
@@ -344,18 +344,113 @@ async def test_close_idempotent() -> None:
 
 
 async def test_close_rolls_incomplete_tasks() -> None:
-    """When Tasks (PR 2) is available, closing a cycle reassigns its
-    non-done tasks to the next active cycle on the same pocket."""
+    """Closing a cycle moves incomplete tasks to the next active cycle on
+    the same pocket; ``done`` tasks stay attached to the closing cycle."""
     if not _tasks_available():
         pytest.skip(
-            "Tasks entity (PR 2) not merged into this branch yet — "
-            "TODO: revisit once feat/mission-control-tasks lands in ee"
+            "Tasks entity not present on this branch — fork predates PR 2"
         )
-    # The actual rollover semantics live in PR 2's task service; once that
-    # module exposes the documented ``agent_reassign_task_cycle`` helper,
-    # this test can construct tasks, call agent_close_cycle, and assert
-    # they show up on the rolled-to cycle.
-    pytest.skip("Tasks-side assertions covered in PR 2's test suite")
+
+    from ee.cloud.tasks import service as tasks_service
+    from ee.cloud.tasks.dto import (
+        AssigneeDTO,
+        CompleteTaskRequest,
+        CreateTaskRequest,
+    )
+
+    ctx = _ctx()
+    # Closing cycle on pocket p1, with a follow-up active cycle on the
+    # same pocket so the rollover has a target.
+    closing = await cycles_service.agent_create_cycle(
+        ctx,
+        CreateCycleRequest(
+            name="closing",
+            pocket_id="p1",
+            start=date(2026, 5, 1),
+            end=date(2026, 5, 14),
+            status="active",
+        ),
+    )
+    follow_up = await cycles_service.agent_create_cycle(
+        ctx,
+        CreateCycleRequest(
+            name="follow-up",
+            pocket_id="p1",
+            start=date(2026, 5, 15),
+            end=date(2026, 5, 28),
+            status="active",
+        ),
+    )
+
+    # Two tasks attached to the closing cycle: one done (stays put), one
+    # in-progress (rolls forward).
+    done_task = await tasks_service.agent_create_task(
+        ctx,
+        CreateTaskRequest(
+            title="done",
+            assignee=AssigneeDTO(kind="human", id="u1", name="u1"),
+            cycle_id=closing.id,
+            pocket_id="p1",
+        ),
+    )
+    await tasks_service.agent_complete_task(
+        ctx, done_task.id, CompleteTaskRequest(next_action="archive")
+    )
+    incomplete_task = await tasks_service.agent_create_task(
+        ctx,
+        CreateTaskRequest(
+            title="incomplete",
+            assignee=AssigneeDTO(kind="human", id="u1", name="u1"),
+            cycle_id=closing.id,
+            pocket_id="p1",
+        ),
+    )
+
+    closed = await cycles_service.agent_close_cycle(ctx, closing.id)
+    assert closed.status == "completed"
+
+    # The incomplete task moved to the follow-up cycle; the done task
+    # stayed on the (now closed) original cycle.
+    rolled = await tasks_service.agent_get_task(ctx, incomplete_task.id)
+    assert rolled.cycle_id == follow_up.id
+    stayed = await tasks_service.agent_get_task(ctx, done_task.id)
+    assert stayed.cycle_id == closing.id
+
+
+async def test_close_drops_to_unscheduled_when_no_follow_up() -> None:
+    """Cycle close with no other active cycle on the same pocket clears
+    the incomplete tasks' cycle_id instead of rolling forward."""
+    if not _tasks_available():
+        pytest.skip(
+            "Tasks entity not present on this branch — fork predates PR 2"
+        )
+
+    from ee.cloud.tasks import service as tasks_service
+    from ee.cloud.tasks.dto import AssigneeDTO, CreateTaskRequest
+
+    ctx = _ctx()
+    closing = await cycles_service.agent_create_cycle(
+        ctx,
+        CreateCycleRequest(
+            name="closing-orphan",
+            pocket_id="p-orphan",
+            start=date(2026, 5, 1),
+            end=date(2026, 5, 14),
+            status="active",
+        ),
+    )
+    orphan = await tasks_service.agent_create_task(
+        ctx,
+        CreateTaskRequest(
+            title="orphan",
+            assignee=AssigneeDTO(kind="human", id="u1", name="u1"),
+            cycle_id=closing.id,
+            pocket_id="p-orphan",
+        ),
+    )
+    await cycles_service.agent_close_cycle(ctx, closing.id)
+    fetched = await tasks_service.agent_get_task(ctx, orphan.id)
+    assert fetched.cycle_id is None
 
 
 # ---------------------------------------------------------------------------

@@ -3,6 +3,13 @@
 # for the Mission Control façade. Request and response shapes are kept on
 # separate classes per ee/cloud rule #4 — never reuse a model across input
 # and output.
+# Updated: 2026-05-13 (feat/mission-control-cleanup) — pinned
+# BulkReassignRequest.Assignee.kind to the Tasks vocabulary
+# (``Literal["human", "agent"]``) now that the endpoint delegates to
+# ``tasks.service.agent_reassign_task`` directly. The Mission Control
+# WorkItem domain still uses ``AssigneeKind.USER`` ("user") for Instinct
+# projections, but the reassign endpoint only acts on Tasks, so the wire
+# contract for the request body follows Tasks.
 """Mission Control wire DTOs.
 
 The audit doc (``docs/internal/2026-05-mission-control-backend-audit.md``,
@@ -16,6 +23,7 @@ guarantees as HTTP callers.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -64,15 +72,18 @@ class BulkActionRequest(BaseModel):
 
 
 class BulkReassignRequest(BaseModel):
-    """Body for the (PR-2-blocked) bulk-reassign endpoint.
+    """Body for ``POST /mission-control/items/bulk-reassign``.
 
-    The Tasks entity ships in PR 2 with the assignee polymorphism this
-    needs; PR 1 surfaces this endpoint as a stub so the frontend can
-    wire its API client without conditional code paths.
+    Delegates per-id to ``ee.cloud.tasks.service.agent_reassign_task``.
+    ``to.kind`` uses the Tasks vocabulary (``human`` / ``agent``) rather
+    than the Mission Control display vocabulary (``user`` / ``agent``) so
+    the body is forward-routed without translation. Ids that aren't
+    Tasks (e.g. ``nudge:<id>``) come back in ``skipped`` — Instinct
+    Actions don't carry a polymorphic assignee.
     """
 
     class Assignee(BaseModel):
-        kind: AssigneeKind
+        kind: Literal["human", "agent"]
         id: str
         name: str | None = None
 
@@ -81,7 +92,12 @@ class BulkReassignRequest(BaseModel):
 
 
 class BulkSnoozeRequest(BaseModel):
-    """Body for the (PR-2-blocked) bulk-snooze endpoint. See note above."""
+    """Body for ``POST /mission-control/items/bulk-snooze``.
+
+    Snoozes N Tasks by setting their ``due_at`` to ``until_iso`` via
+    ``tasks.service.agent_update_task``. Ids that aren't Tasks come back
+    in ``skipped`` — Instinct Actions don't carry a due date.
+    """
 
     ids: list[str] = Field(min_length=1)
     until_iso: str = Field(description="ISO-8601 timestamp to snooze until")

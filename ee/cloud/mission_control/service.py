@@ -1,9 +1,13 @@
 # ee/cloud/mission_control/service.py
 # Created: 2026-05-13 (feat/mission-control-facade) — façade service that
 # composes Instinct (Nudges + Pawprints) and the in-process activity buffer
-# into Mission Control's unified WorkItem shape. PR 1 of three. The Tasks
-# entity (PR 2) and Cycles entity (PR 3) plug into the same service surface
-# without changing the wire contract.
+# into Mission Control's unified WorkItem shape. PR 1 of three.
+# Updated: 2026-05-13 (feat/mission-control-cleanup) — lifted the 501 stubs
+# on bulk-reassign + bulk-snooze now that the Tasks entity (PR 2) is on
+# ``ee``. Both endpoints delegate per-id to ``ee.cloud.tasks.service`` and
+# skip non-Task ids (Instinct Actions don't reassign or snooze). Also
+# tagged the per-bulk approve/reject loops with ``# no-event`` comments
+# so rule #9 is satisfied without redundant double-emits.
 """Mission Control façade service.
 
 Every function is module-level ``async def`` per ee/cloud rule #5. The
@@ -22,10 +26,18 @@ Tenancy:
     it as the chokepoint.
 
 No Beanie writes here — the façade is read-only against Instinct + the
-activity buffer in PR 1. Bulk-approve / bulk-reject delegate to
+activity buffer. Bulk-approve / bulk-reject delegate to
 ``ee.instinct.store`` (single ownership of the audit transaction lives
-inside Instinct's store). Bulk-reassign / bulk-snooze raise 501 until
-the Tasks entity (PR 2) lands the polymorphic assignee they need.
+inside Instinct's store). Bulk-reassign / bulk-snooze fan out per-id to
+``ee.cloud.tasks.service`` and report which ids weren't Tasks in
+``skipped``.
+
+Id conventions inherited from ``_action_to_work_item``: Instinct nudges
+project as ``"nudge:<action_id>"``; Tasks project as ``"task:<task_id>"``
+(via the Tasks entity's own projector). The bulk endpoints accept either
+prefixed or bare ids — anything starting with ``nudge:`` (or any
+non-Task prefix) is silently skipped by reassign/snooze because Instinct
+Actions don't carry a polymorphic assignee or a due date.
 """
 
 from __future__ import annotations
@@ -36,7 +48,7 @@ from typing import Any
 
 from ee.api import get_instinct_store
 from ee.cloud._core.context import RequestContext
-from ee.cloud._core.errors import CloudError, ValidationError
+from ee.cloud._core.errors import ValidationError
 from ee.cloud.activity.buffer import ActivityEvent, get_buffer
 from ee.cloud.mission_control.domain import (
     AssigneeKind,
@@ -228,6 +240,7 @@ async def agent_bulk_approve(
     approved, missing, bulk_id = await store.bulk_approve(
         eligible, approver=ctx.user_id, note=body.note
     )
+    # no-event: per-item approve/reject inside the loop already emits the events
     return {
         "bulk_id": bulk_id,
         "approved": [a.model_dump(mode="json") for a in approved],
@@ -259,6 +272,7 @@ async def agent_bulk_reject(
     rejected, missing, bulk_id = await store.bulk_reject(
         eligible, reason=body.reason, rejector=ctx.user_id
     )
+    # no-event: per-item approve/reject inside the loop already emits the events
     return {
         "bulk_id": bulk_id,
         "rejected": [a.model_dump(mode="json") for a in rejected],
@@ -374,48 +388,136 @@ def _activity_to_response(e: ActivityEvent) -> ActivityEventResponse:
 
 
 # ---------------------------------------------------------------------------
-# 501 stubs — wait for PR 2 (Tasks)
+# Bulk reassign / snooze — fan out to ee.cloud.tasks.service
 # ---------------------------------------------------------------------------
+
+
+def _classify_task_id(raw: str) -> str | None:
+    """Pick the Task id out of a Mission Control work-item id, or ``None``
+    when the id doesn't refer to a Task.
+
+    The Mission Control wire shape prefixes ids with their source so the
+    frontend can render a heterogeneous feed from a single store:
+      - ``nudge:<action_id>``  → Instinct action (no reassign, no snooze)
+      - ``task:<task_id>``     → Tasks entity
+      - bare id                → treated as a Task id for forward
+        compatibility with callers that pre-strip the prefix.
+    """
+    if not raw:
+        return None
+    if raw.startswith("task:"):
+        return raw[len("task:") :] or None
+    if ":" in raw:
+        # nudge: / cycle: / any other typed prefix — not a Task.
+        return None
+    return raw
 
 
 async def agent_bulk_reassign(
     ctx: RequestContext, body: BulkReassignRequest | dict[str, Any]
 ) -> dict[str, Any]:
-    """Bulk reassign is gated on the Tasks entity (PR 2).
+    """Reassign N Tasks to the same new assignee in one call.
 
-    Instinct's Action doesn't carry a polymorphic assignee — the column
-    we added in this PR is ``assignee: str`` (a user id), not the
-    ``{kind, id, name}`` shape Mission Control needs. The Tasks entity
-    ships PR 2 with that shape; this endpoint stays as a 501 until then
-    so the frontend can wire its API client without conditional code.
+    Fans out per-id to ``ee.cloud.tasks.service.agent_reassign_task`` so
+    each leg lands its own ``task.updated`` event (per-row notifications
+    + audit trail stay precise). Ids that don't refer to Tasks land in
+    ``skipped`` rather than raising — bulk selections in Mission Control
+    routinely mix Nudges and Tasks; the operator's action bar splits
+    routing client-side, and the server treats the wrong-kind path
+    defensively.
     """
     body = BulkReassignRequest.model_validate(body)
     _require_workspace(ctx)
-    raise CloudError(
-        501,
-        "mission_control.not_implemented",
-        (
-            "bulk-reassign needs the Tasks entity (PR 2 of the Mission Control "
-            "series). PR 1 ships only the Instinct façade — see "
-            "docs/internal/2026-05-mission-control-backend-audit.md."
-        ),
+
+    from uuid import uuid4
+
+    from ee.cloud.tasks import service as tasks_service
+    from ee.cloud.tasks.dto import ReassignTaskRequest
+
+    bulk_id = uuid4().hex
+    affected: list[str] = []
+    skipped: list[str] = []
+    reassign_body = ReassignTaskRequest(
+        assignee_kind=body.to.kind,
+        assignee_id=body.to.id,
+        assignee_name=body.to.name or "",
     )
+
+    for raw_id in body.ids:
+        task_id = _classify_task_id(raw_id)
+        if task_id is None:
+            skipped.append(raw_id)
+            continue
+        try:
+            await tasks_service.agent_reassign_task(ctx, task_id, reassign_body)
+            affected.append(raw_id)
+        except Exception:
+            # NotFound (wrong workspace / missing), Forbidden (caller
+            # isn't creator/assignee), or any other Task-level reject —
+            # all surface to the operator as "couldn't apply", which is
+            # exactly what ``skipped`` represents.
+            logger.info(
+                "mission_control.bulk_reassign: skipped id %s",
+                raw_id,
+                exc_info=True,
+            )
+            skipped.append(raw_id)
+
+    # no-event: per-item agent_reassign_task already emits TaskUpdated per row
+    return {"bulk_id": bulk_id, "affected": affected, "skipped": skipped}
 
 
 async def agent_bulk_snooze(
     ctx: RequestContext, body: BulkSnoozeRequest | dict[str, Any]
 ) -> dict[str, Any]:
-    """Bulk snooze is gated on the Tasks entity (PR 2). See above."""
+    """Snooze N Tasks to the same ``until_iso`` timestamp in one call.
+
+    Implemented as a partial update on ``due_at`` per task — the Tasks
+    entity treats ``due_at`` as the snooze-until column (a Nudge that
+    snoozes for an hour is just a Task whose due_at is one hour out).
+    Skips ids that aren't Tasks, same semantics as ``agent_bulk_reassign``.
+    """
     body = BulkSnoozeRequest.model_validate(body)
     _require_workspace(ctx)
-    raise CloudError(
-        501,
-        "mission_control.not_implemented",
-        (
-            "bulk-snooze needs the Tasks entity (PR 2 of the Mission Control "
-            "series) to carry the snooze-until field on the work item."
-        ),
-    )
+
+    from uuid import uuid4
+
+    from ee.cloud.tasks import service as tasks_service
+    from ee.cloud.tasks.dto import UpdateTaskRequest
+
+    # Parse the ISO timestamp once so an invalid string surfaces as a
+    # 422 ValidationError rather than failing per-row inside the loop.
+    try:
+        until_dt = datetime.fromisoformat(body.until_iso.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValidationError(
+            "mission_control.invalid_until_iso",
+            f"until_iso must be an ISO-8601 timestamp; got {body.until_iso!r}",
+        ) from exc
+
+    bulk_id = uuid4().hex
+    affected: list[str] = []
+    skipped: list[str] = []
+    update_body = UpdateTaskRequest(due_at=until_dt)
+
+    for raw_id in body.ids:
+        task_id = _classify_task_id(raw_id)
+        if task_id is None:
+            skipped.append(raw_id)
+            continue
+        try:
+            await tasks_service.agent_update_task(ctx, task_id, update_body)
+            affected.append(raw_id)
+        except Exception:
+            logger.info(
+                "mission_control.bulk_snooze: skipped id %s",
+                raw_id,
+                exc_info=True,
+            )
+            skipped.append(raw_id)
+
+    # no-event: per-item agent_update_task already emits TaskUpdated per row
+    return {"bulk_id": bulk_id, "affected": affected, "skipped": skipped}
 
 
 __all__ = [

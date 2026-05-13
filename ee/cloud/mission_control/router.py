@@ -3,6 +3,10 @@
 # Mission Control façade. Endpoints exactly as specified in the audit doc:
 # items list, bulk approve/reject, bulk reassign/snooze stubs (501 until
 # PR 2), outcomes summary, activity feed.
+# Updated: 2026-05-13 (feat/mission-control-cleanup) — lifted the 501s on
+# bulk-reassign / bulk-snooze. Both now return a ``BulkActionResponse``
+# shape (``affected`` + ``skipped`` + ``bulk_id``) by delegating per-id
+# to the Tasks service.
 """Mission Control façade router.
 
 Thin per ee/cloud rule #4 — parses requests, delegates to
@@ -15,8 +19,8 @@ canonical URLs are:
   GET  /api/v1/mission-control/items
   POST /api/v1/mission-control/items/bulk-approve
   POST /api/v1/mission-control/items/bulk-reject
-  POST /api/v1/mission-control/items/bulk-reassign   (501 — PR 2 wires it)
-  POST /api/v1/mission-control/items/bulk-snooze     (501 — PR 2 wires it)
+  POST /api/v1/mission-control/items/bulk-reassign
+  POST /api/v1/mission-control/items/bulk-snooze
   GET  /api/v1/mission-control/outcomes
   GET  /api/v1/mission-control/activity
 """
@@ -92,11 +96,13 @@ async def bulk_reassign(
     body: BulkReassignRequest,
     ctx: RequestContext = Depends(request_context),
 ) -> dict:
-    """Stub — surfaces 501 until the Tasks entity (PR 2) lands.
+    """Reassign N Tasks in one call.
 
-    The endpoint exists so the frontend API client can wire it without
-    conditional code paths. Service returns a ``CloudError(501, ...)``
-    with the audit-doc reference in the message.
+    Delegates per-id to ``tasks.service.agent_reassign_task``. Returns
+    ``{bulk_id, affected, skipped}``: ids that aren't Tasks (Nudges, any
+    non-Task prefix) land in ``skipped``. Cross-workspace ids also land
+    in ``skipped`` rather than raising, so a mixed operator selection
+    can't leak across tenants.
     """
     return await mc_service.agent_bulk_reassign(ctx, body)
 
@@ -106,7 +112,13 @@ async def bulk_snooze(
     body: BulkSnoozeRequest,
     ctx: RequestContext = Depends(request_context),
 ) -> dict:
-    """Stub — surfaces 501 until the Tasks entity (PR 2) lands. See above."""
+    """Snooze N Tasks to a future ``until_iso`` timestamp.
+
+    Delegates per-id to ``tasks.service.agent_update_task`` setting the
+    Task's ``due_at`` to the snooze deadline. Same ``skipped`` semantics
+    as ``bulk-reassign``. Invalid ISO timestamps return 422 via
+    ``mission_control.invalid_until_iso``.
+    """
     return await mc_service.agent_bulk_snooze(ctx, body)
 
 
