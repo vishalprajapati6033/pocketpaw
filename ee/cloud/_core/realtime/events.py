@@ -313,3 +313,28 @@ class NotificationRead(Event):
 @dataclass
 class NotificationCleared(Event):
     EVENT_TYPE: ClassVar[str] = "notification.cleared"
+
+
+# Cycles — Mission Control time-boxed work windows.
+# The daily-snapshot job (``ee.cloud.cycles.snapshot_job``) emits
+# ``CycleSnapshotted`` after appending a new point to a cycle's daily
+# series; the frontend's burnup chart subscribes and patches the active
+# cycle without a full refetch.
+@dataclass
+class CycleCreated(Event):
+    EVENT_TYPE: ClassVar[str] = "cycle.created"
+
+
+@dataclass
+class CycleUpdated(Event):
+    EVENT_TYPE: ClassVar[str] = "cycle.updated"
+
+
+@dataclass
+class CycleClosed(Event):
+    EVENT_TYPE: ClassVar[str] = "cycle.closed"
+
+
+@dataclass
+class CycleSnapshotted(Event):
+    EVENT_TYPE: ClassVar[str] = "cycle.snapshotted"
