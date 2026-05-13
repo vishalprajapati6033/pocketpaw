@@ -23,6 +23,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 
 from ee.cloud._core.context import RequestContext, request_context
+from ee.cloud.license import require_license
 from ee.cloud.tasks import service as tasks_service
 from ee.cloud.tasks.dto import (
     BlockTaskRequest,
@@ -35,7 +36,7 @@ from ee.cloud.tasks.dto import (
     UpdateTaskRequest,
 )
 
-router = APIRouter(prefix="/tasks", tags=["Tasks"])
+router = APIRouter(prefix="/tasks", tags=["Tasks"], dependencies=[Depends(require_license)])
 
 
 @router.post("", response_model=TaskResponse)
