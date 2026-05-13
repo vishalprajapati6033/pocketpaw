@@ -3,6 +3,10 @@
 # the mission_control façade service. Asserts WorkItem projection, section
 # routing, agent/pocket/section filters, tenancy gating against
 # pockets_service.list_pockets, and outcome aggregation math.
+# Updated: 2026-05-13 (feat/mission-control-cleanup) — dropped the
+# TestStubEndpoints block now that bulk-reassign and bulk-snooze delegate
+# to the Tasks service. Full coverage of those endpoints lives in
+# test_mission_control_bulk_reassign.py and test_mission_control_bulk_snooze.py.
 
 from __future__ import annotations
 
@@ -13,12 +17,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 from ee.cloud._core.context import RequestContext, ScopeKind
-from ee.cloud._core.errors import CloudError, ValidationError
+from ee.cloud._core.errors import ValidationError
 from ee.cloud.mission_control import service as mc_service
 from ee.cloud.mission_control.domain import WorkItemSection, WorkItemStatus
 from ee.cloud.mission_control.dto import (
     BulkActionRequest,
-    BulkReassignRequest,
     ListActivityRequest,
     ListWorkItemsRequest,
     OutcomesQueryRequest,
@@ -241,34 +244,6 @@ class TestOutcomesSummary:
         )
         # Only the "recent" row falls in the 24h window.
         assert summary.total == 1
-
-
-# ---------------------------------------------------------------------------
-# 501 stubs
-# ---------------------------------------------------------------------------
-
-
-class TestStubEndpoints:
-    @pytest.mark.asyncio
-    async def test_bulk_reassign_raises_not_implemented(self, store: InstinctStore) -> None:
-        with pytest.raises(CloudError) as exc:
-            await mc_service.agent_bulk_reassign(
-                _ctx(),
-                BulkReassignRequest(
-                    ids=["x"], to={"kind": "agent", "id": "a1", "name": "claude"}
-                ),
-            )
-        assert exc.value.status_code == 501
-        assert exc.value.code == "mission_control.not_implemented"
-
-    @pytest.mark.asyncio
-    async def test_bulk_snooze_raises_not_implemented(self, store: InstinctStore) -> None:
-        with pytest.raises(CloudError) as exc:
-            await mc_service.agent_bulk_snooze(
-                _ctx(),
-                {"ids": ["x"], "until_iso": "2026-12-31T00:00:00Z"},
-            )
-        assert exc.value.status_code == 501
 
 
 # ---------------------------------------------------------------------------

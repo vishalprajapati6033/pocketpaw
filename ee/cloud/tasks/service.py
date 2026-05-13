@@ -5,6 +5,11 @@
 #   per Rule 9. Tenant filter on every read per Rule 7. Optimistic
 #   single-writer claim via ``find_one_and_update`` so two agents
 #   racing on the same proposed task can never both succeed.
+# Updated: 2026-05-13 (feat/mission-control-cleanup) — added
+#   ``agent_reassign_task_cycle`` so cycle-close rollover can move
+#   tasks to the next active cycle (or clear ``cycle_id``) without the
+#   creator-or-assignee guard, since workspace admins close cycles
+#   they may not own personally.
 """Tasks entity — business logic service.
 
 Public API (all module-level ``async def``):
@@ -428,6 +433,28 @@ async def agent_reassign_task(
 # ---------------------------------------------------------------------------
 
 
+async def agent_reassign_task_cycle(
+    ctx: RequestContext, task_id: str, new_cycle_id: str | None
+) -> TaskResponse:
+    """Move a Task to a different cycle (or clear its cycle).
+
+    Used by ``cycles.service._roll_incomplete_tasks`` when a cycle
+    closes — incomplete tasks roll to the next active cycle on the same
+    pocket, and ``new_cycle_id=None`` drops them back into the
+    unscheduled list. Workspace-admin pathway: skips the per-row
+    creator/assignee guard that ``agent_update_task`` enforces, because
+    the cycle owner (not the task owner) is the one closing the cycle.
+    Still tenant-scoped via ``_fetch_task``.
+    """
+
+    doc = await _fetch_task(ctx, task_id)
+    doc.cycle_id = new_cycle_id
+    await doc.save()
+    task = _to_domain(doc)
+    await emit(TaskUpdated(data=_event_payload(doc, task)))
+    return task_to_dto(task)
+
+
 async def list_for_agent_runtime(
     workspace_id: str, agent_id: str, status: str = "proposed", limit: int = 50
 ) -> list[TaskResponse]:
@@ -465,6 +492,7 @@ __all__ = [
     "agent_get_task",
     "agent_list_tasks",
     "agent_reassign_task",
+    "agent_reassign_task_cycle",
     "agent_update_task",
     "list_for_agent_runtime",
 ]

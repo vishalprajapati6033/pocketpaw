@@ -1,5 +1,11 @@
 """PocketPaw Enterprise Cloud — domain-driven architecture.
 
+Updated: 2026-05-13 — Mission Control cleanup PR. Lifted the 501 stubs
+    on Mission Control's bulk-reassign / bulk-snooze (they now delegate
+    to the Tasks service), added emit-or-no-event comments to the bulk
+    approve/reject paths and the cycle counter-sync read, documented the
+    snapshot_job's wiring placeholder in ``mount_cloud``, and pinned the
+    UTC weekend-flag drift note onto the cycle snapshot docstring.
 Updated: 2026-05-13 — Mission Control PR 2 of 3. Added the Tasks
     entity (unified work-item primitive: Nudges + agent tasks +
     projections) and its in-process listener that fans ``task.proposed``
@@ -370,6 +376,13 @@ def mount_cloud(app: FastAPI) -> None:
     from ee.cloud.tasks.listeners import register_task_listeners
 
     register_task_listeners()
+
+    # TODO: wire daily-snapshot scheduler — see ``ee.cloud.cycles.snapshot_job``
+    # for cron / Kubernetes CronJob / Celery beat wiring patterns. We
+    # deliberately do NOT spin up an in-process loop here; the host
+    # platform owns scheduling (its scheduler knows the tenant list and
+    # has the right retry / backoff semantics). Wiring lives in the
+    # deployment layer.
 
     # Mission Control activity buffer — per-workspace ring buffer fed by
     # agent.* bus events. Same constraint as the upload listeners: subscribe

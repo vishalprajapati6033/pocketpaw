@@ -624,5 +624,6 @@ source_modules = [
     "ee.cloud.cycles.router",
     "ee.cloud.cycles.dto",
     "ee.cloud.cycles.domain",
+    "ee.cloud.cycles.snapshot_job",
 ]
 forbidden_modules = ["ee.cloud.models.cycle"]

@@ -5,11 +5,10 @@ Sole owner of writes to the ``Cycle`` Beanie document. Module-level
 emit-on-every-write.
 
 Composition with the Tasks entity (``ee.cloud.tasks.service``) is via lazy
-import — that entity ships in PR 2 of the Mission Control series and may
-not be merged onto whichever ``ee`` snapshot this branch was cut from.
-When tasks isn't importable, the relevant methods (item list, counter
-refresh, snapshot job) gracefully degrade rather than crashing the cycles
-endpoints. The same lazy-import gate is exercised in tests.
+import — kept lazy so cycles can still operate when the host branch
+hasn't merged Tasks yet. Once both entities are present (the default on
+``ee`` post-PR-2), the composition runs at full fidelity; the
+lazy-import path stays as a safety net for trunk forks.
 
 Public API:
 - ``agent_create_cycle(ctx, body)``
@@ -21,6 +20,9 @@ Public API:
 
 Internal:
 - ``_snapshot_cycle_daily(ctx, cycle_id)`` — idempotent within a day.
+  Weekend flag is computed against the UTC date; deployments in
+  non-UTC timezones may observe ±12h drift on the weekend boundary.
+  Pass an explicit ``today`` param to align with local time.
 """
 
 from __future__ import annotations
@@ -332,6 +334,10 @@ async def agent_get_cycle(ctx: RequestContext, cycle_id: str) -> CycleResponse:
             doc.completed = completed
             await doc.save()
 
+    # no-event: silent counter sync on read — avoids CycleUpdated churn on every
+    # cycle detail fetch. The authoritative ``CycleUpdated`` emits live on writes
+    # (agent_update_cycle, agent_close_cycle); the daily snapshot job emits
+    # ``CycleSnapshotted`` for chart updates.
     return _to_response(_to_domain(doc))
 
 
@@ -504,6 +510,10 @@ async def _snapshot_cycle_daily(
     cadence by only appending when the most recent point is at least 7
     days old. Documented in the model docstring.
 
+    Weekend flag is computed against the UTC date; deployments in non-UTC
+    timezones may observe ±12h drift on the weekend boundary. Pass an
+    explicit ``today`` param to align with local time.
+
     Returns the newly-appended point as a DTO so the snapshot job can emit
     ``CycleSnapshotted`` with a payload the frontend's burnup chart can
     consume directly.
@@ -562,6 +572,23 @@ async def _snapshot_cycle_daily(
     return dto
 
 
+async def list_active_cycle_ids(workspace_id: str) -> list[str]:
+    """Return the ids of every active cycle in a workspace.
+
+    Helper for the snapshot job — kept inside the service so the 4-file
+    rule holds (only service.py may touch ``models.cycle``). The job
+    iterates these ids and calls ``_snapshot_cycle_daily`` per cycle.
+    Workspace is passed explicitly (not via a RequestContext) because
+    the snapshot job runs as a system actor without a user identity.
+    """
+    if not workspace_id:
+        return []
+    ids: list[str] = []
+    async for doc in _CycleDoc.find({"workspace": workspace_id, "status": "active"}):
+        ids.append(str(doc.id))
+    return ids
+
+
 __all__ = [
     "agent_close_cycle",
     "agent_create_cycle",
@@ -569,5 +596,6 @@ __all__ = [
     "agent_list_cycle_items",
     "agent_list_cycles",
     "agent_update_cycle",
+    "list_active_cycle_ids",
     "_snapshot_cycle_daily",
 ]
