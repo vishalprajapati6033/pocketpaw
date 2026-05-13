@@ -114,6 +114,13 @@ async def create(
     return created
 
 
+async def count_unread(user_id: str) -> int:
+    """Return the total count of unread notifications for a user."""
+    return await _NotificationDoc.find(
+        {"recipient": user_id, "read": False}
+    ).count()
+
+
 async def list_for_user(
     user_id: str, *, unread: bool = False, limit: int = 50
 ) -> list[Notification]:
@@ -161,6 +168,7 @@ async def clear_all(user_id: str) -> int:
 __all__ = [
     "Notification",
     "NotificationSource",
+    "count_unread",
     "create",
     "list_for_user",
     "list_for_user_dicts",

@@ -324,7 +324,7 @@ async def get_thread_messages(
     limit: int = Query(50, ge=1, le=100),
 ):
     """Get all messages in a thread (parent + replies), oldest-first."""
-    return await message_service.get_thread_messages(thread_id, user_id, cursor, limit)
+    return await message_service.get_thread_messages(thread_id, user_id, group_id=group_id, cursor=cursor, limit=limit)
 
 
 @_licensed.post("/groups/{group_id}/threads/{thread_id}/close")

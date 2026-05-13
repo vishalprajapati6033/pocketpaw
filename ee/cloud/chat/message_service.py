@@ -458,7 +458,7 @@ async def send_message(group_id: str, user_id: str, body: SendMessageRequest) ->
         try:
             sender_doc = await _UserDoc.get(PydanticObjectId(user_id))
             sender_name = sender_doc.full_name or sender_doc.email or "Someone"
-        except Exception:
+        except (ValueError, AttributeError):
             sender_name = "Someone"
 
         title = (
@@ -916,28 +916,39 @@ async def get_active_threads(group_id: str, user_id: str) -> list[dict]:
     parent_docs = await _MessageDoc.find({"_id": {"$in": oids}, "deleted": False}).to_list()
     parent_by_id = {str(p.id): p for p in parent_docs}
 
-    # Get reply counts and last reply time per thread
+    active_thread_ids = [str(p.id) for p in parent_docs]
+    if not active_thread_ids:
+        return []
+
+    # Single aggregation to get reply_count and last_reply_at for all active threads
+    pipeline = [
+        {"$match": {
+            "context_type": "group",
+            "thread_id": {"$in": active_thread_ids},
+            "deleted": False,
+        }},
+        {"$group": {
+            "_id": "$thread_id",
+            "reply_count": {"$sum": 1},
+            "last_reply_at": {"$max": "$createdAt"},
+        }},
+    ]
+    agg_cursor = _MessageDoc.aggregate(pipeline)
+    thread_stats: dict[str, dict] = {}
+    async for doc in agg_cursor:
+        tid = doc["_id"]
+        thread_stats[tid] = {
+            "reply_count": doc["reply_count"],
+            "last_reply_at": doc.get("last_reply_at"),
+        }
+
+    # Build response using the aggregated stats
     result = []
-    for tid in group.active_threads:
-        parent = parent_by_id.get(tid)
-        if not parent:
-            continue
-
-        # Count non-deleted replies
-        reply_count = await _MessageDoc.find(
-            {"context_type": "group", "thread_id": tid, "deleted": False}
-        ).count()
-
-        # Get last reply time
-        last_reply = (
-            await _MessageDoc.find(
-                {"context_type": "group", "thread_id": tid, "deleted": False}
-            )
-            .sort([("createdAt", -1)])
-            .limit(1)
-            .to_list()
-        )
-        last_reply_at = last_reply[0].createdAt if last_reply else parent.createdAt
+    for tid in active_thread_ids:
+        parent = parent_by_id[tid]
+        stats = thread_stats.get(tid, {})
+        reply_count = stats.get("reply_count", 0)
+        last_reply_at = stats.get("last_reply_at") or parent.createdAt
 
         domain_msg = _message_doc_to_domain(parent)
         wire = message_to_wire_dict(domain_msg)
@@ -962,7 +973,9 @@ async def close_thread(group_id: str, user_id: str, thread_id: str) -> None:
     # Only group admins/owner or thread author can close
     if group.owner != user_id and group.member_roles.get(user_id) != "admin":
         msg = await _MessageDoc.get(PydanticObjectId(thread_id))
-        if msg and msg.sender != user_id:
+        if not msg or msg.deleted or str(msg.group) != group_id:
+            raise NotFound("thread", thread_id)
+        if msg.sender != user_id:
             raise Forbidden(
                 "thread.not_authorized",
                 "Only group admins or the thread author can close a thread",
@@ -986,17 +999,26 @@ async def close_thread(group_id: str, user_id: str, thread_id: str) -> None:
 
 
 async def get_thread_messages(
-    thread_id: str, user_id: str, cursor: str | None = None, limit: int = 50
+    thread_id: str, user_id: str, *, group_id: str | None = None,
+    cursor: str | None = None, limit: int = 50,
 ) -> dict:
     """Get all messages in a thread, paginated oldest-first.
 
     Includes the parent message as the first item.
+
+    If *group_id* is provided it is validated against the parent message's
+    stored group to prevent cross-group access via the URL parameter.
     """
     from ee.cloud.chat.dto import message_to_wire_dict
 
     # Verify the thread parent exists and user can access
     parent = await _message_get_domain(thread_id)
     if not parent or parent.deleted or parent.context_type != "group" or not parent.group:
+        raise NotFound("thread", thread_id)
+
+    # If caller supplied a group_id URL param, assert it matches the
+    # parent message's actual group — prevents cross-group access.
+    if group_id is not None and str(parent.group) != group_id:
         raise NotFound("thread", thread_id)
 
     group = await _get_group_or_404(parent.group)

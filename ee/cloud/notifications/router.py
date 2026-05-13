@@ -34,10 +34,8 @@ async def unread_count(
     ctx: RequestContext = Depends(request_context),
 ) -> dict:
     """Return the unread notification count for the current user."""
-    notes = await notifications_service.list_for_user(
-        ctx.user_id, unread=True, limit=9999
-    )
-    return {"count": len(notes)}
+    count = await notifications_service.count_unread(ctx.user_id)
+    return {"count": count}
 
 
 @router.post("/{notification_id}/read")
