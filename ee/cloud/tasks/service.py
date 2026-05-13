@@ -10,6 +10,11 @@
 #   tasks to the next active cycle (or clear ``cycle_id``) without the
 #   creator-or-assignee guard, since workspace admins close cycles
 #   they may not own personally.
+# Updated: 2026-05-13 (fix/mission-control-followup-nits) — the admin
+#   ``agent_reassign_task_cycle`` path now emits a structured audit log
+#   line on every call so the creator/assignee-guard bypass is
+#   reviewable. PR #1097's reviewer flagged the silent privilege bypass
+#   as the highest-priority follow-up.
 """Tasks entity — business logic service.
 
 Public API (all module-level ``async def``):
@@ -445,11 +450,25 @@ async def agent_reassign_task_cycle(
     creator/assignee guard that ``agent_update_task`` enforces, because
     the cycle owner (not the task owner) is the one closing the cycle.
     Still tenant-scoped via ``_fetch_task``.
+
+    Audit: emits a structured ``tasks.reassign_cycle`` log line on every
+    call (caller, task, from→to cycle) so the privilege bypass is
+    reviewable. The line is INFO-level — the operation is expected on
+    cycle close — but carries enough context for after-the-fact audit.
     """
 
     doc = await _fetch_task(ctx, task_id)
+    previous_cycle_id = doc.cycle_id
     doc.cycle_id = new_cycle_id
     await doc.save()
+    logger.info(
+        "tasks.reassign_cycle workspace=%s caller=%s task=%s from=%s to=%s",
+        ctx.workspace_id,
+        ctx.user_id,
+        task_id,
+        previous_cycle_id,
+        new_cycle_id,
+    )
     task = _to_domain(doc)
     await emit(TaskUpdated(data=_event_payload(doc, task)))
     return task_to_dto(task)
