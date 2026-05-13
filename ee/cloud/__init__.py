@@ -14,8 +14,15 @@ Updated: 2026-04-19 (Cluster C / PR1) — Mounted ee.cloud.kb.knowledge_router,
 Updated: 2026-04-19 (Cluster B) — Added pocket journal SSE stream router to
     mount_cloud() — feeds the RippleGraphWidget with a live, pocket-scoped
     slice of the org journal.
+Updated: 2026-05-13 (feat/mission-control-facade) — mounted the Mission
+    Control façade router at /api/v1/mission-control/* and wired the
+    in-process activity buffer's bus subscribers after init_realtime so
+    the live ticker fills in from agent.thinking / agent.tool_use /
+    agent.stream_end events. PR 1 of three; Tasks (PR 2) and Cycles
+    (PR 3) plug into the same façade in follow-ups.
 
-Domains: auth, workspace, chat, pockets, sessions, agents, kb, knowledge, cycles.
+Domains: auth, workspace, chat, pockets, sessions, agents, kb, knowledge,
+mission_control, cycles.
 Each has router.py (thin), service.py (logic), schemas.py (validation).
 """
 
@@ -123,6 +130,7 @@ def mount_cloud(app: FastAPI) -> None:
     app.include_router(pockets_journal_stream_router, prefix="/api/v1")
 
     from ee.cloud.kb.router import router as kb_router
+    from ee.cloud.mission_control.router import router as mission_control_router
     from ee.cloud.notifications.router import router as notifications_router
     from ee.cloud.uploads.router import router as uploads_router
     from ee.paw_print.router import router as paw_print_router
@@ -132,6 +140,7 @@ def mount_cloud(app: FastAPI) -> None:
     app.include_router(uploads_router, prefix="/api/v1")
     app.include_router(notifications_router, prefix="/api/v1")
     app.include_router(files_router, prefix="/api/v1")
+    app.include_router(mission_control_router, prefix="/api/v1")
 
     # Files Tab v2 — /api/v1/files/tree + /api/v1/files/browse. Mounted
     # inline (instead of via build_router's ctx_factory) so the routes can
@@ -347,6 +356,13 @@ def mount_cloud(app: FastAPI) -> None:
     from ee.cloud.uploads.listeners import register_upload_listeners
 
     register_upload_listeners()
+
+    # Mission Control activity buffer — per-workspace ring buffer fed by
+    # agent.* bus events. Same constraint as the upload listeners: subscribe
+    # AFTER init_realtime installed the singleton bus.
+    from ee.cloud.activity.buffer import register_activity_listeners
+
+    register_activity_listeners()
 
     # Start/stop agent pool with app lifecycle.
     #
