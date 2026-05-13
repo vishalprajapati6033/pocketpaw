@@ -292,13 +292,13 @@ class AgentContextBuilder:
                 f"widgets_summary: {json.dumps(widget_summary)}\n"
                 f"\n"
                 f"SCOPE — read this carefully before doing anything:\n"
-                f"In this conversation, \"pocket\" / \"this pocket\" / \"the\n"
-                f"pocket\" always means THIS workspace dashboard\n"
+                f'In this conversation, "pocket" / "this pocket" / "the\n'
+                f'pocket" always means THIS workspace dashboard\n'
                 f"(id ``{pocket_id}``) — a MongoDB document the user is\n"
                 f"viewing on screen. It is NOT the PocketPaw application,\n"
                 f"NOT the source tree on disk, NOT any file under\n"
-                f"``D:\\paw`` or ``backend/`` or ``ee/cloud/``. \"Edit the\n"
-                f"pocket\", \"add a widget\", \"more widgets\" all refer to\n"
+                f'``D:\\paw`` or ``backend/`` or ``ee/cloud/``. "Edit the\n'
+                f'pocket", "add a widget", "more widgets" all refer to\n'
                 f"this document — operate on it through the\n"
                 f"``mcp__pocketpaw_pocket__*`` tools ONLY. Do NOT use\n"
                 f"shell, file_edit, grep, or web_search for pocket\n"
@@ -312,7 +312,7 @@ class AgentContextBuilder:
                 f"BEFORE answering any question about this pocket's contents,\n"
                 f"widgets, layout, data, or configuration, you MUST first call:\n"
                 f"  tool: mcp__pocketpaw_pocket__get_pocket\n"
-                f"  args: {{\"pocket_id\": \"{pocket_id}\"}}\n"
+                f'  args: {{"pocket_id": "{pocket_id}"}}\n'
                 f"That returns the full document (rippleSpec, widgets,\n"
                 f"metadata, visibility). Base your answer on that, not on\n"
                 f"the summary above.\n"
@@ -576,9 +576,7 @@ class AgentContextBuilder:
         try:
             emb = await embedder.embed_query(text=user_query, image_bytes=image_bytes)
         except Exception:
-            logger.exception(
-                "query embedding failed; falling back to BM25 for this turn"
-            )
+            logger.exception("query embedding failed; falling back to BM25 for this turn")
             return None
 
         import json
@@ -694,17 +692,13 @@ class AgentContextBuilder:
             except TimeoutError:
                 proc.kill()
                 await proc.wait()
-                logger.debug(
-                    "kb hybrid fetch for scope %s timed out after 5s", scope
-                )
+                logger.debug("kb hybrid fetch for scope %s timed out after 5s", scope)
                 return ""
         except FileNotFoundError:
             logger.debug("kb binary not found at %s — skipping kb injection", binary)
             return ""
         except Exception as exc:  # noqa: BLE001
-            logger.debug(
-                "kb hybrid fetch for scope %s failed (non-fatal): %s", scope, exc
-            )
+            logger.debug("kb hybrid fetch for scope %s failed (non-fatal): %s", scope, exc)
             return ""
 
         if proc.returncode != 0:

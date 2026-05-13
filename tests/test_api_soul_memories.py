@@ -104,9 +104,7 @@ class TestListSoulMemoriesEndpoint:
     async def test_limit_clamped_to_upper_bound(self, monkeypatch):
         # Force the soul manager to return a soul with a tonne of entries,
         # then verify the endpoint hands back at most 200.
-        big = _soul_with_memories(
-            episodic=[FakeMemoryEntry(content=str(i)) for i in range(300)]
-        )
+        big = _soul_with_memories(episodic=[FakeMemoryEntry(content=str(i)) for i in range(300)])
 
         class FakeMgr:
             soul = big
@@ -119,9 +117,7 @@ class TestListSoulMemoriesEndpoint:
 
     @pytest.mark.asyncio
     async def test_limit_clamped_to_lower_bound(self, monkeypatch):
-        small = _soul_with_memories(
-            episodic=[FakeMemoryEntry(content="only")] * 5
-        )
+        small = _soul_with_memories(episodic=[FakeMemoryEntry(content="only")] * 5)
 
         class FakeMgr:
             soul = small
@@ -149,9 +145,7 @@ class TestListSoulMemoriesEndpoint:
             def __init__(self, soul):
                 self.soul = soul
 
-        monkeypatch.setattr(
-            "pocketpaw.soul.get_soul_manager", lambda: FakeMgr(soul)
-        )
+        monkeypatch.setattr("pocketpaw.soul.get_soul_manager", lambda: FakeMgr(soul))
 
         ep = await list_soul_memories(tier="episodic")
         sem = await list_soul_memories(tier="semantic")

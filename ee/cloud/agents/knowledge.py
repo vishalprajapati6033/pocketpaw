@@ -113,7 +113,9 @@ class KnowledgeService:
         (e.g. ``"workspace:w1"``, ``"agent:a1"``, ``"pocket:p1"``). No
         validation here — kb-go rejects unknown scope shapes itself.
         """
-        return await asyncio.to_thread(_kb, "ingest", "--scope", scope, "--source", source, input_text=text)
+        return await asyncio.to_thread(
+            _kb, "ingest", "--scope", scope, "--source", source, input_text=text
+        )
 
     @staticmethod
     async def ingest_text(agent_id: str, text: str, source: str = "manual") -> dict:
@@ -141,7 +143,9 @@ class KnowledgeService:
             text = await _extract_file(file_path)
             return await KnowledgeService.ingest_text_to_scope(f"agent:{agent_id}", text, label)
         # Text/code files go directly to kb (without intermediate extraction)
-        return await asyncio.to_thread(_kb, "ingest", file_path, "--scope", f"agent:{agent_id}", "--source", label)
+        return await asyncio.to_thread(
+            _kb, "ingest", file_path, "--scope", f"agent:{agent_id}", "--source", label
+        )
 
     @staticmethod
     async def list_articles(agent_id: str) -> list[dict]:
@@ -159,7 +163,12 @@ class KnowledgeService:
     async def search(agent_id: str, query: str, limit: int = 5) -> list[str]:
         results = await asyncio.to_thread(
             _kb,
-            "search", query, "--scope", f"agent:{agent_id}", "--limit", str(limit),
+            "search",
+            query,
+            "--scope",
+            f"agent:{agent_id}",
+            "--limit",
+            str(limit),
         )
         if isinstance(results, list):
             return [r.get("summary", r.get("title", "")) for r in results]
@@ -183,7 +192,13 @@ class KnowledgeService:
         """
         result = await asyncio.to_thread(
             _kb,
-            "search", query, "--scope", scope, "--limit", str(limit), "--context",
+            "search",
+            query,
+            "--scope",
+            scope,
+            "--limit",
+            str(limit),
+            "--context",
         )
         return result if isinstance(result, str) else ""
 

@@ -15,7 +15,12 @@ import os
 from collections.abc import AsyncIterator
 from typing import Any
 
-from pocketpaw.agents.backend import _DEFAULT_IDENTITY, BackendInfo, Capability
+from pocketpaw.agents.backend import (
+    _DEFAULT_IDENTITY,
+    BackendInfo,
+    BaseAgentBackend,
+    Capability,
+)
 from pocketpaw.agents.protocol import AgentEvent
 from pocketpaw.config import Settings
 from pocketpaw.tools.policy import ToolPolicy
@@ -26,7 +31,7 @@ logger = logging.getLogger(__name__)
 _APP_NAME = "pocketpaw"
 
 
-class GoogleADKBackend:
+class GoogleADKBackend(BaseAgentBackend):
     """Google ADK backend — native Python SDK for Gemini-powered agents."""
 
     @staticmethod
@@ -103,7 +108,12 @@ class GoogleADKBackend:
         os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "FALSE"
 
     def _build_custom_tools(self) -> list:
-        """Lazily build and cache PocketPaw custom tools as ADK FunctionTool wrappers."""
+        """Lazily build and cache PocketPaw custom tools as ADK FunctionTool wrappers.
+
+        The pocket specialist tool is injected automatically by
+        ``tool_bridge._instantiate_all_tools`` so it shows up in this list
+        without per-backend wiring.
+        """
         if self._custom_tools is not None:
             return self._custom_tools
         try:

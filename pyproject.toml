@@ -115,8 +115,19 @@ copilot-sdk = [
     "github-copilot-sdk>=0.1.0",
 ]
 deep-agents = [
-    "deepagents>=0.1.0",
-    "langchain-mcp-adapters>=0.1.0",
+    "deepagents>=0.5.8,<0.6.0",
+    "langchain-mcp-adapters>=0.2.2,<0.3.0",
+    # Required for openai/openai_compatible/openrouter/litellm provider paths
+    # in agents/deep_agents.py — deepagents only pulls langchain-anthropic and
+    # langchain-google-genai, so this fills the gap.
+    "langchain-openai>=1.2.0,<2.0.0",
+    # Native LiteLLM integration — handles provider-specific quirks
+    # (DeepSeek reasoning_content, Anthropic thinking blocks, etc.) that the
+    # generic ChatOpenAI masquerade silently dropped on the floor.
+    # Pinned to 0.6.4 (excluding 0.6.5+) because 0.6.5 requires
+    # litellm>=1.83.14 which pins openai==2.24.0 and conflicts with
+    # langchain-openai>=1.2.0 (which needs openai>=2.26.0).
+    "langchain-litellm>=0.6.4,<0.6.5",
 ]
 litellm = [
     "litellm>=1.40.0",
@@ -303,8 +314,13 @@ all = [
     "openai-agents>=0.2.0",
     "google-adk>=1.0.0",
     "github-copilot-sdk>=0.1.0",
-    "deepagents>=0.1.0",
-    "langchain-mcp-adapters>=0.1.0",
+    "deepagents>=0.5.8,<0.6.0",
+    "langchain-mcp-adapters>=0.2.2,<0.3.0",
+    # Required for openai/openai_compatible/openrouter/litellm provider paths
+    # in agents/deep_agents.py — deepagents only pulls langchain-anthropic and
+    # langchain-google-genai, so this fills the gap.
+    "langchain-openai>=1.2.0,<2.0.0",
+    "langchain-litellm>=0.6.4,<0.6.5",
 ]
 dev = [
     # all deps (flattened from [all])
@@ -331,8 +347,13 @@ dev = [
     "openai-agents>=0.2.0",
     "google-adk>=1.0.0",
     "github-copilot-sdk>=0.1.0",
-    "deepagents>=0.1.0",
-    "langchain-mcp-adapters>=0.1.0",
+    "deepagents>=0.5.8,<0.6.0",
+    "langchain-mcp-adapters>=0.2.2,<0.3.0",
+    # Required for openai/openai_compatible/openrouter/litellm provider paths
+    # in agents/deep_agents.py — deepagents only pulls langchain-anthropic and
+    # langchain-google-genai, so this fills the gap.
+    "langchain-openai>=1.2.0,<2.0.0",
+    "langchain-litellm>=0.6.4,<0.6.5",
     # dev tools
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0,<1.0.0",  # pinned: incompatible with pytest-asyncio 1.x until asyncio.run() call sites are migrated
@@ -373,6 +394,12 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
 
+[tool.ruff.lint.per-file-ignores]
+# Prompt-text modules — long lines inside multi-line example/docs
+# strings can't be wrapped without changing the rendered prompt.
+"ee/ripple/_pockets.py" = ["E501"]
+"ee/ripple/_design.py" = ["E501"]
+
 [dependency-groups]
 dev = [
     # all deps (flattened from [all])
@@ -399,8 +426,13 @@ dev = [
     "openai-agents>=0.2.0",
     "google-adk>=1.0.0",
     "github-copilot-sdk>=0.1.0",
-    "deepagents>=0.1.0",
-    "langchain-mcp-adapters>=0.1.0",
+    "deepagents>=0.5.8,<0.6.0",
+    "langchain-mcp-adapters>=0.2.2,<0.3.0",
+    # Required for openai/openai_compatible/openrouter/litellm provider paths
+    # in agents/deep_agents.py — deepagents only pulls langchain-anthropic and
+    # langchain-google-genai, so this fills the gap.
+    "langchain-openai>=1.2.0,<2.0.0",
+    "langchain-litellm>=0.6.4,<0.6.5",
     # dev tools
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0,<1.0.0",  # pinned: incompatible with pytest-asyncio 1.x until asyncio.run() call sites are migrated

@@ -19,7 +19,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-from pocketpaw.agents.backend import BackendInfo, Capability
+from pocketpaw.agents.backend import BackendInfo, BaseAgentBackend, Capability
 from pocketpaw.agents.protocol import AgentEvent
 from pocketpaw.config import Settings
 from pocketpaw.security.rails import is_substring_blocked
@@ -35,7 +35,7 @@ _DEFAULT_IDENTITY = (
 _HTTP_TRANSPORTS: frozenset[str] = frozenset({"http", "sse", "streamable-http"})
 
 
-class ClaudeSDKBackend:
+class ClaudeSDKBackend(BaseAgentBackend):
     """Claude Agent SDK backend — the recommended default.
 
     Provides all built-in tools (Bash, Read, Write, Edit, Glob, Grep,
@@ -46,6 +46,17 @@ class ClaudeSDKBackend:
     """
 
     _TOOL_POLICY_MAP: dict[str, str] = {
+        # NOTE: is_tool_allowed() returns True for any key not explicitly
+        # denied when the profile is 'full' (empty _allowed_set). For
+        # restrictive profiles ('minimal', 'coding') it returns False for
+        # any key absent from the resolved allow set. 'Agent' therefore
+        # MUST have an explicit entry here; without it, any registered
+        # subagent (general-purpose claude_agent_sdk capability) would
+        # be silently blocked for every non-full profile. Mapped to
+        # 'shell' because invoking a subagent has comparable privilege
+        # scope to running a shell command — the gating is deliberately
+        # conservative.
+        "Agent": "shell",
         "Bash": "shell",
         "Read": "read_file",
         "Write": "write_file",
@@ -507,6 +518,25 @@ class ClaudeSDKBackend:
         except Exception as exc:  # noqa: BLE001
             logger.debug("pocket_context MCP server not registered: %s", exc)
 
+        # In-process MCP server: exposes ``pocket_specialist__create`` so the
+        # main agent can hand a brief to the specialist tool, which runs
+        # the full list/validate/persist workflow as an isolated specialist
+        # run without re-implementing it inline.
+        try:
+            from ee.agent.pocket_specialist.mcp_tool import (
+                SERVER_NAME as _PS_SERVER_NAME,
+            )
+            from ee.agent.pocket_specialist.mcp_tool import (
+                build_pocket_specialist_server,
+            )
+
+            if self._policy.is_mcp_server_allowed(_PS_SERVER_NAME):
+                servers[_PS_SERVER_NAME] = build_pocket_specialist_server()
+            else:
+                logger.info("pocket_specialist MCP server blocked by tool policy")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("pocket_specialist MCP server not registered: %s", exc)
+
         return servers
 
     async def _get_or_create_client(self, options: Any, *, session_key: str | None = None) -> Any:
@@ -774,18 +804,38 @@ class ClaudeSDKBackend:
                     lines.append(f"**{role}**: {content}")
                 final_prompt += "\n\n" + "\n".join(lines)
 
-            # Build allowed tools list, filtered by tool policy
-            all_sdk_tools = [
-                "Bash",
-                "Read",
-                "Write",
-                "Edit",
-                "Glob",
-                "Grep",
-                "WebSearch",
-                "WebFetch",
-                "Skill",
-            ]
+            # Pocket sessions don't need shell or filesystem access — the
+            # MCP pocket tools (get_pocket / list_pockets / set_state /
+            # set_node_prop / add_node / etc.) are the complete interface.
+            # Detect via the <pocket-scope> marker every pocket prompt
+            # carries; lock tools down to delegation + web + pocket MCP.
+            #
+            # Without this gate, the agent has been observed reaching for
+            # shell introspection (e.g. `env | grep pocket; curl localhost`)
+            # to "figure out" pocket state, which trips the security rails
+            # AND is the wrong path — the MCP tools already expose
+            # everything the agent needs.
+            is_pocket_session = "<pocket-scope>" in (final_prompt or "")
+
+            if is_pocket_session:
+                all_sdk_tools = ["Agent", "WebSearch", "WebFetch"]
+                logger.info(
+                    "Pocket session detected — tool surface locked to %s",
+                    all_sdk_tools,
+                )
+            else:
+                all_sdk_tools = [
+                    "Agent",
+                    "Bash",
+                    "Read",
+                    "Write",
+                    "Edit",
+                    "Glob",
+                    "Grep",
+                    "WebSearch",
+                    "WebFetch",
+                    "Skill",
+                ]
             allowed_tools = [
                 t
                 for t in all_sdk_tools
@@ -795,15 +845,31 @@ class ClaudeSDKBackend:
                 blocked = set(all_sdk_tools) - set(allowed_tools)
                 logger.info("Tool policy blocked SDK tools: %s", blocked)
 
-            # In-process pocket-context tools — always allowed. Each tool
-            # short-circuits without a valid ``pocket_id``, so the cost of
-            # leaving them enabled for non-pocket sessions is negligible.
-            # Read (``get_pocket``) plus four writes (``update_pocket``,
-            # ``add_widget``, ``update_widget``, ``remove_widget``) — see
-            # ``agents/sdk_mcp_pocket.py``.
+            # In-process pocket-context tools — read-only surface only:
+            # ``get_pocket``, ``list_pockets``, ``get_widget_spec``,
+            # ``get_inline_widget_help``. Mutations flow through the
+            # ``pocket_specialist__create`` / ``__edit`` MCP tools below,
+            # which run an isolated specialist backend with its own
+            # ``StructuredTool`` wrappers — see
+            # ``ee/agent/pocket_specialist/tools.py``.
             from pocketpaw.agents.sdk_mcp_pocket import POCKET_TOOL_IDS
 
             allowed_tools.extend(POCKET_TOOL_IDS)
+
+            # Pocket specialist — ``create`` / ``edit`` tools that run the
+            # full listing → validate → persist workflow as an isolated
+            # specialist backend.
+            try:
+                from ee.agent.pocket_specialist.mcp_tool import (
+                    POCKET_SPECIALIST_TOOL_IDS,
+                )
+
+                allowed_tools.extend(POCKET_SPECIALIST_TOOL_IDS)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "pocket_specialist tool ids not added to allowlist: %s",
+                    exc,
+                )
 
             # Build hooks for security
             hooks = {

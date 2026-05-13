@@ -34,7 +34,6 @@ from typing import Any
 import httpx
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers — bearer login, register, header builders
 # ---------------------------------------------------------------------------
@@ -127,9 +126,7 @@ def member_password() -> str:
 # ---------------------------------------------------------------------------
 
 
-def _revoke_all_invites_for_email(
-    api_url: str, owner: dict[str, Any], email: str
-) -> None:
+def _revoke_all_invites_for_email(api_url: str, owner: dict[str, Any], email: str) -> None:
     """Owner revokes any outstanding invites that target ``email``."""
     workspace_id = owner["workspace_id"]
     headers = _auth_headers(owner["token"], workspace_id)
@@ -149,9 +146,7 @@ def _revoke_all_invites_for_email(
             )
 
 
-def _demote_member(
-    api_url: str, owner: dict[str, Any], member_user_id: str
-) -> None:
+def _demote_member(api_url: str, owner: dict[str, Any], member_user_id: str) -> None:
     """Best-effort demote-to-member so a leaked admin doesn't poison reruns."""
     workspace_id = owner["workspace_id"]
     httpx.patch(
@@ -213,23 +208,16 @@ def test_owner_invites_member_then_promotes(
             timeout=10.0,
         )
         assert accept_resp.status_code == 200, (
-            f"member.accept_invite failed: {accept_resp.status_code} "
-            f"{accept_resp.text}"
+            f"member.accept_invite failed: {accept_resp.status_code} {accept_resp.text}"
         )
 
         # Re-read the member's identity to confirm the workspace membership.
         member_me = _get_me(api_url, member_token)
         member_ws = next(
-            (
-                ws
-                for ws in member_me.get("workspaces", [])
-                if ws["workspace"] == workspace_id
-            ),
+            (ws for ws in member_me.get("workspaces", []) if ws["workspace"] == workspace_id),
             None,
         )
-        assert member_ws is not None, (
-            "member must be a member of the workspace after accepting"
-        )
+        assert member_ws is not None, "member must be a member of the workspace after accepting"
         assert member_ws["role"] == "member", (
             f"expected role=member after accept, got {member_ws['role']!r}"
         )
@@ -266,8 +254,7 @@ def test_owner_invites_member_then_promotes(
             timeout=10.0,
         )
         assert promote_resp.status_code == 200, (
-            f"owner.promote_to_admin failed: {promote_resp.status_code} "
-            f"{promote_resp.text}"
+            f"owner.promote_to_admin failed: {promote_resp.status_code} {promote_resp.text}"
         )
 
         # ----- Phase 6: previously-blocked admin op now succeeds ----------

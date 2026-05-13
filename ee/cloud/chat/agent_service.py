@@ -22,9 +22,11 @@ from typing import Any
 from ee.cloud.shared.errors import CloudError, NotFound
 from ee.ripple import (
     INLINE_RIPPLE_SYSTEM_PROMPT,
+    POCKET_DELEGATION_RULE,
     POCKET_ID_TOKEN,
     get_pocket_prompts,
 )
+from ee.ripple._pockets import _MCP_POCKET_BACKENDS
 
 logger = logging.getLogger(__name__)
 
@@ -457,38 +459,78 @@ def assemble_toolset(ctx: ScopeContext, *, base: list[dict[str, Any]]) -> list[d
 # ---------------------------------------------------------------------------
 
 
-def build_context_block(ctx: ScopeContext, *, backend_name: str | None = None) -> str:
-    """Compact string the agent prompt embeds so the model knows who is
-    here and how to render rich UI back to the client.
+def build_behavior_instructions(ctx: ScopeContext, *, backend_name: str | None = None) -> str:
+    """Return the STATIC behavioral rules for this scope/backend.
 
-    Pocket prompts come from ee.ripple._pockets — the canonical source
-    that backs every pocket surface (cloud chat agent, legacy local
-    pocket router, codex CLI subprocesses). backend_name flips between
-    the in-process MCP variant (claude_agent_sdk) and the shell-CLI
-    variant (codex_cli, opencode, gemini_cli) via get_pocket_prompts.
-    Both variants already embed RIPPLE_DESIGN_RULES at the bottom, so
-    the chat-inline prompt is appended ONLY in plain-chat mode.
+    These are direct authoritative instructions the model must follow —
+    ripple UI conventions, pocket delegation rule, etc. They are
+    intentionally separated from ``build_dynamic_context`` so the caller
+    can inject them as top-level ``instructions`` to the agent backend
+    (where they read as rules) rather than burying them inside the
+    ``knowledge_context`` wrapper (where they read as reference data and
+    the model often ignores them).
+
+    Backend gating mirrors ``build_context_block``: MCP-capable backends
+    get ``INLINE_RIPPLE_SYSTEM_PROMPT + POCKET_DELEGATION_RULE``;
+    others get the heavy inline pocket prompt.
     """
-    creation_prompt, interaction_prompt = get_pocket_prompts(backend_name=backend_name)
+    parts: list[str] = []
+    if backend_name in _MCP_POCKET_BACKENDS:
+        parts.append(INLINE_RIPPLE_SYSTEM_PROMPT)
+        parts.append(POCKET_DELEGATION_RULE)
+    else:
+        creation_prompt, interaction_prompt = get_pocket_prompts(backend_name=backend_name)
+        if ctx.intent == "pocket_create":
+            parts.append(creation_prompt)
+        elif ctx.pocket_id:
+            parts.append(interaction_prompt.replace(POCKET_ID_TOKEN, ctx.pocket_id))
+        else:
+            parts.append(INLINE_RIPPLE_SYSTEM_PROMPT)
+    return "\n".join(parts)
 
+
+def build_dynamic_context(ctx: ScopeContext) -> str:
+    """Return only the per-turn dynamic context tags — scope,
+    participants, current-pocket-id. Pairs with
+    ``build_behavior_instructions``: the dynamic context is reference
+    data and lives inside the ``knowledge_context`` wrapper; the
+    behavioral instructions live at the top level."""
     member_list = ", ".join(ctx.members) if ctx.members else "(none)"
     parts = [
         f"<scope>{ctx.kind.value} {ctx.scope_id}</scope>",
         f"<participants>{member_list}</participants>",
     ]
-    if ctx.intent == "pocket_create":
-        # Creation prompt is self-contained — already includes the design
-        # rules block. The chat-inline prompt does NOT belong here; the
-        # agent is asked to BUILD a pocket, not to emit a chat-inline UI.
-        parts.append(creation_prompt)
-        return "\n".join(parts)
-    if ctx.pocket_id:
-        parts.append(interaction_prompt.replace(POCKET_ID_TOKEN, ctx.pocket_id))
+    if ctx.pocket_id and ctx.intent != "pocket_create":
         parts.append(f'<current-pocket id="{ctx.pocket_id}" />')
-        return "\n".join(parts)
-    # Plain chat — the inline ripple prompt already embeds RIPPLE_DESIGN_RULES.
-    parts.append(INLINE_RIPPLE_SYSTEM_PROMPT)
     return "\n".join(parts)
+
+
+def build_context_block(ctx: ScopeContext, *, backend_name: str | None = None) -> str:
+    """Compact string the agent prompt embeds so the model knows who is
+    here and how to render rich UI back to the client.
+
+    ORDER MATTERS: the static ripple/pocket prompt content goes FIRST
+    so Anthropic prompt caching can hit on it; per-turn dynamic tags
+    (scope, participants, current pocket id) go LAST.
+
+    Combined ``build_behavior_instructions`` + ``build_dynamic_context``.
+    Kept for callers that want the full assembled block (tests, legacy
+    pre-Phase-3 fallback paths). The cloud chat router now uses the two
+    helpers separately so behavioral rules can be hoisted out of the
+    ``knowledge_context`` framing — see comments on the helpers.
+
+    Backend gating: claude_agent_sdk supports the pocket_specialist
+    subagent, so the main chat agent ships only INLINE_RIPPLE_SYSTEM_PROMPT
+    + POCKET_DELEGATION_RULE — heavy POCKET_*_PROMPT_MCP text lives on
+    the specialist. Other backends (codex_cli, opencode, openai_agents,
+    google_adk, deep_agents, copilot_sdk) don't have a native subagent
+    integration today, so they fall back to the pre-Phase-3 path:
+    full pocket prompt inline. Universal Option-A (MCP-based specialist)
+    is the planned follow-up.
+    """
+    behavior = build_behavior_instructions(ctx, backend_name=backend_name)
+    dynamic = build_dynamic_context(ctx)
+    return f"{behavior}\n{dynamic}" if behavior else dynamic
 
 
 _FILE_MENTION_TYPES = {"file", "upload", "attachment", "document", "image"}
@@ -569,8 +611,12 @@ async def build_knowledge_context(
     attachments: list[dict[str, Any]] | None = None,
     mentions: list[dict[str, Any]] | None = None,
 ) -> str:
-    """Build the prompt context block with KB hits relevant to this turn."""
-    scope_block = build_context_block(ctx)
+    """Build the per-turn knowledge context — dynamic scope/participants
+    tags + KB hits. Static behavioral rules are NOT included here; the
+    caller must inject them via ``pool.run(instructions=...)`` so they
+    land outside the "Your Knowledge Base" framing that makes the model
+    treat them as reference data instead of rules."""
+    scope_block = build_dynamic_context(ctx)
     query = (user_message or "").strip()
     refs = _file_reference_terms(attachments=attachments, mentions=mentions)
     if refs:

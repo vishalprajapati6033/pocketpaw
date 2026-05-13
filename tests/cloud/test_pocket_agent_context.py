@@ -35,6 +35,23 @@ async def _make_pocket(**fields):
     return doc
 
 
+@pytest.fixture
+def agent_identity():
+    """Attach the default ``w1`` / ``u1`` identity for the duration of a
+    test that exercises ``_agent_load_doc`` (which enforces workspace +
+    edit-access checks via per-stream ContextVars). Tests that need to
+    vary identity should attach their own via ``attach_agent_identity``;
+    tests that need to exercise the no-identity path should NOT request
+    this fixture."""
+    from ee.cloud.chat.agent_service import attach_agent_identity, detach_agent_identity
+
+    tokens = attach_agent_identity(workspace_id="w1", user_id="u1")
+    try:
+        yield
+    finally:
+        detach_agent_identity(tokens)
+
+
 # ---------------------------------------------------------------------------
 # list_pockets_for_agent
 # ---------------------------------------------------------------------------
@@ -87,7 +104,7 @@ async def test_list_pockets_for_agent_errors_outside_stream():
 
 
 @pytest.mark.asyncio
-async def test_update_pocket_patches_only_provided_fields(mongo_db):
+async def test_update_pocket_patches_only_provided_fields(mongo_db, agent_identity):
     from ee.cloud.models.pocket import Pocket
     from ee.cloud.pockets.agent_context import update_pocket_for_agent
 
@@ -103,7 +120,7 @@ async def test_update_pocket_patches_only_provided_fields(mongo_db):
 
 
 @pytest.mark.asyncio
-async def test_update_pocket_normalizes_ripple_spec(mongo_db):
+async def test_update_pocket_normalizes_ripple_spec(mongo_db, agent_identity):
     from ee.cloud.models.pocket import Pocket
     from ee.cloud.pockets.agent_context import update_pocket_for_agent
 
@@ -120,7 +137,7 @@ async def test_update_pocket_normalizes_ripple_spec(mongo_db):
 
 
 @pytest.mark.asyncio
-async def test_update_pocket_propagates_load_error(mongo_db):
+async def test_update_pocket_propagates_load_error(mongo_db, agent_identity):
     from ee.cloud.pockets.agent_context import update_pocket_for_agent
 
     # Valid ObjectId shape but no matching doc.
@@ -135,7 +152,7 @@ async def test_update_pocket_propagates_load_error(mongo_db):
 
 
 @pytest.mark.asyncio
-async def test_add_widget_appends_with_defaults(mongo_db):
+async def test_add_widget_appends_with_defaults(mongo_db, agent_identity):
     from ee.cloud.models.pocket import Pocket
     from ee.cloud.pockets.agent_context import add_widget_for_agent
 
@@ -167,7 +184,7 @@ async def test_add_widget_rejects_non_dict_widget(mongo_db):
 
 
 @pytest.mark.asyncio
-async def test_update_widget_patches_listed_fields(mongo_db):
+async def test_update_widget_patches_listed_fields(mongo_db, agent_identity):
     from ee.cloud.models.pocket import Pocket, Widget
     from ee.cloud.pockets.agent_context import update_widget_for_agent
 
@@ -187,7 +204,7 @@ async def test_update_widget_patches_listed_fields(mongo_db):
 
 
 @pytest.mark.asyncio
-async def test_update_widget_returns_error_when_widget_missing(mongo_db):
+async def test_update_widget_returns_error_when_widget_missing(mongo_db, agent_identity):
     from ee.cloud.pockets.agent_context import update_widget_for_agent
 
     pocket = await _make_pocket()
@@ -203,7 +220,7 @@ async def test_update_widget_returns_error_when_widget_missing(mongo_db):
 
 
 @pytest.mark.asyncio
-async def test_remove_widget_drops_matching_id(mongo_db):
+async def test_remove_widget_drops_matching_id(mongo_db, agent_identity):
     from ee.cloud.models.pocket import Pocket, Widget
     from ee.cloud.pockets.agent_context import remove_widget_for_agent
 
@@ -220,7 +237,7 @@ async def test_remove_widget_drops_matching_id(mongo_db):
 
 
 @pytest.mark.asyncio
-async def test_remove_widget_errors_when_id_unknown(mongo_db):
+async def test_remove_widget_errors_when_id_unknown(mongo_db, agent_identity):
     from ee.cloud.pockets.agent_context import remove_widget_for_agent
 
     pocket = await _make_pocket()
@@ -237,7 +254,7 @@ async def test_remove_widget_errors_when_id_unknown(mongo_db):
 
 
 @pytest.mark.asyncio
-async def test_update_pocket_pushes_mutation_when_sink_attached(mongo_db):
+async def test_update_pocket_pushes_mutation_when_sink_attached(mongo_db, agent_identity):
     from ee.cloud.chat.agent_service import (
         attach_sse_event_sink,
         detach_sse_event_sink,
@@ -262,7 +279,7 @@ async def test_update_pocket_pushes_mutation_when_sink_attached(mongo_db):
 
 
 @pytest.mark.asyncio
-async def test_push_is_noop_without_sink(mongo_db):
+async def test_push_is_noop_without_sink(mongo_db, agent_identity):
     """Calling the mutation helpers outside an SSE stream must not raise."""
     from ee.cloud.pockets.agent_context import update_pocket_for_agent
 
@@ -396,10 +413,11 @@ async def test_generate_session_title_uses_message_when_haiku_fails():
 
 
 def test_build_context_block_pocket_mode_does_not_raise_on_format_braces():
-    """Regression: literal ``{type, props, children}`` braces in the cloud
-    preamble were being treated as ``str.format`` placeholders, blowing
-    up every pocket-mode chat with ``KeyError: 'type, props, children'``.
-    Doubled braces (``{{...}}``) keep them literal."""
+    """Regression: literal braces in the inline ripple prompt were being treated
+    as ``str.format`` placeholders, blowing up pocket-mode chat with KeyError.
+    On claude_agent_sdk, pocket_id scope ships INLINE_RIPPLE_SYSTEM_PROMPT +
+    POCKET_DELEGATION_RULE (not the full interaction prompt); the pocket id
+    is still present via the <current-pocket> tag."""
     from ee.cloud.chat.agent_service import (
         ScopeContext,
         ScopeKind,
@@ -415,14 +433,20 @@ def test_build_context_block_pocket_mode_does_not_raise_on_format_braces():
         target_agent_id="a1",
         pocket_id="p-mongo-id",
     )
-    block = build_context_block(ctx)
-    # The pocket-id substitution worked and the literal UISpec example
-    # text survived intact.
+    # Must not raise — brace handling in the slim prompt is safe.
+    block = build_context_block(ctx, backend_name="claude_agent_sdk")
+    # The pocket id appears in the dynamic <current-pocket> tag.
     assert "p-mongo-id" in block
-    assert "{type, props, children}" in block
+    # Slim inline prompt and delegation rule are present.
+    assert "<ripple>" in block
+    assert "<pocket-delegation>" in block
 
 
-def test_build_context_block_pocket_create_intent_uses_creation_context():
+def test_build_context_block_pocket_create_intent_uses_delegation():
+    """Phase 3 regression: on claude_agent_sdk, pocket_create intent must use
+    the delegation branch, NOT the full POCKET_CREATION_PROMPT_MCP — that text
+    lives on the specialist and references mutation tools that are filtered off
+    the main agent's allowlist."""
     from ee.cloud.chat.agent_service import (
         ScopeContext,
         ScopeKind,
@@ -438,21 +462,13 @@ def test_build_context_block_pocket_create_intent_uses_creation_context():
         target_agent_id="a1",
         intent="pocket_create",
     )
-    # Default (no backend hint) keeps the shell-CLI variant — codex_cli
-    # and other tool-using backends rely on the ``cloud_*`` CLI surface.
-    block = build_context_block(ctx)
-    assert "<pocket-creation>" in block
-    assert "cloud_create_pocket" in block
-
-    # claude_agent_sdk wires up the in-process pocket MCP server
-    # (``sdk_mcp_pocket``); its prompt steers the agent at the
-    # ``create_pocket`` MCP tool, which reads identity from per-stream
-    # ContextVars instead of subprocess env vars.
+    # Subagent-capable backend: slim prompt + delegation rule.
     mcp_block = build_context_block(ctx, backend_name="claude_agent_sdk")
-    assert "<pocket-creation>" in mcp_block
-    assert "create_pocket(" in mcp_block
+    assert "<ripple>" in mcp_block
+    assert "<pocket-delegation>" in mcp_block
+    # The full creation prompt content must NOT leak into the main agent.
+    assert "<pocket-creation>" not in mcp_block
     assert "cloud_create_pocket" not in mcp_block
-    assert "python -m pocketpaw.tools.cli" not in mcp_block
 
 
 def test_normalizer_lifts_raw_ui_node_under_ui_field():
@@ -498,9 +514,7 @@ def test_normalizer_lifts_each_bind_to_items():
                 {
                     "type": "each",
                     "bind": "todos",  # ← wrong field name
-                    "children": [
-                        {"type": "text", "props": {"text": "{item.text}"}}
-                    ],
+                    "children": [{"type": "text", "props": {"text": "{item.text}"}}],
                 }
             ],
         },
@@ -638,6 +652,82 @@ def test_normalizer_lifts_aliased_ui_field():
         assert alias not in out, f"alias {alias!r} kept alongside ui"
 
 
+def test_normalizer_drops_entity_detail_actions_without_handlers():
+    """An ``entity-detail`` action item with ``id``/``label`` but no
+    ``actions`` handler renders a clickable button that does nothing —
+    a dead control. Normalizer should drop those, keeping only items
+    with a real handler wired."""
+    from ee.cloud.ripple_normalizer import normalize_ripple_spec
+
+    spec = {
+        "state": {},
+        "ui": {
+            "type": "entity-detail",
+            "props": {
+                "title": "Demo",
+                "actions": [
+                    {"id": "view", "label": "View"},  # ← dead, no handler
+                    {
+                        "id": "refresh",
+                        "label": "Refresh",
+                        "actions": [{"action": "emit", "target": "refresh"}],
+                    },
+                    {"id": "share", "label": "Share", "actions": []},  # ← empty list
+                ],
+            },
+        },
+    }
+    out = normalize_ripple_spec(spec)
+    assert out is not None
+    actions = out["ui"]["props"]["actions"]
+    assert len(actions) == 1, "only the wired action should survive"
+    assert actions[0]["id"] == "refresh"
+
+
+def test_normalizer_lifts_on_click_to_actions_on_entity_detail():
+    """Some agents emit ``on_click`` on entity-detail action items
+    (parallel to button widgets) instead of ``actions``. Lift it."""
+    from ee.cloud.ripple_normalizer import normalize_ripple_spec
+
+    spec = {
+        "ui": {
+            "type": "entity-detail",
+            "props": {
+                "title": "Demo",
+                "actions": [
+                    {
+                        "id": "view",
+                        "label": "View on GitHub",
+                        "on_click": [{"action": "navigate", "url": "https://github.com"}],
+                    },
+                ],
+            },
+        },
+    }
+    out = normalize_ripple_spec(spec)
+    assert out is not None
+    item = out["ui"]["props"]["actions"][0]
+    assert "on_click" not in item, "on_click should be lifted away"
+    assert isinstance(item.get("actions"), list)
+    assert item["actions"][0]["action"] == "navigate"
+
+
+def test_normalizer_preserves_entity_detail_with_no_actions_field():
+    """Sanity: an entity-detail with no ``actions`` prop at all should
+    pass through unchanged — the fix only fires when actions exist."""
+    from ee.cloud.ripple_normalizer import normalize_ripple_spec
+
+    spec = {
+        "ui": {
+            "type": "entity-detail",
+            "props": {"title": "Demo", "subtitle": "hi"},
+        },
+    }
+    out = normalize_ripple_spec(spec)
+    assert out is not None
+    assert out["ui"]["props"] == {"title": "Demo", "subtitle": "hi"}
+
+
 def test_normalizer_passes_through_already_wrapped_ui():
     """A spec that's already in the ``{ui: <node>}`` shape should not
     be double-wrapped."""
@@ -670,8 +760,6 @@ async def test_generate_session_title_skips_when_no_session_id():
         session_id=None,
     )
     # Should return without calling the titler at all.
-    with patch(
-        "pocketpaw.memory.titler.generate_title", AsyncMock()
-    ) as titler:
+    with patch("pocketpaw.memory.titler.generate_title", AsyncMock()) as titler:
         await _generate_session_title(ctx, "anything")
     titler.assert_not_called()

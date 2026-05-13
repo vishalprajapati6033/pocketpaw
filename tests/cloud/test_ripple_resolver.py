@@ -199,7 +199,9 @@ async def test_workspace_pockets_source_strict_workspace_scoping(ctx: ResolveCtx
     )
 
 
-async def test_workspace_pockets_source_other_workspace_ctx_scopes_to_other(ctx: ResolveCtx) -> None:
+async def test_workspace_pockets_source_other_workspace_ctx_scopes_to_other(
+    ctx: ResolveCtx,
+) -> None:
     """Cross-workspace tenancy proof — when ctx.workspace_id changes from 'w1' to 'w2',
     the find query's workspace key tracks. Demonstrates the source cannot leak across
     workspace boundaries because the query is built from ctx, not from the spec."""

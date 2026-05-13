@@ -48,6 +48,7 @@ class _FakeUser:
         self.active_workspace = workspace_id
         self.workspaces = [_FakeMembership(workspace=workspace_id, role="admin")]
 
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -89,6 +90,7 @@ def test_app(tmp_path: Path, monkeypatch):
     # tests/cloud/test_plan_feature_gate.py so the patch reaches the same
     # module attribute the guard reads from.
     import ee.cloud.workspace.service as ws_svc
+
     monkeypatch.setattr(ws_svc, "get_workspace_plan", AsyncMock(return_value="enterprise"))
 
     app = FastAPI()

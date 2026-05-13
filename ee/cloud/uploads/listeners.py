@@ -130,8 +130,7 @@ async def index_uploaded_file(event: Event) -> None:
         article_id = _extract_article_id(ingest_result)
         if not article_id:
             logger.debug(
-                "no article_id returned from kb ingest for file_id=%s; "
-                "skipping vector path",
+                "no article_id returned from kb ingest for file_id=%s; skipping vector path",
                 file_id,
             )
             return
@@ -235,8 +234,7 @@ async def _maybe_attach_vector(
         )
     except Exception:
         logger.exception(
-            "kb-go vector ingest failed for file_id=%s article_id=%s; "
-            "text-only KB still ingested",
+            "kb-go vector ingest failed for file_id=%s article_id=%s; text-only KB still ingested",
             file_id,
             article_id,
         )
@@ -300,9 +298,7 @@ async def _write_vector_to_kb(
             stderr=asyncio.subprocess.PIPE,
         )
         try:
-            _stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=60.0
-            )
+            _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60.0)
         except TimeoutError:
             proc.kill()
             await proc.wait()

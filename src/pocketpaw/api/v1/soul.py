@@ -399,10 +399,7 @@ async def list_soul_memories(tier: str = "episodic", limit: int = 20):
     """
     if tier not in _ALLOWED_TIERS:
         return {
-            "error": (
-                f"Unknown tier '{tier}'. Valid tiers: "
-                f"{', '.join(sorted(_ALLOWED_TIERS))}"
-            )
+            "error": (f"Unknown tier '{tier}'. Valid tiers: {', '.join(sorted(_ALLOWED_TIERS))}")
         }
     if limit < 1:
         limit = 1

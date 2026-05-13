@@ -88,9 +88,7 @@ def _patch_codex(events):
             return fake_thread
 
     return patch(
-        "pocketpaw.agents.codex_cli.Codex"
-        if False
-        else "openai_codex_sdk.Codex",
+        "pocketpaw.agents.codex_cli.Codex" if False else "openai_codex_sdk.Codex",
         _FakeCodex,
     ), fake_thread
 
@@ -158,9 +156,7 @@ class TestCodexCLIInit:
     async def test_run_without_cli(self):
         from pocketpaw.agents.codex_cli import CodexCLIBackend
 
-        with patch(
-            "pocketpaw.agents.codex_cli._resolve_codex_binary", return_value=None
-        ):
+        with patch("pocketpaw.agents.codex_cli._resolve_codex_binary", return_value=None):
             backend = CodexCLIBackend(Settings())
             events = []
             async for event in backend.run("test"):
@@ -226,9 +222,7 @@ class TestCodexCLIRun:
             [
                 (
                     "completed",
-                    AgentMessageItem(
-                        id="i1", type="agent_message", text="Hello from Codex!"
-                    ),
+                    AgentMessageItem(id="i1", type="agent_message", text="Hello from Codex!"),
                 ),
             ]
         )
@@ -254,8 +248,8 @@ class TestCodexCLIRun:
 
         polluted = (
             "[features].web_search_request is deprecated because web search "
-            "is enabled by default. (Set web_search to \"live\", \"cached\", "
-            "or \"disabled\" at the top level (or under a profile) in "
+            'is enabled by default. (Set web_search to "live", "cached", '
+            'or "disabled" at the top level (or under a profile) in '
             "config.toml if you want to override it.)Hello there, Test."
         )
 
@@ -264,9 +258,7 @@ class TestCodexCLIRun:
             [
                 (
                     "completed",
-                    AgentMessageItem(
-                        id="i1", type="agent_message", text=polluted
-                    ),
+                    AgentMessageItem(id="i1", type="agent_message", text=polluted),
                 ),
             ]
         )
@@ -671,9 +663,7 @@ class TestCodexCLIPromptDelivery:
         assert "Recent Conversation" in contents
         assert "From previous backend" in contents
 
-    def test_build_subprocess_env_extracts_pocket_id_and_mirrors_mongo(
-        self, monkeypatch
-    ):
+    def test_build_subprocess_env_extracts_pocket_id_and_mirrors_mongo(self, monkeypatch):
         """The Codex subprocess gets per-turn identity + a Mongo URI alias.
         ``cloud_*`` CLI commands invoked from the agent then have everything
         they need without an explicit MCP layer."""
@@ -683,11 +673,7 @@ class TestCodexCLIPromptDelivery:
         monkeypatch.delenv("POCKETPAW_MONGO_URI", raising=False)
         monkeypatch.delenv("POCKETPAW_POCKET_ID", raising=False)
 
-        prompt = (
-            "<scope>pocket abc123</scope>\n"
-            '<current-pocket id="abc123" />\n'
-            "..."
-        )
+        prompt = '<scope>pocket abc123</scope>\n<current-pocket id="abc123" />\n...'
         env = _build_subprocess_env(prompt)
 
         assert env["POCKETPAW_POCKET_ID"] == "abc123"
@@ -697,9 +683,7 @@ class TestCodexCLIPromptDelivery:
         # Parent env survives.
         assert env["CLOUD_MONGODB_URI"] == "mongodb://example/paw"
 
-    def test_build_subprocess_env_no_pocket_in_prompt_leaves_id_unset(
-        self, monkeypatch
-    ):
+    def test_build_subprocess_env_no_pocket_in_prompt_leaves_id_unset(self, monkeypatch):
         from pocketpaw.agents.codex_cli import _build_subprocess_env
 
         monkeypatch.delenv("POCKETPAW_POCKET_ID", raising=False)

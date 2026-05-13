@@ -29,14 +29,12 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from ee.cloud._core.http import add_error_handler
 from ee.cloud.auth import current_active_user
 from ee.cloud.license import require_license
-
 
 # ---------------------------------------------------------------------------
 # Fake user builders
@@ -233,9 +231,7 @@ class TestMemberAccess:
         mock_agent.scopes = []
         mock_agent.created_at = None
 
-        with patch(
-            "ee.cloud.agents.service.create", new=AsyncMock(return_value=mock_agent)
-        ):
+        with patch("ee.cloud.agents.service.create", new=AsyncMock(return_value=mock_agent)):
             app = _make_agents_app(user=_member_of("ws1"))
             client = TestClient(app, raise_server_exceptions=False)
             resp = client.post(
@@ -320,9 +316,7 @@ class TestAdminAccess:
             created_at=datetime.now(UTC),
         )
 
-        with patch(
-            "ee.cloud.workspace.service.update", new=AsyncMock(return_value=fake_ws)
-        ):
+        with patch("ee.cloud.workspace.service.update", new=AsyncMock(return_value=fake_ws)):
             app = _make_workspace_app(user=_admin_of("ws1"))
             client = TestClient(app, raise_server_exceptions=False)
             resp = client.patch("/api/v1/workspaces/ws1", json={"name": "Updated Name"})
@@ -454,9 +448,7 @@ class TestRoleBoundary:
             workspaces=[_FakeMembership(workspace="ws1", role="owner")],
         )
 
-        with patch(
-            "ee.cloud.workspace.service.update", new=AsyncMock(return_value=fake_ws)
-        ):
+        with patch("ee.cloud.workspace.service.update", new=AsyncMock(return_value=fake_ws)):
             app = _make_workspace_app(user=owner_user)
             client = TestClient(app, raise_server_exceptions=False)
             resp = client.patch("/api/v1/workspaces/ws1", json={"name": "Owner Update"})

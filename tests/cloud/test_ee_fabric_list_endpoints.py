@@ -57,6 +57,7 @@ def client(tmp_path: Path, monkeypatch) -> TestClient:
     monkeypatch.setattr(fabric_router_module, "_DB_PATH", test_db)
 
     import ee.cloud.workspace.service as ws_svc
+
     monkeypatch.setattr(ws_svc, "get_workspace_plan", AsyncMock(return_value="business"))
 
     fake_user = _FakeUser()

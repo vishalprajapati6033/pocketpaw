@@ -125,7 +125,9 @@ class LinksListResponse(BaseModel):
 )
 async def list_objects(
     type_id: str | None = Query(None, description="Filter by object type id"),
-    type_name: str | None = Query(None, description="Filter by object type name (case-insensitive)"),
+    type_name: str | None = Query(
+        None, description="Filter by object type name (case-insensitive)"
+    ),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ) -> ObjectsListResponse:

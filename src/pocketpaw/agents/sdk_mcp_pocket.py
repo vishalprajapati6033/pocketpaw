@@ -5,10 +5,16 @@ CLI argument. Windows ``CreateProcess`` caps command lines at ~32KB (WinError
 206), so embedding a full pocket document — including a large
 ``rippleSpec.ui`` tree — in the prompt is unsafe.
 
-Instead we register an in-process MCP server with a ``get_pocket`` tool. The
+Instead we register an in-process MCP server with read-only pocket tools. The
 agent fetches the full pocket on demand; the response flows through the SDK's
 tool-result channel (stdio JSON, unbounded) and never touches the CLI command
 line.
+
+Mutations DO NOT live on this server. Pocket mutations flow through the
+``pocket_specialist__create`` / ``pocket_specialist__edit`` MCP tools
+(``ee/agent/pocket_specialist/mcp_tool.py``), which run an isolated specialist
+backend with LangChain ``StructuredTool`` wrappers around the same
+``*_for_agent`` functions. See ``ee/agent/pocket_specialist/tools.py``.
 
 This module is a thin adapter — the actual fetch lives in
 ``ee/cloud/pockets/agent_context.py``.
@@ -27,22 +33,14 @@ SERVER_NAME = "pocketpaw_pocket"
 # Allowlist entries must use this exact form.
 GET_POCKET_TOOL_ID = f"mcp__{SERVER_NAME}__get_pocket"
 LIST_POCKETS_TOOL_ID = f"mcp__{SERVER_NAME}__list_pockets"
-CREATE_POCKET_TOOL_ID = f"mcp__{SERVER_NAME}__create_pocket"
-UPDATE_POCKET_TOOL_ID = f"mcp__{SERVER_NAME}__update_pocket"
-ADD_WIDGET_TOOL_ID = f"mcp__{SERVER_NAME}__add_widget"
-UPDATE_WIDGET_TOOL_ID = f"mcp__{SERVER_NAME}__update_widget"
-REMOVE_WIDGET_TOOL_ID = f"mcp__{SERVER_NAME}__remove_widget"
 GET_WIDGET_SPEC_TOOL_ID = f"mcp__{SERVER_NAME}__get_widget_spec"
+GET_INLINE_WIDGET_HELP_TOOL_ID = f"mcp__{SERVER_NAME}__get_inline_widget_help"
 
 POCKET_TOOL_IDS = (
     GET_POCKET_TOOL_ID,
     LIST_POCKETS_TOOL_ID,
-    CREATE_POCKET_TOOL_ID,
-    UPDATE_POCKET_TOOL_ID,
-    ADD_WIDGET_TOOL_ID,
-    UPDATE_WIDGET_TOOL_ID,
-    REMOVE_WIDGET_TOOL_ID,
     GET_WIDGET_SPEC_TOOL_ID,
+    GET_INLINE_WIDGET_HELP_TOOL_ID,
 )
 
 
@@ -84,70 +82,10 @@ async def _list_pockets_handler(args: dict) -> dict:
         "content": [
             {
                 "type": "text",
-                "text": json.dumps(
-                    {"pockets": result.get("pockets", [])}, separators=(",", ":")
-                ),
+                "text": json.dumps({"pockets": result.get("pockets", [])}, separators=(",", ":")),
             }
         ]
     }
-
-
-async def _update_pocket_handler(args: dict) -> dict:
-    from ee.cloud.pockets.agent_context import update_pocket_for_agent
-
-    return _result_payload(
-        await update_pocket_for_agent(
-            args.get("pocket_id", ""),
-            name=args.get("name"),
-            description=args.get("description"),
-            icon=args.get("icon"),
-            color=args.get("color"),
-            ripple_spec=args.get("ripple_spec"),
-        )
-    )
-
-
-async def _create_pocket_handler(args: dict) -> dict:
-    from ee.cloud.pockets.agent_context import create_pocket_for_agent
-
-    return _result_payload(
-        await create_pocket_for_agent(
-            name=args.get("name", ""),
-            description=args.get("description", ""),
-            type_=args.get("type", "custom"),
-            icon=args.get("icon", ""),
-            color=args.get("color", ""),
-            ripple_spec=args.get("ripple_spec"),
-        )
-    )
-
-
-async def _add_widget_handler(args: dict) -> dict:
-    from ee.cloud.pockets.agent_context import add_widget_for_agent
-
-    return _result_payload(
-        await add_widget_for_agent(args.get("pocket_id", ""), args.get("widget", {}))
-    )
-
-
-async def _update_widget_handler(args: dict) -> dict:
-    from ee.cloud.pockets.agent_context import update_widget_for_agent
-
-    return _result_payload(
-        await update_widget_for_agent(
-            args.get("pocket_id", ""),
-            args.get("widget_id", ""),
-            args.get("fields", {}),
-        )
-    )
-
-
-async def _remove_widget_handler(args: dict) -> dict:
-    from ee.cloud.pockets.agent_context import remove_widget_for_agent
-
-    return _result_payload(
-        await remove_widget_for_agent(args.get("pocket_id", ""), args.get("widget_id", ""))
-    )
 
 
 async def _get_widget_spec_handler(args: dict) -> dict:
@@ -178,9 +116,7 @@ async def _get_widget_spec_handler(args: dict) -> dict:
     )
     if manifest is None:
         return {
-            "content": [
-                {"type": "text", "text": "Error: ripple manifest unavailable."}
-            ],
+            "content": [{"type": "text", "text": "Error: ripple manifest unavailable."}],
             "is_error": True,
         }
 
@@ -205,6 +141,23 @@ async def _get_widget_spec_handler(args: dict) -> dict:
         block += f"\n\n_Note: unknown types skipped: {', '.join(missing)}_"
 
     return {"content": [{"type": "text", "text": block}]}
+
+
+async def _get_inline_widget_help_handler(args: dict) -> dict:
+    """Handler for get_inline_widget_help — returns the slice of the
+    chat-inline widget catalog matching the requested types.
+
+    Args:
+      types: list of widget kinds the agent intends to use
+             (e.g. ["chart", "sparkline"]). Empty / missing → full
+             catalog (rare — agent generally knows what it wants).
+    """
+    from ee.ripple._inline_core import widget_help
+
+    types = args.get("types") or []
+    if not isinstance(types, list):
+        types = []
+    return {"content": [{"type": "text", "text": widget_help([str(t) for t in types])}]}
 
 
 def build_pocket_context_server() -> tuple[str, Any] | None:
@@ -233,100 +186,13 @@ def build_pocket_context_server() -> tuple[str, Any] | None:
             "List every pocket in the user's workspace they can access "
             "(owned, shared, or workspace-visible). Returns id + name + "
             "description + type + icon + color per pocket — no rippleSpec, "
-            "so the call is cheap. CALL THIS BEFORE ``create_pocket`` to "
-            "see if a similar pocket already exists; the system prompt "
-            "tells you to prefer extending an existing pocket over "
-            "spawning a duplicate. No arguments — workspace identity is "
+            "so the call is cheap. No arguments — workspace identity is "
             "inferred from the active stream."
         ),
         {},
     )
     async def list_pockets(args):  # type: ignore[no-untyped-def]
         return await _list_pockets_handler(args)
-
-    @tool(
-        "create_pocket",
-        (
-            "Materialize a brand-new pocket (themed dashboard / canvas) "
-            "for the user. Pass ``name`` (required), ``description``, "
-            "``type`` (research|business|data|mission|deep-work|custom|"
-            "hospitality), ``icon``, ``color``, and ``ripple_spec`` — a "
-            "UISpec v1.0 component tree (root with ``type``/``props``/"
-            "``children``). Persists the Pocket document and emits a "
-            "``pocket_created`` SSE event so the user's canvas mounts the "
-            "new pocket immediately. Use this — do NOT respond with an "
-            "inline ``ui-spec`` block when the user asked you to BUILD a "
-            "pocket; that only renders inside the chat bubble."
-        ),
-        {
-            "name": str,
-            "description": str,
-            "type": str,
-            "icon": str,
-            "color": str,
-            "ripple_spec": dict,
-        },
-    )
-    async def create_pocket(args):  # type: ignore[no-untyped-def]
-        return await _create_pocket_handler(args)
-
-    @tool(
-        "update_pocket",
-        (
-            "Patch top-level fields on a pocket. Pass ``ripple_spec`` to "
-            "replace the rendered UI tree (UISpec v1.0 / UniversalSpec v2.0). "
-            "Other patchable fields: name, description, icon, color. "
-            "Omit a field to leave it unchanged. Returns the updated pocket "
-            "document. Always call ``get_pocket`` first so you keep "
-            "non-edited parts of the spec intact."
-        ),
-        {
-            "pocket_id": str,
-            "name": str,
-            "description": str,
-            "icon": str,
-            "color": str,
-            "ripple_spec": dict,
-        },
-    )
-    async def update_pocket(args):  # type: ignore[no-untyped-def]
-        return await _update_pocket_handler(args)
-
-    @tool(
-        "add_widget",
-        (
-            "Append a widget to a pocket's embedded widget list. ``widget`` is "
-            "an object: {name, type, icon?, color?, span?, dataSourceType?, "
-            "config?, props?, data?, assignedAgent?}. For ripple-rendered "
-            "pockets, prefer ``update_pocket`` with a new ``ripple_spec`` "
-            "instead — the embedded widget list is the legacy widgets-grid "
-            "format."
-        ),
-        {"pocket_id": str, "widget": dict},
-    )
-    async def add_widget(args):  # type: ignore[no-untyped-def]
-        return await _add_widget_handler(args)
-
-    @tool(
-        "update_widget",
-        (
-            "Patch fields on a single embedded widget. ``fields`` is a partial "
-            "object — only present keys are written. Patchable: name, type, "
-            "icon, color, span, dataSourceType, config, props, data, "
-            "assignedAgent."
-        ),
-        {"pocket_id": str, "widget_id": str, "fields": dict},
-    )
-    async def update_widget(args):  # type: ignore[no-untyped-def]
-        return await _update_widget_handler(args)
-
-    @tool(
-        "remove_widget",
-        "Remove a widget from a pocket's embedded widget list by widget_id.",
-        {"pocket_id": str, "widget_id": str},
-    )
-    async def remove_widget(args):  # type: ignore[no-untyped-def]
-        return await _remove_widget_handler(args)
 
     @tool(
         "get_widget_spec",
@@ -346,18 +212,40 @@ def build_pocket_context_server() -> tuple[str, Any] | None:
     async def get_widget_spec(args):  # type: ignore[no-untyped-def]
         return await _get_widget_spec_handler(args)
 
+    @tool(
+        "get_inline_widget_help",
+        "Return the chat-inline Ripple widget catalog. Call this BEFORE "
+        "emitting any non-core widget in a ui-spec fence (anything "
+        "beyond text/heading/stat/button/table/flex). Pass the widget "
+        "types you intend to use; you receive the canonical prop "
+        "schema for those widgets so the spec renders on the first "
+        "try. Cheap, in-process, single round-trip.",
+        {
+            "type": "object",
+            "properties": {
+                "types": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Widget kinds you plan to use, e.g. "
+                        "['chart', 'sparkline']. Empty returns the "
+                        "full catalog."
+                    ),
+                }
+            },
+        },
+    )
+    async def get_inline_widget_help(args):  # type: ignore[no-untyped-def]
+        return await _get_inline_widget_help_handler(args)
+
     server = create_sdk_mcp_server(
         name=SERVER_NAME,
         version="1.0.0",
         tools=[
             get_pocket,
             list_pockets,
-            create_pocket,
-            update_pocket,
-            add_widget,
-            update_widget,
-            remove_widget,
             get_widget_spec,
+            get_inline_widget_help,
         ],
     )
     return SERVER_NAME, server

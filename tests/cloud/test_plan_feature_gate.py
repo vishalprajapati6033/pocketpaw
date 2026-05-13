@@ -13,8 +13,6 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from ee.cloud._core.deps import current_workspace_id, require_plan_feature
-from ee.cloud._core.errors import Forbidden
-
 
 # ---------------------------------------------------------------------------
 # Helpers

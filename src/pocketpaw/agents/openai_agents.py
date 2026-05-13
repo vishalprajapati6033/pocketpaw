@@ -14,7 +14,12 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-from pocketpaw.agents.backend import _DEFAULT_IDENTITY, BackendInfo, Capability
+from pocketpaw.agents.backend import (
+    _DEFAULT_IDENTITY,
+    BackendInfo,
+    BaseAgentBackend,
+    Capability,
+)
 from pocketpaw.agents.protocol import AgentEvent
 from pocketpaw.config import Settings
 
@@ -26,7 +31,7 @@ def _get_session_db_path() -> Path:
     return Path.home() / ".pocketpaw" / "openai_agents_sessions.db"
 
 
-class OpenAIAgentsBackend:
+class OpenAIAgentsBackend(BaseAgentBackend):
     """OpenAI Agents SDK backend — supports GPT models and Ollama/local via OpenAI-compat."""
 
     @staticmethod
@@ -150,7 +155,12 @@ class OpenAIAgentsBackend:
         return "Tool"
 
     def _build_custom_tools(self) -> list:
-        """Lazily build and cache PocketPaw custom tools as FunctionTool wrappers."""
+        """Lazily build and cache PocketPaw custom tools as FunctionTool wrappers.
+
+        The pocket specialist tool is injected automatically by
+        ``tool_bridge._instantiate_all_tools`` so it shows up in this list
+        without per-backend wiring.
+        """
         if self._custom_tools is not None:
             return self._custom_tools
         try:

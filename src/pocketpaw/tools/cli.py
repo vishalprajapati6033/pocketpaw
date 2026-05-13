@@ -155,10 +155,9 @@ _TOOLS = {
 #
 #   POCKETPAW_MONGO_URI       Mongo connection string (required)
 #   POCKETPAW_WORKSPACE_ID    Workspace owning the pocket (required for
-#                             cloud_create_pocket; ignored elsewhere)
-#   POCKETPAW_USER_ID         Owner for newly-created pockets
-#   POCKETPAW_SESSION_ID      Mongo ObjectId of the chat session, for
-#                             session linking on cloud_create_pocket
+#                             cloud_list_pockets; ignored elsewhere)
+#   POCKETPAW_USER_ID         Owner used for cloud_list_pockets scoping
+#   POCKETPAW_SESSION_ID      Mongo ObjectId of the chat session
 #   POCKETPAW_POCKET_ID       Default pocket id when the JSON body omits
 #                             one (saves the agent a round-trip)
 #
@@ -181,9 +180,7 @@ async def _ensure_cloud_runtime_initialized() -> None:
     from ee.cloud.shared.db import get_client, init_cloud_db
 
     if get_client() is None:
-        mongo_uri = os.environ.get("POCKETPAW_MONGO_URI") or os.environ.get(
-            "CLOUD_MONGODB_URI"
-        )
+        mongo_uri = os.environ.get("POCKETPAW_MONGO_URI") or os.environ.get("CLOUD_MONGODB_URI")
         if not mongo_uri:
             raise RuntimeError(
                 "POCKETPAW_MONGO_URI / CLOUD_MONGODB_URI not set — the agent "
@@ -208,22 +205,6 @@ async def _cloud_get_pocket(args: dict) -> dict:
 
     pocket_id = args.get("pocket_id") or os.environ.get("POCKETPAW_POCKET_ID", "")
     return await fetch_pocket_for_agent(pocket_id)
-
-
-async def _cloud_update_pocket(args: dict) -> dict:
-    import os
-
-    from ee.cloud.pockets.agent_context import update_pocket_for_agent
-
-    pocket_id = args.get("pocket_id") or os.environ.get("POCKETPAW_POCKET_ID", "")
-    return await update_pocket_for_agent(
-        pocket_id,
-        name=args.get("name"),
-        description=args.get("description"),
-        icon=args.get("icon"),
-        color=args.get("color"),
-        ripple_spec=args.get("ripple_spec"),
-    )
 
 
 async def _cloud_add_widget(args: dict) -> dict:
@@ -260,9 +241,7 @@ async def _cloud_list_pockets(args: dict) -> dict:
 
     from ee.cloud.pockets import service as pockets_service
 
-    workspace_id = args.get("workspace_id") or os.environ.get(
-        "POCKETPAW_WORKSPACE_ID", ""
-    )
+    workspace_id = args.get("workspace_id") or os.environ.get("POCKETPAW_WORKSPACE_ID", "")
     user_id = args.get("user_id") or os.environ.get("POCKETPAW_USER_ID", "")
     if not workspace_id or not user_id:
         return {
@@ -276,46 +255,22 @@ async def _cloud_list_pockets(args: dict) -> dict:
     return {"ok": True, "pockets": pockets}
 
 
-async def _cloud_create_pocket(args: dict) -> dict:
-    import os
+async def _cloud_pocket_specialist_create_wrapper(args: dict) -> dict:
+    """Lazy-import wrapper so importing the CLI module doesn't pull in the
+    pocket-specialist runtime (and its deep_agents/claude_agent_sdk
+    dependencies) unless the command is actually called."""
+    from ee.agent.pocket_specialist.cli_tool import _cloud_pocket_specialist_create
 
-    from ee.cloud.pockets import service as pockets_service
-
-    workspace_id = args.get("workspace_id") or os.environ.get(
-        "POCKETPAW_WORKSPACE_ID", ""
-    )
-    owner_id = args.get("owner_id") or os.environ.get("POCKETPAW_USER_ID", "")
-    if not workspace_id or not owner_id:
-        return {
-            "ok": False,
-            "error": (
-                "workspace_id / owner_id missing — the agent backend must export "
-                "POCKETPAW_WORKSPACE_ID + POCKETPAW_USER_ID before spawning."
-            ),
-        }
-    view, pocket_id, err = await pockets_service.agent_create(
-        workspace_id=workspace_id,
-        owner_id=owner_id,
-        name=args.get("name", ""),
-        description=args.get("description", ""),
-        type_=args.get("type", "custom"),
-        icon=args.get("icon", ""),
-        color=args.get("color", ""),
-        ripple_spec=args.get("ripple_spec"),
-    )
-    if err is not None or view is None or pocket_id is None:
-        return {"ok": False, "error": err or "create failed"}
-    return {"ok": True, "pocket": view, "pocket_id": pocket_id}
+    return await _cloud_pocket_specialist_create(args)
 
 
 _CLOUD_HANDLERS: dict[str, Any] = {
     "cloud_list_pockets": _cloud_list_pockets,
     "cloud_get_pocket": _cloud_get_pocket,
-    "cloud_update_pocket": _cloud_update_pocket,
     "cloud_add_widget": _cloud_add_widget,
     "cloud_update_widget": _cloud_update_widget,
     "cloud_remove_widget": _cloud_remove_widget,
-    "cloud_create_pocket": _cloud_create_pocket,
+    "cloud_pocket_specialist_create": _cloud_pocket_specialist_create_wrapper,
 }
 
 

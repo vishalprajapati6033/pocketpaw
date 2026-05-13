@@ -262,7 +262,5 @@ async def test_dispatch_agent_responses_skips_synthesis_when_only_one_agent_resp
     dispatched_agent_ids = [call.kwargs["agent_id"] for call in run_mock.await_args_list]
     assert dispatched_agent_ids == ["agent-a", "agent-b"]
     # No "Final response:" label was emitted because synthesis was skipped.
-    final_labels = [
-        call.kwargs.get("response_label") for call in run_mock.await_args_list
-    ]
+    final_labels = [call.kwargs.get("response_label") for call in run_mock.await_args_list]
     assert "Final response:" not in final_labels

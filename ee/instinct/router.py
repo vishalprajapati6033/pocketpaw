@@ -35,7 +35,6 @@ from pydantic import BaseModel, Field
 from ee.cloud._core.deps import require_plan_feature
 from ee.cloud.license import require_license
 from ee.cloud.shared.deps import require_action_any_workspace
-
 from ee.instinct.correction import (
     Correction,
     compute_patches,
