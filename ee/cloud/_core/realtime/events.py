@@ -299,6 +299,32 @@ class PocketDeleted(Event):
     EVENT_TYPE: ClassVar[str] = "pocket.deleted"
 
 
+# Tasks (Mission Control work-item primitive)
+@dataclass
+class TaskProposed(Event):
+    EVENT_TYPE: ClassVar[str] = "task.proposed"
+
+
+@dataclass
+class TaskUpdated(Event):
+    EVENT_TYPE: ClassVar[str] = "task.updated"
+
+
+@dataclass
+class TaskClaimed(Event):
+    EVENT_TYPE: ClassVar[str] = "task.claimed"
+
+
+@dataclass
+class TaskResolved(Event):
+    EVENT_TYPE: ClassVar[str] = "task.resolved"
+
+
+@dataclass
+class TaskBlocked(Event):
+    EVENT_TYPE: ClassVar[str] = "task.blocked"
+
+
 # Notifications
 @dataclass
 class NotificationNew(Event):
