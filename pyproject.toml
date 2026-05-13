@@ -602,3 +602,14 @@ forbidden_modules = [
     "ee.cloud.models.user",
     "ee.cloud.models.agent",
 ]
+
+[[tool.importlinter.contracts]]
+name = "Cycles — Beanie writes only from service.py"
+type = "forbidden"
+allow_indirect_imports = "true"
+source_modules = [
+    "ee.cloud.cycles.router",
+    "ee.cloud.cycles.dto",
+    "ee.cloud.cycles.domain",
+]
+forbidden_modules = ["ee.cloud.models.cycle"]

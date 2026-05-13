@@ -1,5 +1,10 @@
 """PocketPaw Enterprise Cloud — domain-driven architecture.
 
+Updated: 2026-05-13 — Mission Control PR 3. Mounts the Cycles router on
+    ``mount_cloud()``. The Cycles daily-snapshot job lives at
+    ``ee.cloud.cycles.snapshot_job`` and is invoked by the host platform's
+    scheduler (cron / Kubernetes CronJob / Celery beat) rather than wired
+    as an in-process loop — see that module's docstring for rationale.
 Updated: 2026-04-30 — Stage 1.B of "Files as Knowledge". Wires
     ``register_upload_listeners`` into ``mount_cloud`` so the FileReady
     bus subscriber drives KB indexing for every workspace upload.
@@ -17,7 +22,7 @@ Updated: 2026-05-13 (feat/mission-control-facade) — mounted the Mission
     (PR 3) plug into the same façade in follow-ups.
 
 Domains: auth, workspace, chat, pockets, sessions, agents, kb, knowledge,
-mission_control.
+mission_control, cycles.
 Each has router.py (thin), service.py (logic), schemas.py (validation).
 """
 
@@ -80,6 +85,7 @@ def mount_cloud(app: FastAPI) -> None:
     from ee.cloud.auth.router import router as auth_router
     from ee.cloud.chat.router import router as chat_router
     from ee.cloud.connectors.router import router as connectors_router
+    from ee.cloud.cycles.router import router as cycles_router
     from ee.cloud.license import get_license_info
     from ee.cloud.pockets.router import router as pockets_router
     from ee.cloud.sessions.router import router as sessions_router
@@ -92,6 +98,7 @@ def mount_cloud(app: FastAPI) -> None:
     app.include_router(connectors_router, prefix="/api/v1")
     app.include_router(pockets_router, prefix="/api/v1")
     app.include_router(sessions_router, prefix="/api/v1")
+    app.include_router(cycles_router, prefix="/api/v1")
 
     # Phase 1 PR-8: register the connector bus listener so local-mode
     # CLI actions (firebase, gcp, …) get picked up by the in-process
