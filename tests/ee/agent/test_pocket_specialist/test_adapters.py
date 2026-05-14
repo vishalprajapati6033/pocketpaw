@@ -190,8 +190,62 @@ class TestAgentModeAdapterDraftKit:
         assert out.action == "draft_kit"
         assert out.draft_kit is not None
         assert out.draft_kit["structural_plan"] == {}
-        assert isinstance(out.draft_kit["starter_widget_kinds"], list)
-        assert len(out.draft_kit["starter_widget_kinds"]) > 0
+        # Starter list expanded from 10 → 40+ widgets so the chat agent
+        # has visibility into the actual library (Ripple ships 150
+        # widgets; the prior 10-item starter list was provably too
+        # narrow). Bound is conservative — drop in case someone trims
+        # the tuple aggressively in a future cleanup.
+        starters = out.draft_kit["starter_widget_kinds"]
+        assert isinstance(starters, list)
+        assert len(starters) >= 30
+        # The polished pattern layouts MUST be in the starter list —
+        # they're the lever that flips the LLM away from "compose a
+        # dashboard from scratch" toward "use the pre-composed widget".
+        for required in (
+            "pipeline-dashboard",
+            "analytics-dashboard",
+            "entity-detail",
+            "master-detail",
+            "filter-bar",
+            "wizard-layout",
+            "audit-log",
+        ):
+            assert required in starters, (
+                f"starter_widget_kinds missing high-leverage widget {required!r}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_draft_kit_includes_rich_widgets_by_pattern(
+        self, agent_settings
+    ) -> None:
+        """The kit carries a pattern → polished-widget map so the chat
+        agent picks the composed layout instead of rebuilding it from
+        primitives. Every pattern from STEP 1 of VISUAL_VARIATION_RULE
+        must have at least one entry."""
+        adapter = AgentModeAdapter()
+        payload = PocketSpecialistCreateInput(brief="brief enough to clear minlen")
+        out = await adapter.create(
+            payload, workspace_id="w1", user_id="u1", settings=agent_settings
+        )
+        assert out.draft_kit is not None
+        rich = out.draft_kit.get("rich_widgets_by_pattern")
+        assert isinstance(rich, dict)
+        # Every pattern from VISUAL_VARIATION_RULE STEP 1 must be
+        # covered. Missing a pattern here means the LLM falls back to
+        # primitives for that whole category.
+        for pattern in ("dashboard", "viewer", "app", "browser", "wizard", "feed"):
+            assert pattern in rich, f"rich_widgets_by_pattern missing {pattern!r}"
+            assert isinstance(rich[pattern], list)
+            assert len(rich[pattern]) >= 1
+        # Spot-check the dashboard family — this is the case the team-
+        # dashboard regression came in through.
+        assert "pipeline-dashboard" in rich["dashboard"]
+        # And the widget-quality-bar reminder ties it together.
+        assert "widget_quality_bar" in out.draft_kit
+        assert (
+            "pipeline-dashboard"
+            in out.draft_kit["widget_quality_bar"].lower()
+        )
 
     @pytest.mark.asyncio
     async def test_no_backend_spawned_on_draft_kit(self, agent_settings) -> None:
