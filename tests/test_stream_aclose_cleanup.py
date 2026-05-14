@@ -75,12 +75,7 @@ async def test_deep_agents_run_closes_astream_on_normal_completion(monkeypatch):
     fake_agent.astream = MagicMock(return_value=tracked)
 
     monkeypatch.setattr(backend, "_build_model", lambda: MagicMock())
-    monkeypatch.setattr(
-        backend,
-        "_build_mcp_tools",
-        MagicMock(return_value=__import__("asyncio").get_event_loop().create_future()),
-    )
-    # Simpler: stub the async helper directly
+
     async def _empty_mcp_tools():
         return []
 
