@@ -801,6 +801,10 @@ class DeepAgentsBackend:
             return
 
         self._stop_flag = False
+        # Stream handle captured in the run-level scope so the ``finally``
+        # block can close it on every exit path (normal completion,
+        # except branch, generator-close from caller).
+        _stream: Any = None
 
         try:
             model = self._build_model()
@@ -834,13 +838,21 @@ class DeepAgentsBackend:
             # path emits the final args. Same tool_call_id → emit once.
             announced_tool_ids: set[str] = set()
 
-            # Stream using LangGraph's async streaming
-            async for chunk in agent.astream(
+            # Stream using LangGraph's async streaming. Hold the stream in
+            # a variable so the ``finally`` block below can call
+            # ``aclose()`` on it. LangGraph's astream is backed by
+            # ``asyncio.Queue`` readers spawned as background tasks;
+            # without an explicit aclose, those readers stay pending and
+            # get destroyed by GC on the next run, surfacing as
+            # ``Task was destroyed but it is pending! Queue.get()`` log
+            # noise around backend transitions.
+            _stream = agent.astream(
                 {"messages": messages},
                 stream_mode=["updates", "messages"],
                 version="v2",
                 config=config if config else None,
-            ):
+            )
+            async for chunk in _stream:
                 if self._stop_flag:
                     break
 
@@ -941,6 +953,20 @@ class DeepAgentsBackend:
             logger.error("Deep Agents streaming error: %s", e, exc_info=True)
             yield AgentEvent(type="error", content=f"Deep Agents error: {e}")
             yield AgentEvent(type="done", content="")
+        finally:
+            # Close the astream generator so LangGraph's background
+            # Queue readers are cancelled cleanly. Without this, those
+            # readers GC with a pending Queue.get() at the next backend
+            # transition. Idempotent on streams that already exited.
+            if _stream is not None:
+                close = getattr(_stream, "aclose", None)
+                if close is not None:
+                    try:
+                        await close()
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(
+                            "astream aclose error (non-fatal): %s", exc
+                        )
 
     async def stop(self) -> None:
         self._stop_flag = True
