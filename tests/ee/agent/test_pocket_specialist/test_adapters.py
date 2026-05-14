@@ -262,8 +262,10 @@ class TestAgentModeAdapterPersist:
         self, agent_settings
     ) -> None:
         """When the persist tool refuses to save (warnings present, retry
-        budget unspent), the adapter returns the warnings + action=failed
-        so the chat agent can redraft and call again."""
+        budget unspent), the adapter returns the warnings under
+        ``action="redraft"`` (distinct from ``"failed"``) so the chat
+        agent can switch on the action label and call again with a
+        corrected spec without treating the run as a terminal error."""
         with patch(
             "ee.agent.pocket_specialist.tools.make_persist_pocket_tool",
             new=MagicMock(
@@ -282,10 +284,48 @@ class TestAgentModeAdapterPersist:
             )
 
         assert out.ok is False
-        assert out.action == "failed"
+        assert out.action == "redraft"
         assert out.pocket is None
         assert "chart.xKey" in out.warnings[0]
         assert "redraft" in (out.error or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_persist_anyway_after_retries_returns_ok_with_warnings(
+        self, agent_settings
+    ) -> None:
+        """``make_persist_pocket_tool`` is designed to persist anyway
+        after ``max_validation_retries`` attempts — never blocks the
+        user on a perma-retry loop. When that happens the capture dict
+        has BOTH a pocket AND non-empty warnings. The adapter must
+        return ``action="created"`` with the warnings surfaced — NOT
+        ``"redraft"`` or ``"failed"``. This pins the read-order between
+        ``captured_pocket`` and ``captured_warnings`` in
+        ``_validate_and_persist`` — a regression that flipped the
+        check (warnings-first instead of pocket-first) would route a
+        successful-with-warnings persist into the redraft branch and
+        leave the chat agent stuck in a loop."""
+        persisted = {"id": "p-imperfect", "name": "Imperfect"}
+        residual = ["chart.xKey unrecognized (kept anyway after retries)"]
+        with patch(
+            "ee.agent.pocket_specialist.tools.make_persist_pocket_tool",
+            new=MagicMock(
+                side_effect=_persist_factory_stub(persisted, warnings=residual)
+            ),
+        ):
+            adapter = AgentModeAdapter()
+            payload = PocketSpecialistCreateInput(
+                brief="brief enough to clear minlen",
+                spec={"type": "flex", "children": []},
+            )
+            out = await adapter.create(
+                payload, workspace_id="w1", user_id="u1", settings=agent_settings
+            )
+
+        assert out.ok is True
+        assert out.action == "created"
+        assert out.pocket == persisted
+        assert out.warnings == residual
+        assert out.error is None
 
     @pytest.mark.asyncio
     async def test_persist_exception_returns_failed(self, agent_settings) -> None:

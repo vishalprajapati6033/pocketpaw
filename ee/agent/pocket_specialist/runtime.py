@@ -111,7 +111,7 @@ class PocketSpecialistCreateInput(BaseModel):
 
 class PocketSpecialistCreateOutput(BaseModel):
     ok: bool
-    action: Literal["created", "extended", "failed", "draft_kit"]
+    action: Literal["created", "extended", "failed", "draft_kit", "redraft"]
     pocket: dict[str, Any] | None = None
     warnings: list[str] = Field(default_factory=list)
     error: str | None = None

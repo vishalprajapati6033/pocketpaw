@@ -272,7 +272,13 @@ async def _validate_and_persist(
     if captured_pocket is None:
         # ``make_persist_pocket_tool`` short-circuits without saving when
         # the manifest validator returns warnings and the retry budget
-        # is unspent. The chat agent should redraft and call again.
+        # is unspent. The chat agent should redraft and call again with
+        # the same brief + a corrected ``spec``. We return
+        # ``action="redraft"`` (distinct from ``"failed"``) so callers
+        # can switch on the action and re-prompt the LLM without
+        # treating it as a terminal error. ``ok`` stays False because
+        # no pocket landed — but the run isn't done, it's waiting on
+        # the chat agent's next call.
         logger.info(
             "[pocket-specialist] agent-mode redraft required "
             "(warnings=%d duration=%dms)",
@@ -281,7 +287,7 @@ async def _validate_and_persist(
         )
         return PocketSpecialistCreateOutput(
             ok=False,
-            action="failed",
+            action="redraft",
             pocket=None,
             warnings=captured_warnings,
             error=(
