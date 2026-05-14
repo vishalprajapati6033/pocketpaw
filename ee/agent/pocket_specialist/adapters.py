@@ -29,23 +29,38 @@ from pocketpaw.config import Settings
 logger = logging.getLogger(__name__)
 
 
-# A small, hand-curated starter list of widget kinds the chat agent can
-# reach for in agent-mode drafts. NOT exhaustive — the manifest is the
-# source of truth and the chat agent should use the
+# Hand-curated starter list of widget kinds the chat agent can reach
+# for in agent-mode drafts. NOT exhaustive — the Ripple manifest is
+# the source of truth (150 widgets) and the chat agent should use the
 # ``mcp__pocketpaw_pocket__get_widget_spec`` tool to look up props for
-# any kind it wants to use. Listing these here keeps the kit response
-# small while still giving the chat agent a productive starting set.
+# any kind it wants. The 10-widget version of this list (flex / grid /
+# stat / chart / table / text / button / badge / progress / kanban)
+# was provably too narrow — the LLM defaulted to those 10 widgets and
+# never reached for the polished layouts already in the library. The
+# list below covers the same canonical patterns the showcase at
+# https://localhost:5173/showcase demonstrates, organized by use case.
 _STARTER_WIDGET_KINDS: tuple[str, ...] = (
-    "flex",
-    "grid",
-    "stat",
-    "chart",
-    "table",
-    "text",
-    "button",
-    "badge",
-    "progress",
-    "kanban",
+    # containers + structure
+    "flex", "grid", "split", "tabs", "card", "section", "page-header", "hero",
+    # display
+    "text", "heading", "badge", "callout", "stat", "metric",
+    # apps (interactive focal widgets)
+    "kanban", "calendar", "gantt", "form-layout", "wizard-layout",
+    # data viz
+    "chart", "table", "data-grid", "audit-log", "timeline", "kv-table",
+    "funnel", "heatmap", "treemap", "gauge", "sparkline",
+    # polished pattern layouts (Material 3 / HIG canonical shapes)
+    "master-detail", "entity-detail", "pricing-table", "invoice-layout",
+    "order-status", "report-layout", "comparison-layout", "checklist-layout",
+    # high-leverage dashboards (use when pattern=dashboard)
+    "pipeline-dashboard", "analytics-dashboard", "ops-dashboard",
+    "project-dashboard", "exec-dashboard",
+    # rich inputs
+    "input", "textarea", "select", "combobox", "multi-select", "filter-bar",
+    "date-picker", "location-picker", "search",
+    # enterprise / advanced
+    "comment-thread", "tree-table", "org-chart", "saved-views",
+    "notification-center", "error-state", "empty-state",
 )
 
 
@@ -167,6 +182,65 @@ def _draft_kit_response(input: Any, *, started: float) -> Any:
             "``[{label, value}]`` list)."
         ),
         "starter_widget_kinds": list(_STARTER_WIDGET_KINDS),
+        "rich_widgets_by_pattern": {
+            # Pattern → high-leverage widgets that already encapsulate
+            # the canonical layout. Reach for these BEFORE composing
+            # the same shape from primitives — e.g., use
+            # ``pipeline-dashboard`` instead of building a quota progress
+            # bar + top reps leaderboard + funnel + recent deals table
+            # by hand. The widget exists; let it do the work.
+            "dashboard": [
+                "pipeline-dashboard",
+                "analytics-dashboard",
+                "ops-dashboard",
+                "project-dashboard",
+                "exec-dashboard",
+            ],
+            "viewer": [
+                "entity-detail",
+                "pricing-table",
+                "invoice-layout",
+                "order-status",
+                "report-layout",
+                "comparison-layout",
+            ],
+            "app": [
+                "kanban",
+                "calendar",
+                "gantt",
+                "form-layout",
+                "wizard-layout",
+                "checklist-layout",
+            ],
+            "browser": [
+                "master-detail",
+                "tree-table",
+                "filter-bar",
+                "saved-views",
+            ],
+            "wizard": [
+                "wizard-layout",
+                "checklist-layout",
+                "form-layout",
+            ],
+            "feed": [
+                "audit-log",
+                "timeline",
+                "comment-thread",
+                "notification-center",
+            ],
+        },
+        "widget_quality_bar": (
+            "If you're tempted to compose a dashboard out of a 3-stat grid "
+            "+ a chart + a table, check ``rich_widgets_by_pattern`` first. "
+            "The polished domain layout (``pipeline-dashboard`` for sales, "
+            "``ops-dashboard`` for incidents, ``project-dashboard`` for "
+            "delivery) already gives you the funnel, the leaderboard, the "
+            "conversion rates, and the quota progress — composed and styled "
+            "to match. Same for viewers: an article isn't ``page-header`` + "
+            "``text`` + ``text``, it's ``entity-detail`` or ``report-layout`` "
+            "with a body slot. Use the focal widget."
+        ),
         "next_step": (
             "Draft a rippleSpec for the structural plan above. Use your own "
             "model — no subagent will be spawned. When ready, call "
@@ -178,9 +252,10 @@ def _draft_kit_response(input: Any, *, started: float) -> Any:
         ),
         "lookup_tool": (
             "Use ``mcp__pocketpaw_pocket__get_widget_spec`` to fetch allowed "
-            "props for any widget kind before drafting. Use "
-            "``mcp__pocketpaw_pocket__list_pockets`` to see existing pockets "
-            "in the workspace."
+            "props for any widget kind before drafting (especially the rich "
+            "layouts above — they take richer prop shapes than the "
+            "primitives). Use ``mcp__pocketpaw_pocket__list_pockets`` to see "
+            "existing pockets in the workspace."
         ),
     }
 

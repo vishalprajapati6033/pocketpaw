@@ -21,22 +21,27 @@ layout      flex, grid, card, container, tabs, accordion, split,
             section, app-shell, sidebar, breadcrumb, comparison-layout,
             map, checklist-layout, entity-detail, form-layout,
             invoice-layout, location-picker, order-status,
-            report-layout, wizard-layout
+            report-layout, wizard-layout, glass-card, ripple-frame
 display     heading, text, badge, metric, stat, progress, progress-ring,
-            avatar, image, markdown, code-block, code, kbd, icon,
-            quote, highlight, definition-list, comparison-table,
+            avatar, image, markdown, rich-text, code-block, code, kbd,
+            icon, quote, highlight, definition-list, comparison-table,
             pros-cons, steps, status-dot, trend, link-preview, qr,
-            diff, copy, chip, empty-state, loading
+            diff, copy, chip, empty-state, loading, skeleton,
+            company-header, article-meta, soul-status, c4, terminal
 input       button, input, textarea, select, combobox, multi-select,
             checkbox, switch, radio-group, slider, rating, date-picker,
             time-picker, number-input, segmented, color-picker,
-            file-upload, form, filter-bar
+            file-upload, form, filter-bar, search, mention, otp-input,
+            range-bar, code-editor
 data        chart, table, data-grid, kanban, gantt, calendar, timeline,
             tree, tree-table, virtual-list, sparkline, gauge, funnel,
-            heatmap, sankey, treemap
+            heatmap, sankey, treemap, workflow
+dashboard   pipeline-dashboard, analytics-dashboard, ops-dashboard,
+            exec-dashboard, project-dashboard, dashboard, dashboard-slot,
+            analyst-bar, bulk-action-bar, saved-views
 overlay     alert, callout, tooltip, popover, hover-card, dropdown-menu,
             toast, command-palette, context-menu, notification-center,
-            error-state
+            error-state, sheet, modal, confirm-dialog, coachmark
 research    source-card, citation, sources-bar, discover-card, follow-up,
             kv-table, news-card, ticker
 vertical    pricing-table, settings-list, comment-thread, audit-log,
@@ -90,6 +95,51 @@ of text rows" rebuild looks worse than the real widget.
   filter a list by status/category    → `select` or `filter-bar`
                                         bound to `state.filter`
                                         — NOT tabs
+
+  ## Polished pattern layouts — reach for these BEFORE composing from primitives
+
+  When the user described a familiar domain shape, the library
+  already has the composed layout. Picking the polished widget reads
+  better than rebuilding it from a 3-stat grid + chart + table:
+
+  sales pipeline / quota tracker     → pipeline-dashboard
+                                        (funnel + reps + conversions
+                                        + quota progress, composed)
+  product / web analytics            → analytics-dashboard
+  on-call / incidents / sre          → ops-dashboard
+  delivery / project status          → project-dashboard
+  exec / leadership weekly review    → exec-dashboard
+  invoice / quote / receipt          → invoice-layout
+  order / shipment tracking          → order-status
+  record / profile / entity facts    → entity-detail (NOT page-header
+                                        + grid of stats)
+  pricing / plans / tiers            → pricing-table
+  quarterly / status write-up        → report-layout
+  feature / product comparison       → comparison-layout
+  launch checklist / runbook         → checklist-layout
+  multi-step setup / onboarding      → wizard-layout
+  signup / contact / multi-field     → form-layout
+
+  ## Other widgets to reach for when the brief matches
+
+  product tour / onboarding hint     → coachmark
+  notification bell / inbox          → notification-center
+  saved filter / view picker         → saved-views
+  bulk action bar (select N rows)    → bulk-action-bar
+  analyst control bar (date+filter)  → analyst-bar
+  mention picker (@user)             → mention
+  one-time password input            → otp-input
+  range slider (min/max)             → range-bar
+  rich text editor                   → rich-text (NOT markdown for
+                                        editable content)
+  code editor (IDE-like)             → code-editor (NOT code-block)
+  terminal / shell output            → terminal
+  loading placeholder                → skeleton (NOT empty `text`)
+  modal dialog                       → modal (lightweight) or sheet
+                                        (drawer-style)
+  confirm before destructive action  → confirm-dialog
+  glass-tinted card surface          → glass-card
+  C4 architecture diagram            → c4
 """
 
 
