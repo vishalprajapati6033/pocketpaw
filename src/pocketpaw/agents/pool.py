@@ -176,6 +176,32 @@ class AgentPool:
         if instructions:
             system_prompt = f"{system_prompt}\n\n{instructions}" if system_prompt else instructions
 
+        # Query-specific soul memory recall — inject relevant past interactions
+        # so the agent can reference cross-session memories. This complements
+        # the general semantic facts already injected by SoulBootstrapProvider.
+        if instance.soul_manager and instance.soul_manager.soul and message.strip():
+            try:
+                soul_ctx = await instance.soul_manager.soul.context_for(
+                    message,
+                    max_memories=5,
+                    include_state=False,
+                    include_self_model=False,
+                )
+                if soul_ctx:
+                    memory_block = (
+                        "## Relevant Past Memories\n"
+                        "Below are memories from previous conversations that "
+                        "are relevant to the current question. Use them to "
+                        "provide continuity and a personalized response.\n\n"
+                        f"{soul_ctx}"
+                    )
+                    if system_prompt:
+                        system_prompt = f"{system_prompt}\n\n{memory_block}"
+                    else:
+                        system_prompt = memory_block
+            except Exception:
+                logger.debug("Soul context_for() failed for agent %s", agent_id)
+
         # Inject knowledge context directly into system prompt
         if knowledge_context:
             system_prompt = (
