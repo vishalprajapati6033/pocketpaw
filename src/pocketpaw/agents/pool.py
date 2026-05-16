@@ -162,6 +162,11 @@ class AgentPool:
             try:
                 ctx = await instance.soul_manager.bootstrap_provider.get_context()
                 system_prompt = ctx.identity
+                # Append soul-level knowledge (semantic memories, bond info, etc.)
+                # into the identity block so the agent carries persistent context.
+                if ctx.knowledge:
+                    knowledge_lines = "\n".join(f"- {k}" for k in ctx.knowledge)
+                    system_prompt = f"{system_prompt}\n\n# Key Knowledge\n{knowledge_lines}"
             except Exception:
                 logger.warning("Failed to build soul prompt for agent %s", agent_id)
 
