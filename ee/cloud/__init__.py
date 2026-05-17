@@ -1,5 +1,11 @@
 """PocketPaw Enterprise Cloud — domain-driven architecture.
 
+Updated: 2026-05-17 (security #1117 P1) — Mounts ``CSRFMiddleware`` and
+    the ``/auth/csrf`` token endpoint so the web build can use the
+    HttpOnly auth cookie without exposing CSRF surface. Bearer-auth
+    clients (Tauri, MCP, scripts) skip the middleware entirely so
+    nothing breaks for existing callers; see ``ee/cloud/_core/csrf.py``
+    for the decision tree.
 Updated: 2026-05-17 (pocketpaw#1118 P1) — Mounts the planner router
     (``/api/v1/planner/run``, ``/api/v1/planner/by-project/{id}``).
     The planner module wraps the OSS deep_work planner and lands its
@@ -89,11 +95,23 @@ def init_realtime() -> None:
 def mount_cloud(app: FastAPI) -> None:
     """Mount all cloud domain routers, the error handler, and the
     request-timing middleware."""
+    from ee.cloud._core.csrf import CSRFMiddleware, csrf_router
     from ee.cloud._core.http import add_error_handler
     from ee.cloud._core.timing import TimingMiddleware
 
-    # Request-timing middleware first so it wraps every subsequent route
+    # Starlette's add_middleware is a stack — LAST registered runs OUTERMOST
+    # on inbound. Effective order here: CSRF → Timing → route handler.
+    # A CSRF 403 short-circuits before Timing observes the request, so perf
+    # data won't include rejected POSTs. That's a deliberate tradeoff: the
+    # CSRF gate exists to be fast and predictable, not measured. Reorder
+    # ONLY if you want Timing to wrap CSRF rejections (swap the two add_
+    # middleware calls — TimingMiddleware would then run outermost).
     app.add_middleware(TimingMiddleware)
+
+    # CSRF middleware — outermost on inbound, runs before any route.
+    # Cookie-auth callers must echo X-CSRF-Token; Bearer-auth callers
+    # (Tauri, MCP, scripts) bypass entirely. See ``ee/cloud/_core/csrf.py``.
+    app.add_middleware(CSRFMiddleware)
 
     # Global error handler — extracted to ee.cloud._core.http
     add_error_handler(app)
@@ -117,6 +135,8 @@ def mount_cloud(app: FastAPI) -> None:
     from ee.cloud.workspace.router import router as workspace_router
 
     app.include_router(auth_router, prefix="/api/v1")
+    # CSRF token-mint endpoint sits alongside the rest of /auth/*.
+    app.include_router(csrf_router, prefix="/api/v1")
     app.include_router(workspace_router, prefix="/api/v1")
     app.include_router(agents_router, prefix="/api/v1")
     app.include_router(chat_router, prefix="/api/v1")
