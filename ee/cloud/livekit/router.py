@@ -101,11 +101,18 @@ async def generate_token(
 
     The token is valid for ``ttl_seconds`` (default 1 hour).
     Participants need this token to join the call.
+    The participant's display name is included so other users see the
+    real name instead of the user ID.
     """
     await require_license()
+
+    # Use the user's full_name as the LiveKit participant name
+    display_name = user.full_name or body.identity
+
     token = await livekit_service.generate_participant_token(
         room_name=body.room_name,
         identity=body.identity,
+        name=display_name,
         can_publish=body.can_publish,
         can_subscribe=body.can_subscribe,
         ttl_seconds=body.ttl_seconds,

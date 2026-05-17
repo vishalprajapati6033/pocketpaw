@@ -128,6 +128,7 @@ async def generate_participant_token(
     room_name: str,
     identity: str,
     *,
+    name: str | None = None,
     can_publish: bool = True,
     can_subscribe: bool = True,
     ttl_seconds: int = 3600,
@@ -137,6 +138,7 @@ async def generate_participant_token(
     Args:
         room_name: The LiveKit room name.
         identity: Participant identity (usually user ID).
+        name: Display name to show to other participants. Falls back to identity.
         can_publish: Whether the participant can publish audio/video.
         can_subscribe: Whether the participant can subscribe to others.
         ttl_seconds: Token time-to-live.
@@ -148,6 +150,7 @@ async def generate_participant_token(
     return await _generate_token(
         room_name,
         identity,
+        name=name,
         can_publish=can_publish,
         can_subscribe=can_subscribe,
         ttl_seconds=ttl_seconds,
@@ -321,6 +324,7 @@ async def _generate_token(
     room_name: str,
     identity: str,
     *,
+    name: str | None = None,
     can_publish: bool = True,
     can_subscribe: bool = True,
     is_admin: bool = False,
@@ -337,12 +341,15 @@ async def _generate_token(
         agent=is_admin or None,
     )
 
+    # Use the provided display name, falling back to the identity (user ID)
+    display_name = name or identity
+
     token = (
         AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
         .with_identity(identity)
         .with_ttl(timedelta(seconds=ttl_seconds))
         .with_grants(grants)
-        .with_name(identity)
+        .with_name(display_name)
     )
 
     jwt = token.to_jwt()
