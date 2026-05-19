@@ -9,7 +9,7 @@ for the full protocol.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -28,13 +28,22 @@ class CloudAgentChatRequest(BaseModel):
     # Idempotency key echoed back in ``message.persisted`` so the client can
     # reconcile its optimistic bubble before any agent output arrives.
     client_message_id: str | None = None
-    # Optional intent hint that swaps the system-prompt block built by
-    # ``build_context_block``. The desktop client sets ``pocket_create``
-    # when the user is in the pocket sidebar with no pocket selected
-    # ("describe a pocket to create…"), so the agent uses the
-    # ``create_pocket`` tool instead of rendering an inline ``ui-spec``
-    # block as a chat reply.
-    intent: Literal["pocket_create"] | None = None
+    # Optional dispatch hint from the client. Recognized today:
+    #   - ``pocket_create`` — swaps the system prompt to pocket-creation
+    #     guidance so the agent uses ``create_pocket`` instead of
+    #     rendering an inline ``ui-spec`` block.
+    #   - ``skill:<name>`` — frontend hint that the user invoked a slash
+    #     command. The Claude Agent SDK on the backend reads the bare
+    #     ``/<name> args`` message text and invokes its built-in Skill
+    #     tool; the hint here is preserved for future deterministic
+    #     dispatch (see ee/cloud/chat/agent_router._run_agent_stream).
+    # Kept as ``str`` (not ``Literal``) so the field stays forward-
+    # compatible — older clients that send unrecognized values used to
+    # break here with a 422; now we silently accept and ignore.
+    intent: str | None = None
+    # Argument string for ``intent="skill:<name>"``. Empty when the skill
+    # was invoked bare. Ignored for other intent values today.
+    skill_args: str | None = None
 
 
 class SseEventName(StrEnum):

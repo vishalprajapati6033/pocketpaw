@@ -14,6 +14,7 @@
 # rules) + the shared design language from ee.ripple._design (widget
 # catalog, canonical shapes, full-pane rule, theme, design-quality bar).
 
+from ee.ripple._design import USE_THE_WIDGET_RULE, WIDGET_CATALOG
 
 _INLINE_PREAMBLE = """\
 <ripple>
@@ -122,6 +123,9 @@ Standard channels (host-recognized targets on `emit`):
 - `tool.invoke`  — call a registered tool by name; payload is `{name, args}`.
 - `nav.open`     — navigate; or use the dedicated `navigate` action.
 
+Field name per action: `navigate` uses `url`; `emit`/`pin`/`unpin` use `target`.
+They are NOT interchangeable.
+
 Interaction rules:
 - EVERY interactive element MUST include on_click / on_change.
 - EVERY action MUST emit chat.send unless explicitly not needed.
@@ -143,21 +147,37 @@ Six core widgets cover ~90% of chat replies. Use these from memory:
   heading    — same as text.h1..h4 with stronger visual default.
   stat       — single big number. Props: label, value, delta, trend
                ('up'|'down'|'flat'), sublabel.
-  button     — Props: label, icon, variant. Always carries on_click.
+  button     — Props: label, icon, variant ('primary'|'secondary'|
+               'outline'|'ghost'|'link'|'destructive'). Always carries
+               on_click.
   table      — Props: columns ([{accessorKey, header}, ...]), rows
                (data array OR `{state.x}` expression), variant
                ('default'|'compact'|'striped'|'minimal'), searchable,
                sortable, pageSize.
   flex       — layout. Props: direction ('row'|'column'), gap, align,
                justify. Children = the laid-out nodes.
+               `gap` is a number (×4px) or t-shirt token
+               ('xs'|'sm'|'md'|'lg'|'xl'|'2xl') or a CSS length
+               ('12px'); raw words like 'medium' are ignored.
 
 Anything beyond these — chart, sparkline, kanban, calendar, gauge,
 heatmap, treemap, timeline, gantt, candlestick OHLC, comparison-table,
 pricing-table, source-card, news-card, link-preview, master-detail,
-entity-detail, dashboard, etc. — is supported but the prop schema is
-NOT in this prompt. Call the `get_inline_widget_help` MCP tool with
-the widget types you intend to use. Cheap (single round-trip) and
-returns the canonical shape for those widgets.
+entity-detail, dashboard, definition-list, wizard-layout, form-layout,
+checklist-layout, report-layout, invoice-layout, callout, badge,
+progress, rating, kbd, code-block, etc. — is supported but the prop
+schema is NOT in this prompt.
+
+# MUST CALL BEFORE EMIT
+
+Before the FIRST node of any non-core type lands in your spec, you MUST
+call `get_inline_widget_help(types=[...])` and copy prop names FROM
+the returned schema. The widget name is not a contract — the manifest
+is. Guessing prop names has shipped broken UIs (e.g. `definition-list`
+with `description` instead of `definition`, `timeline` events with
+`description` instead of `detail`) that render as empty rows. Batch
+types in one call: `get_inline_widget_help(types=["chart", "sparkline",
+"definition-list"])` is one round-trip — there is no excuse to skip it.
 
 Example: planning a candlestick + sparkline reply →
   get_inline_widget_help(types=["chart", "sparkline"])
@@ -165,8 +185,8 @@ Example: planning a candlestick + sparkline reply →
     shape for sparkline. Use the returned text verbatim as the prop
     contract.
 
-Do NOT guess prop names for non-core widgets. Wrong props render as
-empty placeholders and waste a turn.
+If the tool returns an error, OMIT the widget rather than guess. A
+partial UI is correct; a guessed-shape widget renders empty.
 """
 
 
@@ -197,7 +217,16 @@ Final self-check before sending:
 </ripple>"""
 
 
-INLINE_RIPPLE_SYSTEM_PROMPT = _INLINE_PREAMBLE + _INLINE_CORE_CATALOG + "\n" + _INLINE_RULES
+INLINE_RIPPLE_SYSTEM_PROMPT = (
+    _INLINE_PREAMBLE
+    + WIDGET_CATALOG
+    + "\n"
+    + USE_THE_WIDGET_RULE
+    + "\n"
+    + _INLINE_CORE_CATALOG
+    + "\n"
+    + _INLINE_RULES
+)
 
 
 __all__ = ["INLINE_RIPPLE_SYSTEM_PROMPT"]
