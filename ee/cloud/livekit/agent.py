@@ -531,7 +531,7 @@ class CallMeetingAgent:
                     await self.stop()
                     return
 
-            await asyncio.sleep(5)
+            await asyncio.sleep(30)
 
     async def _cleanup_room(self) -> None:
         """Delete the LiveKit room after a natural call end."""
@@ -558,12 +558,9 @@ class CallMeetingAgent:
                 "Error cleaning up room %s: %s", self.room_name, exc,
             )
 
-        # Remove from active agents registry
-        try:
-            from ee.cloud.livekit.service import _active_agents
-            _active_agents.pop(self.group_id, None)
-        except Exception:
-            pass
+        # The active-agents registry lives in the parent process; the
+        # _reap_agent_process background task in service.py will clean up
+        # when this subprocess exits — nothing to do here.
 
     # ------------------------------------------------------------------
     # Notes generation

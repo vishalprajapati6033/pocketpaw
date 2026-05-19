@@ -6,7 +6,8 @@ Endpoints:
 - ``DELETE /api/v1/livekit/rooms/{group_id}`` — end a call
 - ``GET /api/v1/livekit/rooms/{group_id}`` — get room status
 
-All routes require an active enterprise license and user authentication.
+All routes require an active enterprise license, user authentication,
+and group membership.
 """
 
 from __future__ import annotations
@@ -16,6 +17,10 @@ import logging
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from ee.cloud.chat.group_service import (
+    _get_group_domain_or_404,
+    _require_domain_group_member,
+)
 from ee.cloud.livekit import service as livekit_service
 from ee.cloud.license import require_license
 from ee.cloud.shared.deps import current_user, current_workspace_id
@@ -71,6 +76,22 @@ class EndCallResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _group_id_from_room_name(room_name: str) -> str | None:
+    """Extract group ID from a LiveKit room name (``group-call-{id}``).
+
+    Returns None if the room name doesn't match the expected pattern.
+    """
+    prefix = "group-call-"
+    if room_name.startswith(prefix):
+        return room_name[len(prefix):]
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
@@ -87,6 +108,11 @@ async def create_room(
     The response includes a short-lived admin token for the call bot.
     """
     await require_license()
+
+    # Verify the caller is a member of the target group.
+    group = await _get_group_domain_or_404(body.group_id)
+    _require_domain_group_member(group, str(user.id))
+
     result = await livekit_service.create_room(body.group_id)
     return CreateRoomResponse(**result)
 
@@ -105,6 +131,12 @@ async def generate_token(
     real name instead of the user ID.
     """
     await require_license()
+
+    # Verify the caller is a member of the group that owns this room.
+    gid = _group_id_from_room_name(body.room_name)
+    if gid:
+        group = await _get_group_domain_or_404(gid)
+        _require_domain_group_member(group, str(user.id))
 
     # Use the user's full_name as the LiveKit participant name
     display_name = user.full_name or body.identity
@@ -136,6 +168,11 @@ async def get_room_info(
     (no active call).
     """
     await require_license()
+
+    # Verify the caller is a member of the target group.
+    group = await _get_group_domain_or_404(group_id)
+    _require_domain_group_member(group, str(user.id))
+
     info = await livekit_service.get_room_info(group_id)
     if info is None:
         # Return a "room not active" response
@@ -160,5 +197,10 @@ async def end_call(
     will be posted to the group shortly after.
     """
     await require_license()
+
+    # Verify the caller is a member of the target group.
+    group = await _get_group_domain_or_404(group_id)
+    _require_domain_group_member(group, str(user.id))
+
     result = await livekit_service.end_room(group_id)
     return EndCallResponse(**result)

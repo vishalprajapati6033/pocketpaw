@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -27,9 +28,11 @@ logger = logging.getLogger(__name__)
 # Active meeting agents registry
 # ---------------------------------------------------------------------------
 
-_active_agents: dict[str, "CallMeetingAgent"] = {}
+from ee.cloud.livekit.types import MeetingAgentProtocol
 
-def _get_agent(group_id: str) -> "CallMeetingAgent | None":
+_active_agents: dict[str, MeetingAgentProtocol] = {}
+
+def _get_agent(group_id: str) -> MeetingAgentProtocol | None:
     """Get the active meeting agent for a group, if any."""
     return _active_agents.get(group_id)
 
@@ -57,6 +60,113 @@ def _ensure_configured() -> None:
 def room_name_for_group(group_id: str) -> str:
     """Build a deterministic LiveKit room name for a group."""
     return f"group-call-{group_id}"
+
+
+# ---------------------------------------------------------------------------
+# Subprocess agent management (avoids running WebRTC/Deepgram in the
+# server event loop).
+# ---------------------------------------------------------------------------
+
+
+class _SubprocessAgentRef:
+    """Thin wrapper that implements ``MeetingAgentProtocol`` via a subprocess.
+
+    The real ``CallMeetingAgent`` runs in a child process managed by
+    ``asyncio.create_subprocess_exec``.  ``start()`` is a no-op (the
+    process starts on construction); ``stop()`` sends SIGTERM.
+    """
+
+    def __init__(
+        self,
+        group_id: str,
+        room_name: str,
+        process: asyncio.subprocess.Process,
+    ) -> None:
+        self.group_id = group_id
+        self.room_name = room_name
+        self._process = process
+
+    async def start(self) -> None:
+        """Already started by ``_spawn_agent_process``."""
+        pass
+
+    async def stop(self) -> None:
+        """Send SIGTERM and wait up to 10 s for graceful exit."""
+        if self._process.returncode is not None:
+            return  # already terminated
+        try:
+            self._process.terminate()
+            try:
+                await asyncio.wait_for(self._process.wait(), timeout=10)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Agent subprocess for room %s did not exit in 10s, killing",
+                    self.room_name,
+                )
+                self._process.kill()
+                await self._process.wait()
+        except ProcessLookupError:
+            pass  # already dead
+        logger.info(
+            "Agent subprocess for room %s exited (code %s)",
+            self.room_name,
+            self._process.returncode,
+        )
+
+
+async def _spawn_agent_process(
+    group_id: str,
+    room_name: str,
+    bot_token: str,
+) -> asyncio.subprocess.Process:
+    """Launch ``CallMeetingAgent`` as a managed subprocess.
+
+    Uses ``sys.executable -m ee.cloud.livekit.agent`` so the child
+    inherits the same Python environment and dependencies.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-m",
+        "ee.cloud.livekit.agent",
+        "--group", group_id,
+        "--room", room_name,
+        "--token", bot_token,
+        "--url", LIVEKIT_URL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    logger.info(
+        "Spawned agent subprocess (PID %d) for room %s",
+        proc.pid,
+        room_name,
+    )
+    return proc
+
+
+async def _reap_agent_process(
+    group_id: str,
+    proc: asyncio.subprocess.Process,
+) -> None:
+    """Wait for an agent subprocess to finish, then clean up the registry.
+
+    Runs in a background ``asyncio.Task``.  When the agent detects the
+    room is empty and exits on its own, this removes it from
+    ``_active_agents`` so the registry doesn't leak.
+    """
+    try:
+        await proc.wait()
+    except asyncio.CancelledError:
+        # Server is shutting down — kill the child and let it go.
+        if proc.returncode is None:
+            proc.kill()
+        raise
+    finally:
+        _active_agents.pop(group_id, None)
+        logger.info(
+            "Reaped agent subprocess for group %s (exit code %s)",
+            group_id,
+            proc.returncode,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -94,26 +204,36 @@ async def create_room(group_id: str) -> dict[str, Any]:
                 raise
 
     # Generate a subscriber-only token for the call bot (no agent flag
-    # so it auto-subscribes to remote tracks for transcription)
+    # so it auto-subscribes to remote tracks for transcription).
+    # Use a 24h TTL so the bot never expires mid-call.
     bot_token = await _generate_token(
         room_name, "call-bot",
         can_publish=False,
         can_subscribe=True,
         is_admin=False,
+        ttl_seconds=86400,
     )
 
-    # Start the meeting notes agent as a background task
+    # Start the meeting notes agent as a managed subprocess so it does not
+    # block the server event loop with WebRTC / Deepgram STT processing.
     if group_id not in _active_agents:
-        from ee.cloud.livekit.agent import CallMeetingAgent
-        agent = CallMeetingAgent(
+        proc = await _spawn_agent_process(
             group_id=group_id,
             room_name=room_name,
             bot_token=bot_token,
-            livekit_url=LIVEKIT_URL,
         )
-        _active_agents[group_id] = agent
-        asyncio.create_task(agent.start())
-        logger.info("Started meeting agent for group %s (room %s)", group_id, room_name)
+        agent_ref = _SubprocessAgentRef(
+            group_id=group_id,
+            room_name=room_name,
+            process=proc,
+        )
+        _active_agents[group_id] = agent_ref
+
+        # Background task: wait for the subprocess to finish, then clean
+        # up the registry so we don't leak agent references.
+        asyncio.create_task(_reap_agent_process(group_id, proc))
+
+        logger.info("Started meeting agent subprocess for group %s (room %s)", group_id, room_name)
 
     return {
         "room_name": room_name,
