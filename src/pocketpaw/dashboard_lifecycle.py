@@ -177,12 +177,12 @@ async def startup_event(
     try:
         import os
 
-        from ee.cloud.db import init_cloud_db
+        from pocketpaw_ee.cloud.db import init_cloud_db
 
         mongo_uri = os.environ.get("CLOUD_MONGODB_URI", "mongodb://localhost:27017/paw-enterprise")
         await init_cloud_db(mongo_uri)
         # Seed default admin user and workspace
-        from ee.cloud.auth.core import (
+        from pocketpaw_ee.cloud.auth.core import (
             ensure_default_agent_all_workspaces,
             seed_admin,
             seed_workspace,
@@ -197,7 +197,9 @@ async def startup_event(
         # emits ``session_titled`` after the first user message; this listener
         # writes the title onto the Session document so it survives a refresh.
         try:
-            from ee.cloud.sessions.title_listener import register as register_title_listener
+            from pocketpaw_ee.cloud.sessions.title_listener import (
+                register as register_title_listener,
+            )
 
             register_title_listener()
         except Exception as exc:

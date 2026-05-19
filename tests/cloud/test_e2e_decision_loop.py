@@ -14,11 +14,10 @@ import json
 from pathlib import Path
 
 import pytest
-
-from ee.fabric.models import FabricQuery, PropertyDef
-from ee.fabric.store import FabricStore
-from ee.instinct.models import ActionTrigger
-from ee.instinct.store import InstinctStore
+from pocketpaw_ee.fabric.models import FabricQuery, PropertyDef
+from pocketpaw_ee.fabric.store import FabricStore
+from pocketpaw_ee.instinct.models import ActionTrigger
+from pocketpaw_ee.instinct.store import InstinctStore
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -124,9 +124,9 @@ async def _create_pocket_and_session(
     have no JWT auth still work.
     """
     try:
-        from ee.cloud.models.session import Session
-        from ee.cloud.models.user import User
-        from ee.cloud.models.workspace import Workspace
+        from pocketpaw_ee.cloud.models.session import Session
+        from pocketpaw_ee.cloud.models.user import User
+        from pocketpaw_ee.cloud.models.workspace import Workspace
 
         # ── User selection ──────────────────────────────────────────────
         # Prefer an explicitly-threaded user id from the chat context so
@@ -173,8 +173,8 @@ async def _create_pocket_and_session(
         workspace_id = str(workspace.id)
 
         # Create pocket
-        from ee.cloud.pockets import service as pockets_service
-        from ee.cloud.pockets.dto import CreatePocketRequest
+        from pocketpaw_ee.cloud.pockets import service as pockets_service
+        from pocketpaw_ee.cloud.pockets.dto import CreatePocketRequest
 
         meta = spec.get("metadata", {})
         pocket = await pockets_service.create(

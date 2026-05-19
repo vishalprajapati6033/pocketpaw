@@ -82,8 +82,7 @@ class AgentPool:
             inst.last_active = datetime.now(UTC)
             # Check config staleness
             from beanie import PydanticObjectId
-
-            from ee.cloud.models.agent import Agent
+            from pocketpaw_ee.cloud.models.agent import Agent
 
             try:
                 agent_doc = await Agent.get(PydanticObjectId(agent_id))
@@ -114,12 +113,11 @@ class AgentPool:
 
         # Build new instance
         from beanie import PydanticObjectId
-
-        from ee.cloud.models.agent import Agent
+        from pocketpaw_ee.cloud.models.agent import Agent
 
         agent_doc = await Agent.get(PydanticObjectId(agent_id))
         if not agent_doc:
-            from ee.cloud.shared.errors import NotFound
+            from pocketpaw_ee.cloud.shared.errors import NotFound
 
             raise NotFound("agent", agent_id)
 
@@ -274,7 +272,7 @@ class AgentPool:
         # Instantiate backend
         backend_cls = get_backend_class(settings.agent_backend)
         if not backend_cls:
-            from ee.cloud.shared.errors import ValidationError
+            from pocketpaw_ee.cloud.shared.errors import ValidationError
 
             raise ValidationError(
                 "agent.invalid_backend",

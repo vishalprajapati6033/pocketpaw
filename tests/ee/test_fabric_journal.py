@@ -20,14 +20,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pocketpaw_ee.fabric.events import ACTION_OBJECT_CREATED
+from pocketpaw_ee.fabric.journal_store import FabricJournalStore
+from pocketpaw_ee.fabric.models import FabricObject, FabricQuery
+from pocketpaw_ee.fabric.policy import PolicyDecision, decide, filter_visible, visible
+from pocketpaw_ee.fabric.projection import FabricProjection
 from soul_protocol.engine.journal import open_journal
 from soul_protocol.spec.journal import Actor
-
-from ee.fabric.events import ACTION_OBJECT_CREATED
-from ee.fabric.journal_store import FabricJournalStore
-from ee.fabric.models import FabricObject, FabricQuery
-from ee.fabric.policy import PolicyDecision, decide, filter_visible, visible
-from ee.fabric.projection import FabricProjection
 
 
 @pytest.fixture

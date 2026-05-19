@@ -13,14 +13,13 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-
-from ee.cloud._core.context import RequestContext, ScopeKind
-from ee.cloud._core.errors import ValidationError
-from ee.cloud.mission_control import service as mc_service
-from ee.cloud.mission_control.dto import BulkSnoozeRequest
-from ee.cloud.tasks import service as tasks_service
-from ee.cloud.tasks.dto import AssigneeDTO, CreateTaskRequest
-from ee.instinct.store import InstinctStore
+from pocketpaw_ee.cloud._core.context import RequestContext, ScopeKind
+from pocketpaw_ee.cloud._core.errors import ValidationError
+from pocketpaw_ee.cloud.mission_control import service as mc_service
+from pocketpaw_ee.cloud.mission_control.dto import BulkSnoozeRequest
+from pocketpaw_ee.cloud.tasks import service as tasks_service
+from pocketpaw_ee.cloud.tasks.dto import AssigneeDTO, CreateTaskRequest
+from pocketpaw_ee.instinct.store import InstinctStore
 
 pytestmark = pytest.mark.usefixtures("mongo_db")
 

@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from ee.cloud.livekit.service import (
-    LIVEKIT_URL,
+import pytest
+from pocketpaw_ee.cloud.livekit.service import (
     CALL_BOT_USER_ID,
-    room_name_for_group,
-    _format_duration,
     _active_agents,
+    _format_duration,
+    room_name_for_group,
 )
 
 
@@ -61,7 +60,9 @@ class TestService:
         mock_api_instance.__aexit__ = AsyncMock(return_value=False)
 
         # Patch at the import site in the service module
-        patcher = patch("ee.cloud.livekit.service.LiveKitAPI", return_value=mock_api_instance)
+        patcher = patch(
+            "pocketpaw_ee.cloud.livekit.service.LiveKitAPI", return_value=mock_api_instance
+        )
         patcher.start()
 
         yield mock_room_svc
@@ -71,11 +72,11 @@ class TestService:
         patcher.stop()
 
     @pytest.mark.asyncio
-    @patch("ee.cloud.livekit.service.LIVEKIT_URL", "wss://test.livekit.cloud")
-    @patch("ee.cloud.livekit.service.LIVEKIT_API_KEY", "test-key")
-    @patch("ee.cloud.livekit.service.LIVEKIT_API_SECRET", "test-secret")
+    @patch("pocketpaw_ee.cloud.livekit.service.LIVEKIT_URL", "wss://test.livekit.cloud")
+    @patch("pocketpaw_ee.cloud.livekit.service.LIVEKIT_API_KEY", "test-key")
+    @patch("pocketpaw_ee.cloud.livekit.service.LIVEKIT_API_SECRET", "test-secret")
     async def test_create_room(self, mock_lk_context):
-        from ee.cloud.livekit.service import create_room
+        from pocketpaw_ee.cloud.livekit.service import create_room
 
         mock_room = MagicMock()
         mock_room.name = "group-call-test123"
@@ -90,11 +91,11 @@ class TestService:
         mock_lk_context.create_room.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("ee.cloud.livekit.service.LIVEKIT_URL", "wss://test.livekit.cloud")
-    @patch("ee.cloud.livekit.service.LIVEKIT_API_KEY", "test-key")
-    @patch("ee.cloud.livekit.service.LIVEKIT_API_SECRET", "test-secret")
+    @patch("pocketpaw_ee.cloud.livekit.service.LIVEKIT_URL", "wss://test.livekit.cloud")
+    @patch("pocketpaw_ee.cloud.livekit.service.LIVEKIT_API_KEY", "test-key")
+    @patch("pocketpaw_ee.cloud.livekit.service.LIVEKIT_API_SECRET", "test-secret")
     async def test_generate_participant_token(self):
-        from ee.cloud.livekit.service import generate_participant_token
+        from pocketpaw_ee.cloud.livekit.service import generate_participant_token
 
         token = await generate_participant_token(
             room_name="group-call-test123",
@@ -105,11 +106,11 @@ class TestService:
         assert len(token) > 0
 
     @pytest.mark.asyncio
-    @patch("ee.cloud.livekit.service.LIVEKIT_URL", "wss://test.livekit.cloud")
-    @patch("ee.cloud.livekit.service.LIVEKIT_API_KEY", "test-key")
-    @patch("ee.cloud.livekit.service.LIVEKIT_API_SECRET", "test-secret")
+    @patch("pocketpaw_ee.cloud.livekit.service.LIVEKIT_URL", "wss://test.livekit.cloud")
+    @patch("pocketpaw_ee.cloud.livekit.service.LIVEKIT_API_KEY", "test-key")
+    @patch("pocketpaw_ee.cloud.livekit.service.LIVEKIT_API_SECRET", "test-secret")
     async def test_end_room(self, mock_lk_context):
-        from ee.cloud.livekit.service import end_room
+        from pocketpaw_ee.cloud.livekit.service import end_room
 
         mock_lk_context.delete_room = AsyncMock()
 
@@ -121,11 +122,11 @@ class TestService:
         mock_lk_context.delete_room.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("ee.cloud.livekit.service.LIVEKIT_URL", "wss://test.livekit.cloud")
-    @patch("ee.cloud.livekit.service.LIVEKIT_API_KEY", "test-key")
-    @patch("ee.cloud.livekit.service.LIVEKIT_API_SECRET", "test-secret")
+    @patch("pocketpaw_ee.cloud.livekit.service.LIVEKIT_URL", "wss://test.livekit.cloud")
+    @patch("pocketpaw_ee.cloud.livekit.service.LIVEKIT_API_KEY", "test-key")
+    @patch("pocketpaw_ee.cloud.livekit.service.LIVEKIT_API_SECRET", "test-secret")
     async def test_get_room_info_no_room(self, mock_lk_context):
-        from ee.cloud.livekit.service import get_room_info
+        from pocketpaw_ee.cloud.livekit.service import get_room_info
 
         # Room list returns empty
         mock_list_resp = MagicMock()
@@ -137,11 +138,11 @@ class TestService:
         assert result is None
 
     @pytest.mark.asyncio
-    @patch("ee.cloud.livekit.service.LIVEKIT_URL", "wss://test.livekit.cloud")
-    @patch("ee.cloud.livekit.service.LIVEKIT_API_KEY", "test-key")
-    @patch("ee.cloud.livekit.service.LIVEKIT_API_SECRET", "test-secret")
+    @patch("pocketpaw_ee.cloud.livekit.service.LIVEKIT_URL", "wss://test.livekit.cloud")
+    @patch("pocketpaw_ee.cloud.livekit.service.LIVEKIT_API_KEY", "test-key")
+    @patch("pocketpaw_ee.cloud.livekit.service.LIVEKIT_API_SECRET", "test-secret")
     async def test_get_room_info_with_participants(self, mock_lk_context):
-        from ee.cloud.livekit.service import get_room_info
+        from pocketpaw_ee.cloud.livekit.service import get_room_info
 
         # Mock room list response with one room
         mock_room = MagicMock()
@@ -168,13 +169,13 @@ class TestService:
         assert result["participants"][0]["identity"] == "user_abc"
 
     @pytest.mark.asyncio
-    @patch("ee.cloud.livekit.service.LIVEKIT_URL", "wss://test.livekit.cloud")
-    @patch("ee.cloud.livekit.service.LIVEKIT_API_KEY", "test-key")
-    @patch("ee.cloud.livekit.service.LIVEKIT_API_SECRET", "test-secret")
+    @patch("pocketpaw_ee.cloud.livekit.service.LIVEKIT_URL", "wss://test.livekit.cloud")
+    @patch("pocketpaw_ee.cloud.livekit.service.LIVEKIT_API_KEY", "test-key")
+    @patch("pocketpaw_ee.cloud.livekit.service.LIVEKIT_API_SECRET", "test-secret")
     async def test_not_configured_raises(self):
-        from ee.cloud.livekit.service import create_room
+        from pocketpaw_ee.cloud.livekit.service import create_room
 
-        with patch("ee.cloud.livekit.service.LIVEKIT_URL", ""):
+        with patch("pocketpaw_ee.cloud.livekit.service.LIVEKIT_URL", ""):
             with pytest.raises(RuntimeError, match="LiveKit is not configured"):
                 await create_room("test123")
 
@@ -183,9 +184,11 @@ class TestMeetingNotesAgent:
     """Tests for the CallMeetingAgent functionality."""
 
     @pytest.mark.asyncio
-    @patch("ee.cloud.livekit.agent.CallMeetingAgent._finalize_notes", new_callable=AsyncMock)
+    @patch(
+        "pocketpaw_ee.cloud.livekit.agent.CallMeetingAgent._finalize_notes", new_callable=AsyncMock
+    )
     async def test_stop_generates_notes(self, mock_finalize):
-        from ee.cloud.livekit.agent import CallMeetingAgent
+        from pocketpaw_ee.cloud.livekit.agent import CallMeetingAgent
 
         agent = CallMeetingAgent(
             group_id="test123",
@@ -198,7 +201,7 @@ class TestMeetingNotesAgent:
         mock_finalize.assert_called_once()
 
     def test_add_transcript_segment(self):
-        from ee.cloud.livekit.agent import CallMeetingAgent
+        from pocketpaw_ee.cloud.livekit.agent import CallMeetingAgent
 
         agent = CallMeetingAgent(
             group_id="test123",
@@ -214,7 +217,7 @@ class TestMeetingNotesAgent:
         assert agent.transcript_segments[1]["text"] == "Hi Alice"
 
     def test_parse_summary_json(self):
-        from ee.cloud.livekit.agent import CallMeetingAgent
+        from pocketpaw_ee.cloud.livekit.agent import CallMeetingAgent
 
         agent = CallMeetingAgent(
             group_id="test123",
@@ -229,7 +232,7 @@ class TestMeetingNotesAgent:
         assert items == ["Do Y", "Do Z"]
 
     def test_parse_summary_json_markdown_block(self):
-        from ee.cloud.livekit.agent import CallMeetingAgent
+        from pocketpaw_ee.cloud.livekit.agent import CallMeetingAgent
 
         agent = CallMeetingAgent(
             group_id="test123",
@@ -244,7 +247,7 @@ class TestMeetingNotesAgent:
         assert items == ["Item 1"]
 
     def test_parse_summary_json_fallback(self):
-        from ee.cloud.livekit.agent import CallMeetingAgent
+        from pocketpaw_ee.cloud.livekit.agent import CallMeetingAgent
 
         agent = CallMeetingAgent(
             group_id="test123",
@@ -259,7 +262,7 @@ class TestMeetingNotesAgent:
         assert items == []
 
     def test_heuristic_summary(self):
-        from ee.cloud.livekit.agent import CallMeetingAgent
+        from pocketpaw_ee.cloud.livekit.agent import CallMeetingAgent
 
         agent = CallMeetingAgent(
             group_id="test123",
@@ -279,15 +282,15 @@ class TestMeetingNotesPosting:
 
     @pytest.mark.asyncio
     async def test_post_meeting_notes(self):
-        from ee.cloud.livekit.service import post_meeting_notes_to_group
+        from pocketpaw_ee.cloud.livekit.service import post_meeting_notes_to_group
 
         with (
             patch(
-                "ee.cloud.chat.message_service._create_group_message_doc",
+                "pocketpaw_ee.cloud.chat.message_service._create_group_message_doc",
                 new_callable=AsyncMock,
             ) as mock_create,
             patch(
-                "ee.cloud.shared.events.event_bus.emit",
+                "pocketpaw_ee.cloud.shared.events.event_bus.emit",
                 new_callable=AsyncMock,
             ) as mock_emit,
         ):
@@ -321,15 +324,15 @@ class TestMeetingNotesPosting:
 
     @pytest.mark.asyncio
     async def test_post_meeting_notes_empty_transcript(self):
-        from ee.cloud.livekit.service import post_meeting_notes_to_group
+        from pocketpaw_ee.cloud.livekit.service import post_meeting_notes_to_group
 
         with (
             patch(
-                "ee.cloud.chat.message_service._create_group_message_doc",
+                "pocketpaw_ee.cloud.chat.message_service._create_group_message_doc",
                 new_callable=AsyncMock,
             ) as mock_create,
             patch(
-                "ee.cloud.shared.events.event_bus.emit",
+                "pocketpaw_ee.cloud.shared.events.event_bus.emit",
                 new_callable=AsyncMock,
             ) as mock_emit,
         ):

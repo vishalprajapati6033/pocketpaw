@@ -12,8 +12,8 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from pocketpaw_ee.cloud.shared.events import event_bus
 
-from ee.cloud.shared.events import event_bus
 from pocketpaw.connectors.protocol import ActionResult
 from pocketpaw.runtime import connector_bus
 

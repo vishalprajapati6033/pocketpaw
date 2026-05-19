@@ -55,7 +55,9 @@ def create_memory_store(
     """
     if backend == "mongodb":
         # Lazy import so OSS builds don't need motor/beanie loaded.
-        from ee.cloud.memory.mongo_store import MongoMemoryStore  # type: ignore[import-not-found]
+        from pocketpaw_ee.cloud.memory.mongo_store import (
+            MongoMemoryStore,  # type: ignore[import-not-found]
+        )
 
         logger.info("Using MongoDB memory backend (ee)")
         return MongoMemoryStore()

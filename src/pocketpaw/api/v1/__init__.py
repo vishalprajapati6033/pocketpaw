@@ -66,11 +66,11 @@ _V1_ROUTERS: list[tuple[str, str, str]] = [
 
 # Enterprise API routes (require ee/ module) — skipped silently when ee/ is absent.
 _EE_ROUTERS: list[tuple[str, str, str]] = [
-    ("ee.fabric.router", "router", "Fabric"),
-    ("ee.fleet.router", "router", "Fleet"),
-    ("ee.instinct.router", "router", "Instinct"),
-    ("ee.retrieval.router", "router", "Retrieval"),
-    ("ee.widget.router", "router", "Widgets"),
+    ("pocketpaw_ee.fabric.router", "router", "Fabric"),
+    ("pocketpaw_ee.fleet.router", "router", "Fleet"),
+    ("pocketpaw_ee.instinct.router", "router", "Instinct"),
+    ("pocketpaw_ee.retrieval.router", "router", "Retrieval"),
+    ("pocketpaw_ee.widget.router", "router", "Widgets"),
     ("pocketpaw.ee.automations.router", "router", "Automations"),
 ]
 

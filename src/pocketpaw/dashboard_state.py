@@ -66,8 +66,7 @@ async def get_agent_loop_for(agent_id: str) -> AgentLoop:
     are cached as ``_NOT_FOUND`` to keep repeated lookups out of Mongo.
     """
     from beanie import PydanticObjectId
-
-    from ee.cloud.models.agent import Agent
+    from pocketpaw_ee.cloud.models.agent import Agent
 
     async with _agent_loops_lock:
         try:

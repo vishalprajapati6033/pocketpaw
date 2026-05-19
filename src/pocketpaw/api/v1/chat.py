@@ -31,7 +31,7 @@ from pocketpaw.api.v1.schemas.chat import ChatRequest, ChatResponse
 # Telegram), we fall back to a no-op dep that yields ``(None, None)`` — the
 # downstream pocket creator keeps its current first-user heuristic.
 try:
-    from ee.cloud.auth.core import current_optional_user as _cloud_optional_user
+    from pocketpaw_ee.cloud.auth.core import current_optional_user as _cloud_optional_user
 
     _CLOUD_AUTH_AVAILABLE = True
 except Exception:  # noqa: BLE001

@@ -149,8 +149,8 @@ async def _resolve_via_ee_mongo(
     workspace context instead of calling this.
     """
     try:
-        from ee.cloud.uploads.router import _ADAPTER as EE_ADAPTER
-        from ee.cloud.uploads.router import _META as EE_META
+        from pocketpaw_ee.cloud.uploads.router import _ADAPTER as EE_ADAPTER
+        from pocketpaw_ee.cloud.uploads.router import _META as EE_META
     except Exception:
         return None, None
 
@@ -211,7 +211,7 @@ async def resolve_media_with_records(media: list[str]) -> list[ResolvedMedia]:
             ee_path, ee_rec = await _resolve_via_ee_mongo(fid)
             if ee_rec is not None:
                 rec = ee_rec
-                from ee.cloud.uploads.router import _ADAPTER as EE_ADAPTER
+                from pocketpaw_ee.cloud.uploads.router import _ADAPTER as EE_ADAPTER
 
                 adapter = EE_ADAPTER
                 # EE's LocalStorageAdapter may have given us a local path already.

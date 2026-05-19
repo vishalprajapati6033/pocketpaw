@@ -384,10 +384,11 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-only-include = ["src/pocketpaw", "ee"]
+only-include = ["src/pocketpaw", "ee/pocketpaw_ee"]
 
 [tool.hatch.build.targets.wheel.sources]
 "src" = ""
+"ee" = ""
 
 [tool.ruff]
 line-length = 100
@@ -469,21 +470,21 @@ markers = [
 # entities are added one at a time at touch-time per the touch-time
 # migration rule in CLAUDE.md.
 [tool.importlinter]
-root_packages = ["ee", "pocketpaw"]
+root_packages = ["pocketpaw_ee", "pocketpaw"]
 
 [[tool.importlinter.contracts]]
 name = "Pockets — Beanie writes only from service.py"
 type = "forbidden"
 allow_indirect_imports = "true"
 source_modules = [
-    "ee.cloud.pockets.router",
-    "ee.cloud.pockets.dto",
-    "ee.cloud.pockets.domain",
-    "ee.cloud.pockets.agent_context",
+    "pocketpaw_ee.cloud.pockets.router",
+    "pocketpaw_ee.cloud.pockets.dto",
+    "pocketpaw_ee.cloud.pockets.domain",
+    "pocketpaw_ee.cloud.pockets.agent_context",
 ]
 forbidden_modules = [
-    "ee.cloud.models.pocket",
-    "ee.cloud.models.session",
+    "pocketpaw_ee.cloud.models.pocket",
+    "pocketpaw_ee.cloud.models.session",
 ]
 
 [[tool.importlinter.contracts]]
@@ -491,78 +492,78 @@ name = "Notifications — Beanie writes only from service.py"
 type = "forbidden"
 allow_indirect_imports = "true"
 source_modules = [
-    "ee.cloud.notifications.router",
-    "ee.cloud.notifications.dto",
-    "ee.cloud.notifications.domain",
+    "pocketpaw_ee.cloud.notifications.router",
+    "pocketpaw_ee.cloud.notifications.dto",
+    "pocketpaw_ee.cloud.notifications.domain",
 ]
-forbidden_modules = ["ee.cloud.models.notification"]
+forbidden_modules = ["pocketpaw_ee.cloud.models.notification"]
 
 [[tool.importlinter.contracts]]
 name = "Sessions — Beanie writes only from service.py"
 type = "forbidden"
 allow_indirect_imports = "true"
 source_modules = [
-    "ee.cloud.sessions.router",
-    "ee.cloud.sessions.dto",
-    "ee.cloud.sessions.domain",
+    "pocketpaw_ee.cloud.sessions.router",
+    "pocketpaw_ee.cloud.sessions.dto",
+    "pocketpaw_ee.cloud.sessions.domain",
 ]
-forbidden_modules = ["ee.cloud.models.session"]
+forbidden_modules = ["pocketpaw_ee.cloud.models.session"]
 
 [[tool.importlinter.contracts]]
 name = "Agents — Beanie writes only from service.py"
 type = "forbidden"
 allow_indirect_imports = "true"
 source_modules = [
-    "ee.cloud.agents.router",
-    "ee.cloud.agents.dto",
-    "ee.cloud.agents.domain",
-    "ee.cloud.kb.knowledge_router",
+    "pocketpaw_ee.cloud.agents.router",
+    "pocketpaw_ee.cloud.agents.dto",
+    "pocketpaw_ee.cloud.agents.domain",
+    "pocketpaw_ee.cloud.kb.knowledge_router",
 ]
-forbidden_modules = ["ee.cloud.models.agent"]
+forbidden_modules = ["pocketpaw_ee.cloud.models.agent"]
 
 [[tool.importlinter.contracts]]
 name = "Workspace — Beanie writes only from service.py"
 type = "forbidden"
 allow_indirect_imports = "true"
 source_modules = [
-    "ee.cloud.workspace.router",
-    "ee.cloud.workspace.dto",
-    "ee.cloud.workspace.domain",
+    "pocketpaw_ee.cloud.workspace.router",
+    "pocketpaw_ee.cloud.workspace.dto",
+    "pocketpaw_ee.cloud.workspace.domain",
 ]
-forbidden_modules = ["ee.cloud.models.workspace"]
+forbidden_modules = ["pocketpaw_ee.cloud.models.workspace"]
 
 [[tool.importlinter.contracts]]
 name = "Auth — Beanie writes only from service.py"
 type = "forbidden"
 allow_indirect_imports = "true"
 source_modules = [
-    "ee.cloud.auth.router",
-    "ee.cloud.auth.dto",
-    "ee.cloud.auth.domain",
+    "pocketpaw_ee.cloud.auth.router",
+    "pocketpaw_ee.cloud.auth.dto",
+    "pocketpaw_ee.cloud.auth.domain",
 ]
-forbidden_modules = ["ee.cloud.models.user"]
+forbidden_modules = ["pocketpaw_ee.cloud.models.user"]
 
 [[tool.importlinter.contracts]]
 name = "Shared agent_bridge — orchestrate via entity services only"
 type = "forbidden"
 allow_indirect_imports = "true"
-source_modules = ["ee.cloud.shared.agent_bridge"]
+source_modules = ["pocketpaw_ee.cloud.shared.agent_bridge"]
 forbidden_modules = [
-    "ee.cloud.models.group",
-    "ee.cloud.models.message",
-    "ee.cloud.models.agent",
+    "pocketpaw_ee.cloud.models.group",
+    "pocketpaw_ee.cloud.models.message",
+    "pocketpaw_ee.cloud.models.agent",
 ]
 
 [[tool.importlinter.contracts]]
 name = "Shared deps — guard via entity services only"
 type = "forbidden"
 allow_indirect_imports = "true"
-source_modules = ["ee.cloud.shared.deps"]
+source_modules = ["pocketpaw_ee.cloud.shared.deps"]
 forbidden_modules = [
-    "ee.cloud.models.user",
-    "ee.cloud.models.group",
-    "ee.cloud.models.agent",
-    "ee.cloud.models.pocket",
+    "pocketpaw_ee.cloud.models.user",
+    "pocketpaw_ee.cloud.models.group",
+    "pocketpaw_ee.cloud.models.agent",
+    "pocketpaw_ee.cloud.models.pocket",
 ]
 
 [[tool.importlinter.contracts]]
@@ -570,17 +571,17 @@ name = "Chat — Beanie writes only from service.py"
 type = "forbidden"
 allow_indirect_imports = "true"
 source_modules = [
-    "ee.cloud.chat.router",
-    "ee.cloud.chat.agent_router",
-    "ee.cloud.chat.dto",
-    "ee.cloud.chat.domain",
+    "pocketpaw_ee.cloud.chat.router",
+    "pocketpaw_ee.cloud.chat.agent_router",
+    "pocketpaw_ee.cloud.chat.dto",
+    "pocketpaw_ee.cloud.chat.domain",
 ]
 forbidden_modules = [
-    "ee.cloud.models.group",
-    "ee.cloud.models.message",
-    "ee.cloud.models.read_state",
-    "ee.cloud.models.user",
-    "ee.cloud.models.agent",
+    "pocketpaw_ee.cloud.models.group",
+    "pocketpaw_ee.cloud.models.message",
+    "pocketpaw_ee.cloud.models.read_state",
+    "pocketpaw_ee.cloud.models.user",
+    "pocketpaw_ee.cloud.models.agent",
 ]
 
 [[tool.importlinter.contracts]]
@@ -588,12 +589,12 @@ name = "Tasks — Beanie writes only from service.py"
 type = "forbidden"
 allow_indirect_imports = "true"
 source_modules = [
-    "ee.cloud.tasks.router",
-    "ee.cloud.tasks.dto",
-    "ee.cloud.tasks.domain",
-    "ee.cloud.tasks.listeners",
+    "pocketpaw_ee.cloud.tasks.router",
+    "pocketpaw_ee.cloud.tasks.dto",
+    "pocketpaw_ee.cloud.tasks.domain",
+    "pocketpaw_ee.cloud.tasks.listeners",
 ]
-forbidden_modules = ["ee.cloud.models.task"]
+forbidden_modules = ["pocketpaw_ee.cloud.models.task"]
 
 
 # Mission Control façade — the façade reads through Instinct's store
@@ -607,18 +608,18 @@ name = "Mission Control — no Beanie touches from façade layer"
 type = "forbidden"
 allow_indirect_imports = "true"
 source_modules = [
-    "ee.cloud.mission_control.router",
-    "ee.cloud.mission_control.dto",
-    "ee.cloud.mission_control.domain",
-    "ee.cloud.mission_control.service",
+    "pocketpaw_ee.cloud.mission_control.router",
+    "pocketpaw_ee.cloud.mission_control.dto",
+    "pocketpaw_ee.cloud.mission_control.domain",
+    "pocketpaw_ee.cloud.mission_control.service",
 ]
 forbidden_modules = [
-    "ee.cloud.models.pocket",
-    "ee.cloud.models.notification",
-    "ee.cloud.models.user",
-    "ee.cloud.models.agent",
-    "ee.cloud.models.planner",
-    "ee.cloud.models.cycle",
+    "pocketpaw_ee.cloud.models.pocket",
+    "pocketpaw_ee.cloud.models.notification",
+    "pocketpaw_ee.cloud.models.user",
+    "pocketpaw_ee.cloud.models.agent",
+    "pocketpaw_ee.cloud.models.planner",
+    "pocketpaw_ee.cloud.models.cycle",
 ]
 
 [[tool.importlinter.contracts]]
@@ -626,43 +627,43 @@ name = "Cycles — Beanie writes only from service.py"
 type = "forbidden"
 allow_indirect_imports = "true"
 source_modules = [
-    "ee.cloud.cycles.router",
-    "ee.cloud.cycles.dto",
-    "ee.cloud.cycles.domain",
-    "ee.cloud.cycles.snapshot_job",
-    "ee.cloud.cycles.scheduler",
+    "pocketpaw_ee.cloud.cycles.router",
+    "pocketpaw_ee.cloud.cycles.dto",
+    "pocketpaw_ee.cloud.cycles.domain",
+    "pocketpaw_ee.cloud.cycles.snapshot_job",
+    "pocketpaw_ee.cloud.cycles.scheduler",
 ]
-forbidden_modules = ["ee.cloud.models.cycle"]
+forbidden_modules = ["pocketpaw_ee.cloud.models.cycle"]
 
 [[tool.importlinter.contracts]]
 name = "Projects — Beanie writes only from service.py"
 type = "forbidden"
 allow_indirect_imports = "true"
 source_modules = [
-    "ee.cloud.projects.router",
-    "ee.cloud.projects.dto",
-    "ee.cloud.projects.domain",
+    "pocketpaw_ee.cloud.projects.router",
+    "pocketpaw_ee.cloud.projects.dto",
+    "pocketpaw_ee.cloud.projects.domain",
 ]
-forbidden_modules = ["ee.cloud.models.project"]
+forbidden_modules = ["pocketpaw_ee.cloud.models.project"]
 
 [[tool.importlinter.contracts]]
 name = "Planner — Beanie writes only from service.py"
 type = "forbidden"
 allow_indirect_imports = "true"
 source_modules = [
-    "ee.cloud.planner.router",
-    "ee.cloud.planner.dto",
-    "ee.cloud.planner.domain",
+    "pocketpaw_ee.cloud.planner.router",
+    "pocketpaw_ee.cloud.planner.dto",
+    "pocketpaw_ee.cloud.planner.domain",
 ]
-forbidden_modules = ["ee.cloud.models.planner"]
+forbidden_modules = ["pocketpaw_ee.cloud.models.planner"]
 
 [[tool.importlinter.contracts]]
 name = "Audit — Beanie writes only from service.py"
 type = "forbidden"
 allow_indirect_imports = "true"
 source_modules = [
-    "ee.cloud.audit.router",
-    "ee.cloud.audit.dto",
-    "ee.cloud.audit.domain",
+    "pocketpaw_ee.cloud.audit.router",
+    "pocketpaw_ee.cloud.audit.dto",
+    "pocketpaw_ee.cloud.audit.domain",
 ]
-forbidden_modules = ["ee.cloud.models.audit"]
+forbidden_modules = ["pocketpaw_ee.cloud.models.audit"]

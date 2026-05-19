@@ -27,14 +27,13 @@ from uuid import UUID
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from soul_protocol.engine.journal import open_journal
-
-from ee.journal_dep import get_journal, reset_journal_cache
-from ee.widget.events import (
+from pocketpaw_ee.journal_dep import get_journal, reset_journal_cache
+from pocketpaw_ee.widget.events import (
     ACTION_WIDGET_COOCCURRENCE_ACCEPTED,
     ACTION_WIDGET_COOCCURRENCE_DISMISSED,
 )
-from ee.widget.router import reset_store_cache, router
+from pocketpaw_ee.widget.router import reset_store_cache, router
+from soul_protocol.engine.journal import open_journal
 
 
 @pytest.fixture(autouse=True)

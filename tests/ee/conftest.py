@@ -109,7 +109,7 @@ def license_env(_license_env_vars: dict[str, str]):
     """
 
     with patch.dict(os.environ, _license_env_vars):
-        import ee.cloud.license as lic_mod
+        import pocketpaw_ee.cloud.license as lic_mod
 
         lic_mod._cached_license = None
         lic_mod._license_error = None
@@ -142,9 +142,8 @@ async def beanie_test_db():
 
     from beanie import init_beanie
     from mongomock_motor import AsyncMongoMockClient
-
-    from ee.cloud.memory.documents import MemoryFactDoc
-    from ee.cloud.models import ALL_DOCUMENTS
+    from pocketpaw_ee.cloud.memory.documents import MemoryFactDoc
+    from pocketpaw_ee.cloud.models import ALL_DOCUMENTS
 
     db_name = f"test_ee_shared_{uuid.uuid4().hex[:8]}"
     client = AsyncMongoMockClient()
@@ -177,7 +176,7 @@ async def app(license_env, beanie_test_db) -> FastAPI:
 
     _require_enterprise()
 
-    from ee.cloud import mount_cloud
+    from pocketpaw_ee.cloud import mount_cloud
 
     test_app = FastAPI()
 

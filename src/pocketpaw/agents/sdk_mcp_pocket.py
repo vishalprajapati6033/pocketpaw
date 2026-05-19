@@ -64,13 +64,13 @@ def _result_payload(result: dict) -> dict:
 
 
 async def _get_pocket_handler(args: dict) -> dict:
-    from ee.cloud.pockets.agent_context import fetch_pocket_for_agent
+    from pocketpaw_ee.cloud.pockets.agent_context import fetch_pocket_for_agent
 
     return _result_payload(await fetch_pocket_for_agent(args.get("pocket_id", "")))
 
 
 async def _list_pockets_handler(args: dict) -> dict:
-    from ee.cloud.pockets.agent_context import list_pockets_for_agent
+    from pocketpaw_ee.cloud.pockets.agent_context import list_pockets_for_agent
 
     result = await list_pockets_for_agent()
     if not result.get("ok"):
@@ -91,7 +91,8 @@ async def _list_pockets_handler(args: dict) -> dict:
 async def _get_widget_spec_handler(args: dict) -> dict:
     """Fetch the manifest, filter to requested widget types, and return a
     formatted markdown reference. Backs the ``get_widget_spec`` MCP tool."""
-    from ee.ripple.manifest import format_for_prompt, get_manifest
+    from pocketpaw_ee.ripple.manifest import format_for_prompt, get_manifest
+
     from pocketpaw.config import get_settings
 
     raw_types = args.get("types") or []
@@ -152,7 +153,7 @@ async def _get_inline_widget_help_handler(args: dict) -> dict:
              (e.g. ["chart", "sparkline"]). Empty / missing → full
              catalog (rare — agent generally knows what it wants).
     """
-    from ee.ripple._inline_core import widget_help
+    from pocketpaw_ee.ripple._inline_core import widget_help
 
     types = args.get("types") or []
     if not isinstance(types, list):

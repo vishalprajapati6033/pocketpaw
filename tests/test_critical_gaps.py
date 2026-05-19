@@ -126,7 +126,8 @@ class TestFabricTools:
 
     @pytest.mark.asyncio
     async def test_fabric_query_with_results(self):
-        from ee.fabric.models import FabricObject, FabricQueryResult
+        from pocketpaw_ee.fabric.models import FabricObject, FabricQueryResult
+
         from pocketpaw.tools.builtin.fabric_tools import FabricQueryTool
 
         mock_store = MagicMock()
@@ -160,7 +161,8 @@ class TestFabricTools:
 
     @pytest.mark.asyncio
     async def test_fabric_create_object(self):
-        from ee.fabric.models import FabricObject, ObjectType
+        from pocketpaw_ee.fabric.models import FabricObject, ObjectType
+
         from pocketpaw.tools.builtin.fabric_tools import FabricCreateTool
 
         mock_store = MagicMock()
@@ -190,7 +192,8 @@ class TestFabricTools:
 class TestInstinctTools:
     @pytest.mark.asyncio
     async def test_propose_action(self):
-        from ee.instinct.models import Action, ActionTrigger
+        from pocketpaw_ee.instinct.models import Action, ActionTrigger
+
         from pocketpaw.tools.builtin.instinct_tools import InstinctProposeTool
 
         mock_store = MagicMock()
@@ -236,7 +239,8 @@ class TestInstinctTools:
 
     @pytest.mark.asyncio
     async def test_audit_query(self):
-        from ee.instinct.models import AuditEntry
+        from pocketpaw_ee.instinct.models import AuditEntry
+
         from pocketpaw.tools.builtin.instinct_tools import InstinctAuditTool
 
         mock_store = MagicMock()

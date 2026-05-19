@@ -13,15 +13,14 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import AsyncMock
 
+import pocketpaw_ee.fabric.router as fabric_router_module
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-import ee.fabric.router as fabric_router_module
-from ee.cloud._core.deps import current_workspace_id
-from ee.cloud.auth import current_active_user
-from ee.cloud.license import require_license
-from ee.fabric.store import FabricStore
+from pocketpaw_ee.cloud._core.deps import current_workspace_id
+from pocketpaw_ee.cloud.auth import current_active_user
+from pocketpaw_ee.cloud.license import require_license
+from pocketpaw_ee.fabric.store import FabricStore
 
 
 class _FakeMembership:
@@ -56,7 +55,7 @@ def client(tmp_path: Path, monkeypatch) -> TestClient:
     test_db = tmp_path / "fabric-test.db"
     monkeypatch.setattr(fabric_router_module, "_DB_PATH", test_db)
 
-    import ee.cloud.workspace.service as ws_svc
+    import pocketpaw_ee.cloud.workspace.service as ws_svc
 
     monkeypatch.setattr(ws_svc, "get_workspace_plan", AsyncMock(return_value="business"))
 

@@ -112,7 +112,7 @@ def _instantiate_all_tools(backend: str = "claude_agent_sdk") -> list[BaseTool]:
     # and never consumes PocketPaw BaseTools through this bridge.
     if backend in _SPECIALIST_FUNCTION_TOOL_BACKENDS:
         try:
-            from ee.agent.pocket_specialist.tool import PocketSpecialistTool
+            from pocketpaw_ee.agent.pocket_specialist.tool import PocketSpecialistTool
 
             tools.append(PocketSpecialistTool())
         except Exception as exc:  # noqa: BLE001

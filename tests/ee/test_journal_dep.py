@@ -10,9 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pocketpaw_ee.journal_dep import _org_data_dir, get_journal, reset_journal_cache
 from soul_protocol.engine.journal import Journal
-
-from ee.journal_dep import _org_data_dir, get_journal, reset_journal_cache
 
 
 @pytest.fixture(autouse=True)

@@ -13,7 +13,7 @@ from pocketpaw.config import Settings
 def _cloud_override(name: str) -> bool | None:
     """Return True/False if ee.cloud forces a feature on/off, else None."""
     try:
-        from ee.cloud import features as cloud_features  # type: ignore[import-not-found]
+        from pocketpaw_ee.cloud import features as cloud_features  # type: ignore[import-not-found]
     except ImportError:
         return None
     getter = getattr(cloud_features, name, None)

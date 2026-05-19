@@ -553,10 +553,10 @@ class ClaudeSDKBackend(BaseAgentBackend):
         # the full list/validate/persist workflow as an isolated specialist
         # run without re-implementing it inline.
         try:
-            from ee.agent.pocket_specialist.mcp_tool import (
+            from pocketpaw_ee.agent.pocket_specialist.mcp_tool import (
                 SERVER_NAME as _PS_SERVER_NAME,
             )
-            from ee.agent.pocket_specialist.mcp_tool import (
+            from pocketpaw_ee.agent.pocket_specialist.mcp_tool import (
                 build_pocket_specialist_server,
             )
 
@@ -895,15 +895,13 @@ class ClaudeSDKBackend(BaseAgentBackend):
 
                 allowed_tools.extend(TASK_TOOL_IDS)
             except Exception as exc:  # noqa: BLE001
-                logger.debug(
-                    "pocketpaw_tasks tool ids not added to allowlist: %s", exc
-                )
+                logger.debug("pocketpaw_tasks tool ids not added to allowlist: %s", exc)
 
             # Pocket specialist — ``create`` / ``edit`` tools that run the
             # full listing → validate → persist workflow as an isolated
             # specialist backend.
             try:
-                from ee.agent.pocket_specialist.mcp_tool import (
+                from pocketpaw_ee.agent.pocket_specialist.mcp_tool import (
                     POCKET_SPECIALIST_TOOL_IDS,
                 )
 

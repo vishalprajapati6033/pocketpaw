@@ -39,10 +39,10 @@ def _install_ee_cloud_stubs(monkeypatch, *, user, workspace_by_id=None, create_r
     # first-owned / any-workspace fallbacks
     find_owned_ws = AsyncMock(return_value=None)
 
-    fake_user_mod = types.ModuleType("ee.cloud.models.user")
+    fake_user_mod = types.ModuleType("pocketpaw_ee.cloud.models.user")
     fake_user_mod.User = SimpleNamespace(get=get_user, find_one=find_user)
 
-    fake_ws_mod = types.ModuleType("ee.cloud.models.workspace")
+    fake_ws_mod = types.ModuleType("pocketpaw_ee.cloud.models.workspace")
 
     class _WorkspaceStub:
         # Mimic the Beanie Document constants used in the loop call
@@ -53,7 +53,7 @@ def _install_ee_cloud_stubs(monkeypatch, *, user, workspace_by_id=None, create_r
     _WorkspaceStub.find_one = find_owned_ws
     fake_ws_mod.Workspace = _WorkspaceStub
 
-    fake_session_mod = types.ModuleType("ee.cloud.models.session")
+    fake_session_mod = types.ModuleType("pocketpaw_ee.cloud.models.session")
     # Session(...) is instantiated inside the loop — return a spy instance.
     session_insert = AsyncMock()
 
@@ -81,7 +81,7 @@ def _install_ee_cloud_stubs(monkeypatch, *, user, workspace_by_id=None, create_r
     # user_id, body)`` as a module-level function (was
     # ``PocketService.create``). Stubs updated to match.
     pocket_create = AsyncMock(return_value=create_ret or {"_id": "pocket-xyz"})
-    fake_pockets_dto = types.ModuleType("ee.cloud.pockets.dto")
+    fake_pockets_dto = types.ModuleType("pocketpaw_ee.cloud.pockets.dto")
 
     class _CreatePocketRequest:
         def __init__(self, **kwargs):
@@ -89,7 +89,7 @@ def _install_ee_cloud_stubs(monkeypatch, *, user, workspace_by_id=None, create_r
 
     fake_pockets_dto.CreatePocketRequest = _CreatePocketRequest
 
-    fake_pockets_service = types.ModuleType("ee.cloud.pockets.service")
+    fake_pockets_service = types.ModuleType("pocketpaw_ee.cloud.pockets.service")
     fake_pockets_service.create = pocket_create
 
     # PydanticObjectId(oid) — just return the string, the stub get/find
@@ -99,15 +99,15 @@ def _install_ee_cloud_stubs(monkeypatch, *, user, workspace_by_id=None, create_r
 
     # Install stubs
     for name, mod in {
-        "ee": types.ModuleType("ee"),
-        "ee.cloud": types.ModuleType("ee.cloud"),
-        "ee.cloud.models": types.ModuleType("ee.cloud.models"),
-        "ee.cloud.models.user": fake_user_mod,
-        "ee.cloud.models.workspace": fake_ws_mod,
-        "ee.cloud.models.session": fake_session_mod,
-        "ee.cloud.pockets": types.ModuleType("ee.cloud.pockets"),
-        "ee.cloud.pockets.dto": fake_pockets_dto,
-        "ee.cloud.pockets.service": fake_pockets_service,
+        "pocketpaw_ee": types.ModuleType("pocketpaw_ee"),
+        "pocketpaw_ee.cloud": types.ModuleType("pocketpaw_ee.cloud"),
+        "pocketpaw_ee.cloud.models": types.ModuleType("pocketpaw_ee.cloud.models"),
+        "pocketpaw_ee.cloud.models.user": fake_user_mod,
+        "pocketpaw_ee.cloud.models.workspace": fake_ws_mod,
+        "pocketpaw_ee.cloud.models.session": fake_session_mod,
+        "pocketpaw_ee.cloud.pockets": types.ModuleType("pocketpaw_ee.cloud.pockets"),
+        "pocketpaw_ee.cloud.pockets.dto": fake_pockets_dto,
+        "pocketpaw_ee.cloud.pockets.service": fake_pockets_service,
     }.items():
         monkeypatch.setitem(sys.modules, name, mod)
 

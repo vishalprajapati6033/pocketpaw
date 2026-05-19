@@ -8,8 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
-
-from ee.paw_print.models import (
+from pocketpaw_ee.paw_print.models import (
     MAX_BLOCKS_PER_SPEC,
     MAX_DOMAINS_PER_WIDGET,
     MAX_ITEMS_PER_LIST,
@@ -21,7 +20,7 @@ from ee.paw_print.models import (
     PawPrintSpec,
     PawPrintWidget,
 )
-from ee.paw_print.store import PawPrintStore
+from pocketpaw_ee.paw_print.store import PawPrintStore
 
 
 def _spec(widget_id: str = "pp_test") -> PawPrintSpec:

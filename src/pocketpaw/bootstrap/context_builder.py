@@ -564,7 +564,7 @@ class AgentContextBuilder:
             return None
 
         try:
-            from ee.cloud.embeddings import build_embedder
+            from pocketpaw_ee.cloud.embeddings import build_embedder
         except Exception:
             logger.debug("embeddings package unavailable; falling back to BM25")
             return None

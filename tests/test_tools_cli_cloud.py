@@ -37,7 +37,7 @@ async def test_cloud_get_pocket_calls_agent_context():
     from pocketpaw.tools.cli import _cloud_get_pocket
 
     with patch(
-        "ee.cloud.pockets.agent_context.fetch_pocket_for_agent",
+        "pocketpaw_ee.cloud.pockets.agent_context.fetch_pocket_for_agent",
         new=AsyncMock(return_value={"ok": True, "pocket": {"_id": "p1"}}),
     ) as mock_fetch:
         result = await _cloud_get_pocket({"pocket_id": "p1"})
@@ -54,7 +54,7 @@ async def test_cloud_get_pocket_falls_back_to_env(monkeypatch):
 
     monkeypatch.setenv("POCKETPAW_POCKET_ID", "from-env")
     with patch(
-        "ee.cloud.pockets.agent_context.fetch_pocket_for_agent",
+        "pocketpaw_ee.cloud.pockets.agent_context.fetch_pocket_for_agent",
         new=AsyncMock(return_value={"ok": True}),
     ) as mock_fetch:
         await _cloud_get_pocket({})
@@ -68,7 +68,7 @@ async def test_cloud_add_widget_passes_widget_dict():
 
     widget = {"name": "Revenue", "type": "metric", "data": {"value": 100}}
     with patch(
-        "ee.cloud.pockets.agent_context.add_widget_for_agent",
+        "pocketpaw_ee.cloud.pockets.agent_context.add_widget_for_agent",
         new=AsyncMock(return_value={"ok": True, "pocket": {}}),
     ) as mock_add:
         await _cloud_add_widget({"pocket_id": "p1", "widget": widget})
@@ -81,7 +81,7 @@ async def test_cloud_update_widget_passes_fields():
     from pocketpaw.tools.cli import _cloud_update_widget
 
     with patch(
-        "ee.cloud.pockets.agent_context.update_widget_for_agent",
+        "pocketpaw_ee.cloud.pockets.agent_context.update_widget_for_agent",
         new=AsyncMock(return_value={"ok": True}),
     ) as mock_upd:
         await _cloud_update_widget({"pocket_id": "p1", "widget_id": "w1", "fields": {"name": "X"}})
@@ -94,7 +94,7 @@ async def test_cloud_remove_widget_targets_id():
     from pocketpaw.tools.cli import _cloud_remove_widget
 
     with patch(
-        "ee.cloud.pockets.agent_context.remove_widget_for_agent",
+        "pocketpaw_ee.cloud.pockets.agent_context.remove_widget_for_agent",
         new=AsyncMock(return_value={"ok": True}),
     ) as mock_rm:
         await _cloud_remove_widget({"pocket_id": "p1", "widget_id": "w1"})

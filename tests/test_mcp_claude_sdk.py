@@ -5,9 +5,10 @@ All SDK imports are mocked.
 
 from unittest.mock import patch
 
-from ee.agent.pocket_specialist.mcp_tool import (
+from pocketpaw_ee.agent.pocket_specialist.mcp_tool import (
     SERVER_NAME as _POCKET_SPECIALIST_MCP_SERVER_NAME,
 )
+
 from pocketpaw.agents.claude_sdk import ClaudeAgentSDK
 from pocketpaw.agents.sdk_mcp_pocket import SERVER_NAME as _POCKET_MCP_SERVER_NAME
 from pocketpaw.agents.sdk_mcp_tasks import SERVER_NAME as _TASKS_MCP_SERVER_NAME

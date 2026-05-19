@@ -11,8 +11,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
+from pocketpaw_ee.ripple import POCKET_CREATION_PROMPT, POCKET_INTERACTION_PROMPT
 
-from ee.ripple import POCKET_CREATION_PROMPT, POCKET_INTERACTION_PROMPT
 from pocketpaw.api.deps import require_scope
 from pocketpaw.api.v1.schemas.chat import ChatRequest
 

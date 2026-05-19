@@ -139,9 +139,7 @@ class TestPruneOrphanAutoIntentions:
         assert pruned == 5
         delete_lines = [r for r in caplog.records if "Deleted intention" in r.message]
         summary_lines = [
-            r
-            for r in caplog.records
-            if "Pruned" in r.message and "orphan" in r.message
+            r for r in caplog.records if "Pruned" in r.message and "orphan" in r.message
         ]
         assert delete_lines == [], "per-item delete log must be suppressed during prune"
         assert len(summary_lines) == 1, "expected exactly one summary line"

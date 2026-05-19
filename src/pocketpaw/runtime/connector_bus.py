@@ -21,7 +21,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from ee.cloud.shared.events import event_bus
+from pocketpaw_ee.cloud.shared.events import event_bus
+
 from pocketpaw.connectors.registry import ConnectorRegistry, _create_native_adapter
 
 logger = logging.getLogger(__name__)

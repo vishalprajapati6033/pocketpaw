@@ -134,8 +134,8 @@ class AutomationEvaluator:
         """Propose an Instinct action for human approval."""
         try:
             # Lazy import to avoid circular deps and heavy startup cost
-            from ee.api import get_instinct_store
-            from ee.instinct.models import ActionTrigger
+            from pocketpaw_ee.api import get_instinct_store
+            from pocketpaw_ee.instinct.models import ActionTrigger
 
             instinct = get_instinct_store()
             trigger = ActionTrigger(

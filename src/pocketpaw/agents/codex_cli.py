@@ -188,7 +188,7 @@ def _build_subprocess_env(system_prompt: str) -> dict[str, str]:
 
     # Lazy import — keeps codex_cli importable in OSS-only builds.
     try:
-        from ee.cloud.chat.agent_service import (
+        from pocketpaw_ee.cloud.chat.agent_service import (
             current_session_mongo_id,
             current_user_id,
             current_workspace_id,
@@ -203,7 +203,7 @@ def _build_subprocess_env(system_prompt: str) -> dict[str, str]:
             if value:
                 env[var] = str(value)
     except Exception:
-        logger.debug("ee.cloud.chat ContextVars unavailable", exc_info=True)
+        logger.debug("pocketpaw_ee.cloud.chat ContextVars unavailable", exc_info=True)
 
     # Pocket id rides in on the system prompt (the cloud prompt builder
     # appends ``<current-pocket id="...">`` for in-pocket chats).

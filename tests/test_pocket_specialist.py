@@ -12,7 +12,7 @@ def test_delegation_rule_points_at_mcp_tool():
     to the new ``pocket_specialist__create`` MCP tool — the legacy native
     subagent (``Agent(subagent_type="pocket_specialist")``) has been
     removed."""
-    from ee.ripple._pockets import POCKET_DELEGATION_RULE
+    from pocketpaw_ee.ripple._pockets import POCKET_DELEGATION_RULE
 
     assert "pocket_specialist__create" in POCKET_DELEGATION_RULE, (
         "delegation rule must reference the canonical MCP tool name"

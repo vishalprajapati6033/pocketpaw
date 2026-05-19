@@ -38,27 +38,26 @@ from uuid import uuid4
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from soul_protocol.engine.journal import open_journal
-from soul_protocol.spec.journal import Actor
-
-from ee.journal_dep import get_journal, reset_journal_cache
-from ee.widget.events import (
+from pocketpaw_ee.journal_dep import get_journal, reset_journal_cache
+from pocketpaw_ee.widget.events import (
     ACTION_WIDGET_COOCCURRENCE_DETECTED,
     ACTION_WIDGET_GRADUATED,
     ACTION_WIDGET_INTERACTION_RECORDED,
     cooccurrence_signature,
     normalise_signature_tokens,
 )
-from ee.widget.policy import (
+from pocketpaw_ee.widget.policy import (
     DEFAULT_COOCCURRENCE_THRESHOLD,
     DEFAULT_PIN_THRESHOLD,
     apply_widget_graduations,
     scan_for_cooccurrences,
     scan_for_widget_graduations,
 )
-from ee.widget.projection import WidgetProjection
-from ee.widget.router import reset_store_cache, router
-from ee.widget.store import WidgetJournalStore
+from pocketpaw_ee.widget.projection import WidgetProjection
+from pocketpaw_ee.widget.router import reset_store_cache, router
+from pocketpaw_ee.widget.store import WidgetJournalStore
+from soul_protocol.engine.journal import open_journal
+from soul_protocol.spec.journal import Actor
 
 # ---------------------------------------------------------------------------
 # Fixtures

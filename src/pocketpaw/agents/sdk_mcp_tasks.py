@@ -81,7 +81,7 @@ def _identity() -> tuple[str | None, str | None]:
     """
 
     try:
-        from ee.cloud.chat.agent_service import current_user_id, current_workspace_id
+        from pocketpaw_ee.cloud.chat.agent_service import current_user_id, current_workspace_id
 
         return current_workspace_id(), current_user_id()
     except Exception:
@@ -96,7 +96,7 @@ def _build_ctx(workspace_id: str, user_id: str):
 
     from datetime import UTC, datetime
 
-    from ee.cloud._core.context import RequestContext, ScopeKind
+    from pocketpaw_ee.cloud._core.context import RequestContext, ScopeKind
 
     return RequestContext(
         user_id=user_id,
@@ -120,7 +120,7 @@ async def _list_my_tasks_handler(args: dict) -> dict:
             "from inside a cloud SSE chat stream"
         )
 
-    from ee.cloud.tasks import service as tasks_service
+    from pocketpaw_ee.cloud.tasks import service as tasks_service
 
     status = args.get("status") or "proposed"
     limit_raw = args.get("limit") or 50
@@ -155,8 +155,8 @@ async def _claim_task_handler(args: dict) -> dict:
     if not isinstance(task_id, str) or not task_id:
         return _error_response("task_id is required (string)")
 
-    from ee.cloud.tasks import service as tasks_service
-    from ee.cloud.tasks.dto import ClaimTaskRequest
+    from pocketpaw_ee.cloud.tasks import service as tasks_service
+    from pocketpaw_ee.cloud.tasks.dto import ClaimTaskRequest
 
     ctx = _build_ctx(workspace_id, agent_id)
     try:
@@ -187,9 +187,9 @@ async def _complete_task_handler(args: dict) -> dict:
         return _error_response("next_action must be 'archive' or 'request_approval'")
     result_summary = args.get("result_summary") or ""
 
-    from ee.cloud._core.errors import CloudError
-    from ee.cloud.tasks import service as tasks_service
-    from ee.cloud.tasks.dto import CompleteTaskRequest
+    from pocketpaw_ee.cloud._core.errors import CloudError
+    from pocketpaw_ee.cloud.tasks import service as tasks_service
+    from pocketpaw_ee.cloud.tasks.dto import CompleteTaskRequest
 
     ctx = _build_ctx(workspace_id, agent_id)
     try:

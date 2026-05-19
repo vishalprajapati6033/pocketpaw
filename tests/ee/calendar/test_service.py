@@ -16,21 +16,20 @@ from typing import Any
 
 import pytest
 from bson import ObjectId
-
-from ee.calendar import service as service_module
-from ee.calendar.dto import (
+from pocketpaw_ee.calendar import service as service_module
+from pocketpaw_ee.calendar.dto import (
     CreateEventRequest,
     FreeBusyRequest,
     ListEventsRequest,
     UpdateEventRequest,
 )
-from ee.calendar.events import (
+from pocketpaw_ee.calendar.events import (
     TOPIC_CONFLICT_DETECTED,
     TOPIC_EVENT_CREATED,
     TOPIC_EVENT_DELETED,
     TOPIC_EVENT_UPDATED,
 )
-from ee.cloud.shared.errors import NotFound, ValidationError
+from pocketpaw_ee.cloud.shared.errors import NotFound, ValidationError
 
 # ---------------------------------------------------------------------------
 # Fake Beanie doc — minimum viable replacement.
@@ -338,10 +337,10 @@ async def test_get_freebusy_multi_attendee(ctx, fake_store, monkeypatch):
     """Cover the freebusy path. compute_freebusy is patched because the
     fake store doesn't model the embedded-attendee $in filter that the
     real Mongo query uses."""
-    from ee.calendar import service as svc
+    from pocketpaw_ee.calendar import service as svc
 
     async def _fake_compute(workspace_id, attendee_emails, starts_at, ends_at):
-        from ee.calendar.domain import FreeBusy
+        from pocketpaw_ee.calendar.domain import FreeBusy
 
         return [FreeBusy(attendee_email=e, busy_periods=[]) for e in attendee_emails]
 
@@ -358,7 +357,7 @@ async def test_get_freebusy_multi_attendee(ctx, fake_store, monkeypatch):
 
 async def test_detect_conflicts_overlapping_events(ctx, fake_store, bus_spy, monkeypatch):
     """detect_conflicts emits TOPIC_CONFLICT_DETECTED when conflicts exist."""
-    from ee.calendar import service as svc
+    from pocketpaw_ee.calendar import service as svc
 
     target = _new_doc(
         fake_store,
@@ -377,7 +376,7 @@ async def test_detect_conflicts_overlapping_events(ctx, fake_store, bus_spy, mon
     )
 
     async def _fake_find_conflicts(workspace_id, event):
-        from ee.calendar.conflicts import _doc_to_event
+        from pocketpaw_ee.calendar.conflicts import _doc_to_event
 
         # mirror real find_conflicts: just return `other` mapped.
         return [_doc_to_event(other)]

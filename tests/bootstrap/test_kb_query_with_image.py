@@ -41,7 +41,7 @@ class _FakeEmbedder:
         self.queries.append((text, image_bytes))
         if self._fail:
             raise RuntimeError("upstream blew up")
-        from ee.cloud.embeddings import EmbeddingResult
+        from pocketpaw_ee.cloud.embeddings import EmbeddingResult
 
         return EmbeddingResult(
             vector=list(self._vector),
@@ -65,7 +65,7 @@ class _TextOnlyEmbedder(_FakeEmbedder):
 async def test_image_query_uses_hybrid_with_query_vec(monkeypatch):
     """image_bytes provided → embed_query called → kb invoked --hybrid --query-vec."""
     embedder = _FakeEmbedder()
-    monkeypatch.setattr("ee.cloud.embeddings.build_embedder", lambda s: embedder)
+    monkeypatch.setattr("pocketpaw_ee.cloud.embeddings.build_embedder", lambda s: embedder)
     _stub_settings(
         monkeypatch,
         kb_vectors_enabled=True,
@@ -123,7 +123,7 @@ async def test_image_query_uses_hybrid_with_query_vec(monkeypatch):
 @pytest.mark.asyncio
 async def test_image_query_falls_back_to_bm25_when_embed_fails(monkeypatch):
     failing = _FakeEmbedder(fail=True)
-    monkeypatch.setattr("ee.cloud.embeddings.build_embedder", lambda s: failing)
+    monkeypatch.setattr("pocketpaw_ee.cloud.embeddings.build_embedder", lambda s: failing)
     _stub_settings(
         monkeypatch,
         kb_vectors_enabled=True,
@@ -162,7 +162,7 @@ async def test_image_query_falls_back_to_bm25_when_embed_fails(monkeypatch):
 @pytest.mark.asyncio
 async def test_image_query_falls_back_when_embedder_lacks_image_modality(monkeypatch):
     text_only = _TextOnlyEmbedder()
-    monkeypatch.setattr("ee.cloud.embeddings.build_embedder", lambda s: text_only)
+    monkeypatch.setattr("pocketpaw_ee.cloud.embeddings.build_embedder", lambda s: text_only)
     _stub_settings(
         monkeypatch,
         kb_vectors_enabled=True,
@@ -197,7 +197,7 @@ async def test_image_query_falls_back_when_embedder_lacks_image_modality(monkeyp
 @pytest.mark.asyncio
 async def test_image_query_skips_when_vectors_disabled(monkeypatch):
     embedder = _FakeEmbedder()
-    monkeypatch.setattr("ee.cloud.embeddings.build_embedder", lambda s: embedder)
+    monkeypatch.setattr("pocketpaw_ee.cloud.embeddings.build_embedder", lambda s: embedder)
     _stub_settings(
         monkeypatch,
         kb_vectors_enabled=False,
@@ -233,7 +233,7 @@ async def test_no_image_keeps_bm25_call_shape(monkeypatch):
         embedder_called = True
         return _FakeEmbedder()
 
-    monkeypatch.setattr("ee.cloud.embeddings.build_embedder", _build)
+    monkeypatch.setattr("pocketpaw_ee.cloud.embeddings.build_embedder", _build)
     _stub_settings(
         monkeypatch,
         kb_vectors_enabled=True,

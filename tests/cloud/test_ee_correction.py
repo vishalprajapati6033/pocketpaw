@@ -11,22 +11,21 @@ from unittest.mock import patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-from ee.instinct.correction import (
+from pocketpaw_ee.instinct.correction import (
     Correction,
     CorrectionPatch,
     compute_patches,
     summarize_correction,
 )
-from ee.instinct.models import (
+from pocketpaw_ee.instinct.models import (
     Action,
     ActionCategory,
     ActionPriority,
     ActionStatus,
     ActionTrigger,
 )
-from ee.instinct.router import router
-from ee.instinct.store import InstinctStore
+from pocketpaw_ee.instinct.router import router
+from pocketpaw_ee.instinct.store import InstinctStore
 
 
 def _trigger() -> ActionTrigger:
@@ -271,7 +270,7 @@ def app_with_store(tmp_path: Path):
     app = FastAPI()
     app.include_router(router)
     store = InstinctStore(tmp_path / "router_correction.db")
-    with patch("ee.instinct.router._store", return_value=store):
+    with patch("pocketpaw_ee.instinct.router._store", return_value=store):
         yield app, store
 
 

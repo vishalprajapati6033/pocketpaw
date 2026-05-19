@@ -10,13 +10,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pocketpaw_ee.cloud.kb.knowledge_router as knowledge_router_module
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-import ee.cloud.kb.knowledge_router as knowledge_router_module
-from ee.cloud.auth import current_active_user
-from ee.cloud.license import require_license
+from pocketpaw_ee.cloud.auth import current_active_user
+from pocketpaw_ee.cloud.license import require_license
 
 
 @pytest.fixture()
@@ -67,7 +66,7 @@ def client(monkeypatch):
     async def fake_current_active_user():
         return fake_user
 
-    from ee.cloud._core.http import add_error_handler
+    from pocketpaw_ee.cloud._core.http import add_error_handler
 
     app = FastAPI()
     add_error_handler(app)

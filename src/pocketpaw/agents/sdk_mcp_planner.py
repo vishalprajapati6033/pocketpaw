@@ -66,7 +66,7 @@ def _identity() -> tuple[str | None, str | None]:
     """
 
     try:
-        from ee.cloud.chat.agent_service import current_user_id, current_workspace_id
+        from pocketpaw_ee.cloud.chat.agent_service import current_user_id, current_workspace_id
 
         return current_workspace_id(), current_user_id()
     except Exception:
@@ -79,7 +79,7 @@ def _build_ctx(workspace_id: str, user_id: str):
 
     from datetime import UTC, datetime
 
-    from ee.cloud._core.context import RequestContext, ScopeKind
+    from pocketpaw_ee.cloud._core.context import RequestContext, ScopeKind
 
     return RequestContext(
         user_id=user_id,
@@ -108,9 +108,9 @@ async def _plan_project_handler(args: dict) -> dict:
         return _error_response("goal is required")
 
     try:
-        from ee.cloud._core.errors import CloudError
-        from ee.cloud.planner import service as planner_service
-        from ee.cloud.planner.dto import PlanProjectRequest
+        from pocketpaw_ee.cloud._core.errors import CloudError
+        from pocketpaw_ee.cloud.planner import service as planner_service
+        from pocketpaw_ee.cloud.planner.dto import PlanProjectRequest
     except ImportError as exc:  # pragma: no cover — defensive
         return _error_response(f"planner module not installed: {exc}")
 
