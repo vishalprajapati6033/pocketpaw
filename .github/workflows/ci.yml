@@ -1,12 +1,16 @@
-# CI — runs tests and lint on every PR targeting dev.
+# CI — runs tests and lint on every PR targeting dev/main.
 # Created: 2026-02-26
 # Updated: 2026-03-11 — Added Python version matrix (3.11, 3.12, 3.13) for
 # the test job. Lint job pinned to 3.12 only.
+# Updated: 2026-05-21 — OSS-EE split (Phase 4). `pocketpaw` (OSS core) and
+# `pocketpaw-ee` (enterprise) are now two packages. CI verifies both the
+# OSS-only install and the full (core + EE) install, builds both wheels,
+# and runs the import-linter contracts for each package.
 name: CI
 
 on:
   pull_request:
-    branches: [dev, main]
+    branches: [dev, main, ee]
   push:
     branches: [dev]
 
@@ -37,7 +41,92 @@ jobs:
       - name: Ruff format check
         run: uv run ruff format --check .
 
+  build:
+    name: Build wheels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set Python version
+        run: uv python install 3.12
+
+      # Two wheels: `pocketpaw` (OSS core, only src/pocketpaw) and
+      # `pocketpaw-ee` (only pocketpaw_ee). Fail if either leaks the other.
+      - name: Build core wheel
+        run: uv build --wheel
+
+      - name: Build EE wheel
+        run: cd ee && uv build --wheel
+
+      - name: Assert wheel separation
+        run: |
+          python - <<'PY'
+          import sys, zipfile, glob
+          core = glob.glob("dist/pocketpaw-*.whl")[0]
+          ee = glob.glob("ee/dist/pocketpaw_ee-*.whl")[0]
+          core_names = zipfile.ZipFile(core).namelist()
+          ee_names = zipfile.ZipFile(ee).namelist()
+          bad = []
+          if any(n.startswith("pocketpaw_ee/") for n in core_names):
+              bad.append(f"core wheel {core} contains pocketpaw_ee/")
+          if any(n.startswith("pocketpaw/") for n in ee_names):
+              bad.append(f"ee wheel {ee} contains pocketpaw/")
+          if bad:
+              print("\n".join(bad)); sys.exit(1)
+          print(f"OK: {core} and {ee} are cleanly separated")
+          PY
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels
+          path: |
+            dist/*.whl
+            ee/dist/*.whl
+
+  test-oss:
+    # OSS-only: install just the `pocketpaw` core (no `pocketpaw-ee`) and run
+    # the core test scope. Proves `pip install pocketpaw` is self-sufficient.
+    name: Test (OSS-only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set Python version
+        run: uv python install 3.12
+
+      - name: Install OSS core only
+        run: uv sync --dev
+
+      # Runtime boundary: with pocketpaw_ee absent every reworked core module
+      # must still import and the EE extension registry must degrade to empty.
+      - name: OSS-only import boundary
+        run: uv run python scripts/check_oss_boundary.py
+
+      - name: Run core tests
+        # tests/ee + tests/cloud are EE suites (tests/cloud is also skipped by
+        # the addopts in pyproject.toml). tests/e2e needs Playwright browsers.
+        run: >-
+          uv run pytest tests/
+          --ignore=tests/e2e
+          --ignore=tests/ee
+          --ignore=tests/test_frontend_syntax.py
+          -q --tb=short
+        env:
+          POCKETPAW_LLM_PROVIDER: "ollama"
+          POCKETPAW_OLLAMA_HOST: "http://localhost:11434"
+
   test:
+    # Full install: OSS core + the `pocketpaw-ee` enterprise package. Runs the
+    # complete (non-e2e) suite, including tests/ee.
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
@@ -54,16 +143,20 @@ jobs:
       - name: Set Python version
         run: uv python install ${{ matrix.python-version }}
 
-      - name: Install dependencies
-        run: uv sync --dev
+      - name: Install core + enterprise
+        run: uv sync --dev --group ee
 
       - name: Run tests
-        run: uv run pytest tests/ --ignore=tests/e2e --ignore=tests/test_frontend_syntax.py -x -q --tb=short
+        run: >-
+          uv run pytest tests/
+          --ignore=tests/e2e
+          --ignore=tests/test_frontend_syntax.py
+          -x -q --tb=short
         env:
           POCKETPAW_LLM_PROVIDER: "ollama"
           POCKETPAW_OLLAMA_HOST: "http://localhost:11434"
 
-  oss-ee-boundary:
+  import-linter:
     name: OSS-EE boundary
     runs-on: ubuntu-latest
     steps:
@@ -76,16 +169,16 @@ jobs:
       - name: Set Python version
         run: uv python install 3.12
 
-      - name: Install dependencies
-        run: uv sync --dev
+      # The root contract ("OSS core may not import from EE") references the
+      # `pocketpaw_ee` package, so it must be importable — install both.
+      - name: Install core + enterprise
+        run: uv sync --dev --group ee
 
-      # Static: the OSS core package `pocketpaw` must never import from the
-      # enterprise package `pocketpaw_ee` (import-linter forbidden contract).
-      - name: import-linter contracts
+      # Root pyproject.toml: the OSS-EE boundary contract.
+      - name: import-linter (core)
         run: uv run lint-imports
 
-      # Runtime: with pocketpaw_ee blocked (as on an OSS-only install) every
-      # reworked core module must still import and the extension registry
-      # must degrade to empty.
-      - name: OSS-only import boundary
-        run: uv run python scripts/check_oss_boundary.py
+      # ee/pyproject.toml: the cloud Beanie-chokepoint contracts. Run from the
+      # repo root (where import-linter is installed) against the EE config.
+      - name: import-linter (enterprise)
+        run: uv run lint-imports --config ee/pyproject.toml
