@@ -91,7 +91,7 @@ async def _list_pockets_handler(args: dict) -> dict:
 async def _get_widget_spec_handler(args: dict) -> dict:
     """Fetch the manifest, filter to requested widget types, and return a
     formatted markdown reference. Backs the ``get_widget_spec`` MCP tool."""
-    from pocketpaw_ee.ripple.manifest import format_for_prompt, get_manifest
+    from pocketpaw.ripple.manifest import format_for_prompt, get_manifest
 
     from pocketpaw.config import get_settings
 
@@ -153,7 +153,7 @@ async def _get_inline_widget_help_handler(args: dict) -> dict:
              (e.g. ["chart", "sparkline"]). Empty / missing → full
              catalog (rare — agent generally knows what it wants).
     """
-    from pocketpaw_ee.ripple._inline_core import widget_help
+    from pocketpaw.ripple._inline_core import widget_help
 
     types = args.get("types") or []
     if not isinstance(types, list):

@@ -12,7 +12,7 @@ from pocketpaw_ee.cloud.chat.agent_service import (
     build_context_block,
     build_knowledge_context,
 )
-from pocketpaw_ee.ripple._design import RIPPLE_DESIGN_RULES
+from pocketpaw.ripple._design import RIPPLE_DESIGN_RULES
 
 
 def _pocket_ctx(specs: list[dict]) -> ScopeContext:
@@ -154,7 +154,7 @@ def test_build_context_block_has_stable_static_prefix():
 
 
 def test_inline_widget_help_returns_catalog_for_known_types():
-    from pocketpaw_ee.ripple._inline_core import widget_help
+    from pocketpaw.ripple._inline_core import widget_help
 
     out = widget_help(["chart"])
     # Some chart specifics must appear when 'chart' is asked for.
@@ -177,7 +177,7 @@ def test_inline_widget_help_returns_catalog_for_known_types():
 
 
 def test_inline_widget_help_no_args_returns_full_catalog():
-    from pocketpaw_ee.ripple._inline_core import widget_help
+    from pocketpaw.ripple._inline_core import widget_help
 
     assert widget_help() == RIPPLE_DESIGN_RULES
     assert widget_help([]) == RIPPLE_DESIGN_RULES
@@ -214,7 +214,7 @@ def test_pocket_delegation_rule_points_at_specialist_mcp_tool():
     """The delegation rule must teach the agent to call the
     ``pocket_specialist__create`` MCP tool. The legacy native-subagent
     Agent-tool path has been removed."""
-    from pocketpaw_ee.ripple._pockets import POCKET_DELEGATION_RULE
+    from pocketpaw.ripple._pockets import POCKET_DELEGATION_RULE
 
     assert "pocket_specialist__create" in POCKET_DELEGATION_RULE
     # Legacy native-subagent kwarg shape must be gone.

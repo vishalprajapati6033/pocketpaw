@@ -10,7 +10,7 @@ they edit existing pockets directly.
 from __future__ import annotations
 
 import pytest
-from pocketpaw_ee.ripple._pockets import (
+from pocketpaw.ripple._pockets import (
     POCKET_INTERACTION_PROMPT_CLI,
     POCKET_INTERACTION_PROMPT_MCP,
     POCKET_SPECIALIST_PROMPT,

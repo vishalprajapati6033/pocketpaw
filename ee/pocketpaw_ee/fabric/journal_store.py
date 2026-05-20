@@ -52,7 +52,7 @@ class FabricJournalStore:
 
     Typical wiring:
 
-        from pocketpaw_ee.journal_dep import get_journal
+        from pocketpaw.journal_dep import get_journal
         journal = get_journal()
         store = FabricJournalStore(journal)
         store.bootstrap()

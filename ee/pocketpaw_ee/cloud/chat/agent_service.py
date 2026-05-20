@@ -20,13 +20,13 @@ from enum import StrEnum
 from typing import Any
 
 from pocketpaw_ee.cloud.shared.errors import CloudError, NotFound
-from pocketpaw_ee.ripple import (
+from pocketpaw.ripple import (
     INLINE_RIPPLE_SYSTEM_PROMPT,
     POCKET_DELEGATION_RULE,
     POCKET_ID_TOKEN,
     get_pocket_prompts,
 )
-from pocketpaw_ee.ripple._pockets import _MCP_POCKET_BACKENDS
+from pocketpaw.ripple._pockets import _MCP_POCKET_BACKENDS
 
 logger = logging.getLogger(__name__)
 

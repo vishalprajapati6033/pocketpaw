@@ -23,9 +23,9 @@
 
 from __future__ import annotations
 
-from pocketpaw_ee.ripple._design import RIPPLE_DESIGN_RULES
-from pocketpaw_ee.ripple._inline import INLINE_RIPPLE_SYSTEM_PROMPT
-from pocketpaw_ee.ripple._pockets import (
+from pocketpaw.ripple._design import RIPPLE_DESIGN_RULES
+from pocketpaw.ripple._inline import INLINE_RIPPLE_SYSTEM_PROMPT
+from pocketpaw.ripple._pockets import (
     POCKET_CREATION_PROMPT,
     POCKET_CREATION_PROMPT_CLI,
     POCKET_CREATION_PROMPT_MCP,

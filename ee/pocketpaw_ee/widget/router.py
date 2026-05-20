@@ -47,7 +47,7 @@ from pydantic import BaseModel, Field
 from soul_protocol.engine.journal import Journal
 from soul_protocol.spec.journal import Actor
 
-from pocketpaw_ee.journal_dep import get_journal
+from pocketpaw.journal_dep import get_journal
 from pocketpaw_ee.widget.policy import (
     DEFAULT_ARCHIVE_DAYS,
     DEFAULT_COOCCURRENCE_THRESHOLD,

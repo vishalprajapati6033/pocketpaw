@@ -132,7 +132,7 @@ class TestMCPSchemaAdvertisesHandoff:
 
 class TestParentPromptEditDecisionTree:
     def test_parent_prompt_has_decision_tree(self) -> None:
-        from pocketpaw_ee.ripple._pockets import POCKET_INTERACTION_PROMPT_MCP
+        from pocketpaw.ripple._pockets import POCKET_INTERACTION_PROMPT_MCP
 
         assert "EDIT DECISION TREE" in POCKET_INTERACTION_PROMPT_MCP
         # Three explicit branches:
@@ -141,33 +141,33 @@ class TestParentPromptEditDecisionTree:
         assert "Type C" in POCKET_INTERACTION_PROMPT_MCP
 
     def test_parent_prompt_mentions_target_node_ids(self) -> None:
-        from pocketpaw_ee.ripple._pockets import POCKET_INTERACTION_PROMPT_MCP
+        from pocketpaw.ripple._pockets import POCKET_INTERACTION_PROMPT_MCP
 
         assert "target_node_ids" in POCKET_INTERACTION_PROMPT_MCP
 
     def test_parent_prompt_shows_concrete_rich_edit_call(self) -> None:
         """The parent should see a worked example of an edit call with
         all four fields (pocket_id, intent, pocket, target_node_ids)."""
-        from pocketpaw_ee.ripple._pockets import POCKET_INTERACTION_PROMPT_MCP
+        from pocketpaw.ripple._pockets import POCKET_INTERACTION_PROMPT_MCP
 
         for field in ("pocket_id", "intent", "pocket", "target_node_ids"):
             assert f'"{field}"' in POCKET_INTERACTION_PROMPT_MCP
 
     def test_parent_prompt_caps_disambiguation_questions(self) -> None:
-        from pocketpaw_ee.ripple._pockets import POCKET_INTERACTION_PROMPT_MCP
+        from pocketpaw.ripple._pockets import POCKET_INTERACTION_PROMPT_MCP
 
         assert "NEVER ask more than 1 disambiguation question" in POCKET_INTERACTION_PROMPT_MCP
 
 
 class TestSpecialistPromptHandoffRules:
     def test_specialist_prompt_teaches_skip_read_when_pocket_passed(self) -> None:
-        from pocketpaw_ee.ripple._pockets import POCKET_EDIT_SPECIALIST_PROMPT_MCP
+        from pocketpaw.ripple._pockets import POCKET_EDIT_SPECIALIST_PROMPT_MCP
 
         assert "<parent-handoff>" in POCKET_EDIT_SPECIALIST_PROMPT_MCP
         assert "SKIP your own `get_pocket`" in POCKET_EDIT_SPECIALIST_PROMPT_MCP
 
     def test_specialist_prompt_teaches_target_node_ids_authoritative(self) -> None:
-        from pocketpaw_ee.ripple._pockets import POCKET_EDIT_SPECIALIST_PROMPT_MCP
+        from pocketpaw.ripple._pockets import POCKET_EDIT_SPECIALIST_PROMPT_MCP
 
         # Authoritative — don't search past the parent's lookup.
         assert "TARGET NODE IDS" in POCKET_EDIT_SPECIALIST_PROMPT_MCP

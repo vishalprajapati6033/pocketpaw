@@ -51,7 +51,7 @@ from pocketpaw_ee.fleet import (
     list_bundled_fleets,
     load_fleet,
 )
-from pocketpaw_ee.journal_dep import get_journal
+from pocketpaw.journal_dep import get_journal
 
 logger = logging.getLogger(__name__)
 

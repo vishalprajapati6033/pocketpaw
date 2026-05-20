@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from soul_protocol.engine.journal import Journal
 
-from pocketpaw_ee.journal_dep import get_journal
+from pocketpaw.journal_dep import get_journal
 from pocketpaw_ee.retrieval.policy import (
     DEFAULT_EPISODIC_THRESHOLD,
     DEFAULT_SEMANTIC_THRESHOLD,

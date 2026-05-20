@@ -14,7 +14,7 @@ input-token cost and latency 10x on warm turns.
 from __future__ import annotations
 
 import pytest
-from pocketpaw_ee.ripple import (
+from pocketpaw.ripple import (
     POCKET_EDIT_SPECIALIST_PROMPT_CLI,
     POCKET_EDIT_SPECIALIST_PROMPT_MCP,
     POCKET_ID_TOKEN,

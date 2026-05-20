@@ -222,7 +222,7 @@ class TestPromptSeparation:
         """Main agent's prompt should be the delegation variant —
         scope + canvas + delegation + current-pocket. No design rules,
         no mutation-strategy block."""
-        from pocketpaw_ee.ripple import POCKET_INTERACTION_PROMPT_MCP
+        from pocketpaw.ripple import POCKET_INTERACTION_PROMPT_MCP
 
         # Heavy blocks must be absent:
         assert "<mutation-strategy>" not in POCKET_INTERACTION_PROMPT_MCP
@@ -235,11 +235,11 @@ class TestPromptSeparation:
     def test_edit_specialist_prompt_is_heavy(self) -> None:
         """The specialist's prompt MUST carry the full mutation rules
         + design block — it's the agent actually doing edits."""
-        from pocketpaw_ee.ripple import POCKET_EDIT_SPECIALIST_PROMPT_MCP
+        from pocketpaw.ripple import POCKET_EDIT_SPECIALIST_PROMPT_MCP
 
         assert "<mutation-strategy>" in POCKET_EDIT_SPECIALIST_PROMPT_MCP
         # Should be substantially larger than the main agent's prompt.
-        from pocketpaw_ee.ripple import POCKET_INTERACTION_PROMPT_MCP
+        from pocketpaw.ripple import POCKET_INTERACTION_PROMPT_MCP
 
         assert len(POCKET_EDIT_SPECIALIST_PROMPT_MCP) > len(POCKET_INTERACTION_PROMPT_MCP) * 5, (
             "edit specialist prompt should dwarf the thin main-agent prompt"

@@ -22,7 +22,7 @@ from pocketpaw_ee.agent.pocket_specialist.tools import (
     make_edit_pocket_tools,
     make_persist_pocket_tool,
 )
-from pocketpaw_ee.ripple._pockets import (
+from pocketpaw.ripple._pockets import (
     POCKET_EDIT_SPECIALIST_PROMPT_MCP,
     POCKET_ID_TOKEN,
     POCKET_SPECIALIST_PROMPT,

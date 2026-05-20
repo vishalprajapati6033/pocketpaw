@@ -42,7 +42,7 @@ VALID_MANIFEST = {
 
 @pytest.fixture(autouse=True)
 def _clear_manifest_cache():
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     m._cache.clear()
     yield
@@ -50,7 +50,7 @@ def _clear_manifest_cache():
 
 
 async def test_fetch_success(monkeypatch):
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     async def fake_get(self, url, timeout):
         return httpx.Response(200, json=VALID_MANIFEST, request=httpx.Request("GET", url))
@@ -63,7 +63,7 @@ async def test_fetch_success(monkeypatch):
 
 
 async def test_cache_hit_avoids_second_fetch(monkeypatch):
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     calls = {"n": 0}
 
@@ -78,7 +78,7 @@ async def test_cache_hit_avoids_second_fetch(monkeypatch):
 
 
 async def test_cache_expiry_triggers_refetch(monkeypatch):
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     calls = {"n": 0}
 
@@ -94,7 +94,7 @@ async def test_cache_expiry_triggers_refetch(monkeypatch):
 
 
 async def test_fetch_timeout_returns_none(monkeypatch):
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     async def fake_get(self, url, timeout):
         raise httpx.TimeoutException("simulated timeout")
@@ -105,7 +105,7 @@ async def test_fetch_timeout_returns_none(monkeypatch):
 
 
 async def test_fetch_4xx_returns_none(monkeypatch):
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     async def fake_get(self, url, timeout):
         return httpx.Response(404, text="not found", request=httpx.Request("GET", url))
@@ -116,7 +116,7 @@ async def test_fetch_4xx_returns_none(monkeypatch):
 
 
 async def test_malformed_json_returns_none(monkeypatch):
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     async def fake_get(self, url, timeout):
         return httpx.Response(200, text="not json", request=httpx.Request("GET", url))
@@ -127,7 +127,7 @@ async def test_malformed_json_returns_none(monkeypatch):
 
 
 async def test_schema_mismatch_returns_none(monkeypatch):
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     bad = {"schema": "ripple.manifest/v2", "version": "1", "widgets": []}
 
@@ -140,7 +140,7 @@ async def test_schema_mismatch_returns_none(monkeypatch):
 
 
 async def test_missing_widgets_field_returns_none(monkeypatch):
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     bad = {"schema": "ripple.manifest/v1", "version": "1"}
 
@@ -153,7 +153,7 @@ async def test_missing_widgets_field_returns_none(monkeypatch):
 
 
 def test_format_for_prompt_renders_widgets():
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     block = m.format_for_prompt(VALID_MANIFEST)
     assert "<ripple-widget-reference>" in block
@@ -163,7 +163,7 @@ def test_format_for_prompt_renders_widgets():
 
 
 def test_format_for_prompt_empty_widgets_returns_empty_string():
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     empty = {"schema": "ripple.manifest/v1", "version": "1", "widgets": []}
     assert m.format_for_prompt(empty) == ""
@@ -172,7 +172,7 @@ def test_format_for_prompt_empty_widgets_returns_empty_string():
 async def test_get_widget_spec_handler_returns_matched_entries(monkeypatch):
     """The get_widget_spec MCP tool returns a formatted reference for the
     requested types, sourced from the manifest."""
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     from pocketpaw.agents.sdk_mcp_pocket import _get_widget_spec_handler
 
@@ -199,7 +199,7 @@ async def test_get_widget_spec_handler_errors_on_empty_types():
 
 
 async def test_get_widget_spec_handler_errors_on_unknown_only(monkeypatch):
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     from pocketpaw.agents.sdk_mcp_pocket import _get_widget_spec_handler
 
@@ -215,7 +215,7 @@ async def test_get_widget_spec_handler_errors_on_unknown_only(monkeypatch):
 
 
 async def test_get_widget_spec_handler_partial_match_includes_warning(monkeypatch):
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     from pocketpaw.agents.sdk_mcp_pocket import _get_widget_spec_handler
 
@@ -237,7 +237,7 @@ async def test_format_for_prompt_renders_envelope_before_widgets():
     """The envelope contract must lead the prompt so the agent anchors
     `ui` before reading per-widget examples. If the catalog comes first,
     an LLM scanning examples might infer the wrong top-level shape."""
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     out = m.format_for_prompt(VALID_MANIFEST)
     assert "Spec envelope" in out
@@ -255,7 +255,7 @@ async def test_format_for_prompt_renders_envelope_before_widgets():
 async def test_format_for_prompt_handles_legacy_manifest_without_envelope():
     """Older manifests (pre-spec-envelope) must still render — the
     envelope section is skipped, the widget catalog still appears."""
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     legacy = {**VALID_MANIFEST}
     del legacy["spec"]
@@ -267,7 +267,7 @@ async def test_format_for_prompt_handles_legacy_manifest_without_envelope():
 
 
 async def test_get_widget_spec_handler_errors_when_manifest_unavailable(monkeypatch):
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     from pocketpaw.agents.sdk_mcp_pocket import _get_widget_spec_handler
 
@@ -315,7 +315,7 @@ VALIDATE_MANIFEST = {
 
 
 def test_validate_returns_empty_for_non_dict_spec():
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     assert m.validate_against_manifest(None, VALIDATE_MANIFEST) == []
     assert m.validate_against_manifest("not a dict", VALIDATE_MANIFEST) == []  # type: ignore[arg-type]
@@ -323,7 +323,7 @@ def test_validate_returns_empty_for_non_dict_spec():
 
 
 def test_validate_clean_spec_yields_no_issues():
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     spec = {
         "ui": {
@@ -338,7 +338,7 @@ def test_validate_clean_spec_yields_no_issues():
 
 
 def test_validate_flags_unknown_top_level_props():
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     spec = {
         "ui": {
@@ -357,7 +357,7 @@ def test_validate_timeline_drift_warns_without_apply():
     """Production drift: timeline events emitted with `description` instead
     of the manifest's `detail`. apply_aliases=False just reports — the
     spec is NOT mutated."""
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     spec = {
         "ui": {
@@ -385,7 +385,7 @@ def test_validate_timeline_drift_warns_without_apply():
 
 def test_validate_timeline_description_alias_rewrites():
     """timeline.events[].description -> .detail is a clean rename."""
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     spec = {
         "ui": {
@@ -406,7 +406,7 @@ def test_validate_timeline_description_alias_rewrites():
 def test_validate_does_not_overwrite_existing_canonical_key():
     """If the agent already emitted the right key alongside the wrong one,
     keep the right one — never clobber correct data with the alias."""
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     spec = {
         "ui": {
@@ -429,7 +429,7 @@ def test_validate_does_not_overwrite_existing_canonical_key():
 def test_validate_walks_nested_children():
     """The drift node is buried inside a deep tree. Validator must
     recurse through `children`."""
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     spec = {
         "ui": {
@@ -459,7 +459,7 @@ def test_validate_walks_nested_children():
 def test_validate_accepts_bare_node_without_envelope():
     """Older specs / inline-Ripple specs sometimes pass a bare UI node
     without the {ui: ...} envelope. The walker should still descend."""
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     bare = {
         "type": "timeline",
@@ -473,7 +473,7 @@ def test_validate_accepts_bare_node_without_envelope():
 def test_validate_unknown_widget_type_is_ignored():
     """A node whose `type` isn't in the manifest (custom widget, or stale
     catalog) shouldn't crash validation — we only validate what we know."""
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     spec = {"ui": {"type": "custom-thing", "props": {"foo": "bar"}}}
     assert m.validate_against_manifest(spec, VALIDATE_MANIFEST) == []
@@ -489,7 +489,7 @@ async def test_agent_context_validator_mutates_spec_in_place(monkeypatch):
     runs with apply_aliases=True and rewrites known drift before the
     pocket reaches the service layer."""
     from pocketpaw_ee.cloud.pockets import agent_context
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     async def fake_get(self, url, timeout):
         return httpx.Response(200, json=VALIDATE_MANIFEST, request=httpx.Request("GET", url))
@@ -512,7 +512,7 @@ async def test_agent_context_validator_skips_when_manifest_unavailable(monkeypat
     """Manifest fetch failure is non-fatal — the spec passes through
     untouched and the write proceeds."""
     from pocketpaw_ee.cloud.pockets import agent_context
-    from pocketpaw_ee.ripple import manifest as m
+    from pocketpaw.ripple import manifest as m
 
     async def fake_get(self, url, timeout):
         raise httpx.TimeoutException("network down")

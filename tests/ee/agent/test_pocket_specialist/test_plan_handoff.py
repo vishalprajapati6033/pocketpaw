@@ -159,7 +159,7 @@ class TestMCPSchemaAdvertisesPlan:
 
 class TestParentPromptTeachesTwoPhase:
     def test_creation_prompt_mentions_two_phase_flow(self) -> None:
-        from pocketpaw_ee.ripple._pockets import POCKET_CREATION_PROMPT_MCP
+        from pocketpaw.ripple._pockets import POCKET_CREATION_PROMPT_MCP
 
         # Pre-delegation thinking block is the marquee change.
         assert "TWO-PHASE DELEGATION" in POCKET_CREATION_PROMPT_MCP
@@ -169,7 +169,7 @@ class TestParentPromptTeachesTwoPhase:
 
     def test_creation_prompt_lists_layout_menu(self) -> None:
         """The parent must see the layout menu so it can pick."""
-        from pocketpaw_ee.ripple._pockets import POCKET_CREATION_PROMPT_MCP
+        from pocketpaw.ripple._pockets import POCKET_CREATION_PROMPT_MCP
 
         for layout in (
             "hero+grid",
@@ -185,14 +185,14 @@ class TestParentPromptTeachesTwoPhase:
     def test_creation_prompt_shows_concrete_rich_hints_example(self) -> None:
         """A concrete example of a rich hints object — the model copies
         what it sees, so the example must show plan fields filled in."""
-        from pocketpaw_ee.ripple._pockets import POCKET_CREATION_PROMPT_MCP
+        from pocketpaw.ripple._pockets import POCKET_CREATION_PROMPT_MCP
 
         for field in ("layout", "focal_widget", "data_shape", "key_interactions"):
             assert f'"{field}"' in POCKET_CREATION_PROMPT_MCP
 
     def test_creation_prompt_caps_clarifying_questions(self) -> None:
         """Don't grill the user — 2 questions max."""
-        from pocketpaw_ee.ripple._pockets import POCKET_CREATION_PROMPT_MCP
+        from pocketpaw.ripple._pockets import POCKET_CREATION_PROMPT_MCP
 
         assert (
             "2 questions total" in POCKET_CREATION_PROMPT_MCP
@@ -203,14 +203,14 @@ class TestParentPromptTeachesTwoPhase:
     def test_creation_prompt_keeps_bare_brief_backwards_compat(self) -> None:
         """A user with no plan must still be able to call __create
         with just `brief`."""
-        from pocketpaw_ee.ripple._pockets import POCKET_CREATION_PROMPT_MCP
+        from pocketpaw.ripple._pockets import POCKET_CREATION_PROMPT_MCP
 
         assert "Backwards-compat" in POCKET_CREATION_PROMPT_MCP
 
 
 class TestSpecialistPromptFollowsPlan:
     def test_specialist_prompt_says_follow_plan_dont_redesign(self) -> None:
-        from pocketpaw_ee.ripple._pockets import POCKET_SPECIALIST_PROMPT
+        from pocketpaw.ripple._pockets import POCKET_SPECIALIST_PROMPT
 
         assert "FOLLOW THE PLAN" in POCKET_SPECIALIST_PROMPT
         assert (
@@ -220,7 +220,7 @@ class TestSpecialistPromptFollowsPlan:
         assert "faithful translation" in POCKET_SPECIALIST_PROMPT
 
     def test_specialist_prompt_lists_plan_fields_to_follow(self) -> None:
-        from pocketpaw_ee.ripple._pockets import POCKET_SPECIALIST_PROMPT
+        from pocketpaw.ripple._pockets import POCKET_SPECIALIST_PROMPT
 
         for field in (
             "hints.layout",

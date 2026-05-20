@@ -44,7 +44,7 @@ class RetrievalJournalStore:
 
     Wiring:
 
-        from pocketpaw_ee.journal_dep import get_journal
+        from pocketpaw.journal_dep import get_journal
         journal = get_journal()
         store = RetrievalJournalStore(journal)
         store.bootstrap()

@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from pocketpaw_ee.ripple._design import RIPPLE_DESIGN_RULES
+from pocketpaw.ripple._design import RIPPLE_DESIGN_RULES
 
 
 def widget_help(types: list[str] | None = None) -> str:

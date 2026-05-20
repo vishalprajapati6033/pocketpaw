@@ -28,7 +28,7 @@ from pocketpaw_ee.cloud.pockets.journal_stream_router import (
     router,
 )
 from pocketpaw_ee.cloud.shared.deps import require_pocket_edit
-from pocketpaw_ee.journal_dep import get_journal, reset_journal_cache
+from pocketpaw.journal_dep import get_journal, reset_journal_cache
 from soul_protocol.engine.journal import open_journal
 from soul_protocol.spec.journal import Actor, EventEntry
 

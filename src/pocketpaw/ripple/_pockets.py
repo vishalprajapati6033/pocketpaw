@@ -40,7 +40,7 @@
 
 from __future__ import annotations
 
-from pocketpaw_ee.ripple._design import RIPPLE_DESIGN_RULES
+from pocketpaw.ripple._design import RIPPLE_DESIGN_RULES
 
 POCKET_ID_TOKEN = "__POCKET_ID__"
 

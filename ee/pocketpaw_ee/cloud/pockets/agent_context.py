@@ -76,7 +76,7 @@ async def _validate_ripple_spec(ripple_spec: dict[str, Any] | None) -> list[dict
         return []
     try:
         from pocketpaw.config import get_settings
-        from pocketpaw_ee.ripple.manifest import get_manifest, validate_against_manifest
+        from pocketpaw.ripple.manifest import get_manifest, validate_against_manifest
 
         settings = get_settings()
         manifest = await get_manifest(

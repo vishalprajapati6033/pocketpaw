@@ -38,7 +38,7 @@ from uuid import uuid4
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pocketpaw_ee.journal_dep import get_journal, reset_journal_cache
+from pocketpaw.journal_dep import get_journal, reset_journal_cache
 from pocketpaw_ee.widget.events import (
     ACTION_WIDGET_COOCCURRENCE_DETECTED,
     ACTION_WIDGET_GRADUATED,
