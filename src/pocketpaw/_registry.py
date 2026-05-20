@@ -15,14 +15,12 @@ Usage::
 
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import cache
 from importlib.metadata import entry_points
 from typing import Any
 
-_log_once: set[str] = set()
 
-
-@lru_cache(maxsize=None)
+@cache
 def providers(group: str) -> tuple[Any, ...]:
     """Return instantiated providers for *group*, cached for the process.
 
