@@ -62,3 +62,30 @@ jobs:
         env:
           POCKETPAW_LLM_PROVIDER: "ollama"
           POCKETPAW_OLLAMA_HOST: "http://localhost:11434"
+
+  oss-ee-boundary:
+    name: OSS-EE boundary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set Python version
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      # Static: the OSS core package `pocketpaw` must never import from the
+      # enterprise package `pocketpaw_ee` (import-linter forbidden contract).
+      - name: import-linter contracts
+        run: uv run lint-imports
+
+      # Runtime: with pocketpaw_ee blocked (as on an OSS-only install) every
+      # reworked core module must still import and the extension registry
+      # must degrade to empty.
+      - name: OSS-only import boundary
+        run: uv run python scripts/check_oss_boundary.py

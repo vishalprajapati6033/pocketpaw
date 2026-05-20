@@ -45,7 +45,15 @@ except the documented `tools/cli.py` admin-CLI exception. Add the
 
 ## Enforcement
 
-- `import-linter` `forbidden` contract: `pocketpaw` may not import `pocketpaw_ee`,
-  with a single documented `ignore_imports` for `pocketpaw.tools.cli`.
-- New CI job: build/install core with no `pocketpaw_ee` on disk; run the OSS
-  test subset; assert `import pocketpaw_ee` fails.
+- `import-linter` `forbidden` contract `OSS core may not import from EE`:
+  `pocketpaw` may not statically import `pocketpaw_ee`, with documented
+  `ignore_imports` for the `pocketpaw.tools.cli` admin-CLI exception.
+- New CI job `oss-ee-boundary` (`.github/workflows/ci.yml`): runs
+  `lint-imports` (static) plus `scripts/check_oss_boundary.py` — which blocks
+  `pocketpaw_ee` at runtime and asserts every reworked core module still
+  imports and the extension registry degrades to empty.
+- The full standalone OSS-only *package build* (install `pocketpaw` with no
+  `pocketpaw_ee` on disk at all) is deferred to Phase 4: it depends on the
+  `pyproject.toml` split (`ee/pyproject.toml`), which Phase 4 performs. Doing
+  it before that split would need a fragile file-copy hack; the import-linter
+  contract + runtime boundary check already enforce the split.
