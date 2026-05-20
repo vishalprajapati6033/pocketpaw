@@ -1,16 +1,16 @@
-# Tests for cloud user + workspace threading through the agent loop
+# Tests for cloud user + workspace threading through the agent
 # pocket-creation path.
 # Created: 2026-04-22
-#
-# Covers ``_create_pocket_and_session`` and ``_publish_pocket_event``
-# in ``src/pocketpaw/agents/loop.py``. The module imports ee.cloud
-# models inside the function bodies, so we stub out the ``ee.cloud``
-# namespace via ``sys.modules`` before the call hits the import.
+# Updated: 2026-05-20 — OSS-EE split (Phase 3b). The user/workspace
+#   resolution logic moved out of ``src/pocketpaw/agents/loop.py`` into
+#   ``pocketpaw_ee.cloud.pockets.service.create_pocket_and_session``;
+#   ``loop._create_pocket_and_session`` is now a thin provider shim. The
+#   resolution tests below target the service function directly; the
+#   ``_publish_pocket_event`` tests still cover the core loop shim.
 
 from __future__ import annotations
 
-import sys
-import types
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -18,13 +18,16 @@ import pytest
 
 
 def _install_ee_cloud_stubs(monkeypatch, *, user, workspace_by_id=None, create_ret=None):
-    """Install fake ee.cloud.* modules so the loop's lazy imports resolve
-    without spinning up Mongo.
+    """Patch the cloud model classes + ``create()`` service call that
+    ``create_pocket_and_session`` reaches, so the resolution heuristics run
+    without Mongo.
 
     ``workspace_by_id`` is a dict ``{oid_str: workspace_or_None}`` consulted
     by the stub ``Workspace.get`` — lets individual tests control whether
     the active_workspace lookup hits or misses.
     """
+    from pocketpaw_ee.cloud.pockets import service as pockets_service
+
     workspace_by_id = workspace_by_id or {}
 
     # ── Fake User/Workspace/Session documents ──────────────────────────
@@ -39,27 +42,22 @@ def _install_ee_cloud_stubs(monkeypatch, *, user, workspace_by_id=None, create_r
     # first-owned / any-workspace fallbacks
     find_owned_ws = AsyncMock(return_value=None)
 
-    fake_user_mod = types.ModuleType("pocketpaw_ee.cloud.models.user")
-    fake_user_mod.User = SimpleNamespace(get=get_user, find_one=find_user)
-
-    fake_ws_mod = types.ModuleType("pocketpaw_ee.cloud.models.workspace")
+    fake_user = SimpleNamespace(get=get_user, find_one=find_user)
 
     class _WorkspaceStub:
-        # Mimic the Beanie Document constants used in the loop call
-        # (``Workspace.owner == user_id`` — evaluating at import time).
+        # Mimic the Beanie Document constant used in the call
+        # (``Workspace.owner == user_id`` — evaluating at call time).
         owner = "owner"  # placeholder; find_one mock ignores the value
 
     _WorkspaceStub.get = get_ws
     _WorkspaceStub.find_one = find_owned_ws
-    fake_ws_mod.Workspace = _WorkspaceStub
 
-    fake_session_mod = types.ModuleType("pocketpaw_ee.cloud.models.session")
-    # Session(...) is instantiated inside the loop — return a spy instance.
+    # Session(...) is instantiated inside the service — return a spy instance.
     session_insert = AsyncMock()
 
     class _SessionDoc:
-        # The loop does ``Session.find_one(Session.sessionId == safe_key)``,
-        # so ``sessionId`` has to resolve to *something* that supports ``==``.
+        # ``Session.find_one(Session.sessionId == safe_key)`` — ``sessionId``
+        # has to resolve to *something* that supports ``==``.
         sessionId = "sessionId"  # placeholder — find_one ignores the value
 
         def __init__(self, **kwargs):
@@ -72,50 +70,22 @@ def _install_ee_cloud_stubs(monkeypatch, *, user, workspace_by_id=None, create_r
             pass
 
     _SessionDoc.find_one = AsyncMock(return_value=None)  # type: ignore[attr-defined]
-    fake_session_mod.Session = _SessionDoc
 
-    # pockets_service.create(...) — returns the created pocket doc.
-    # 2026-05-12 rebase: the production code now imports
-    # ``from ee.cloud.pockets.dto import CreatePocketRequest`` (was
-    # ``.schemas``) and calls ``pockets_service.create(workspace_id,
-    # user_id, body)`` as a module-level function (was
-    # ``PocketService.create``). Stubs updated to match.
+    # create(workspace_id, user_id, body) — the same-module pocket-create
+    # service function create_pocket_and_session delegates to.
     pocket_create = AsyncMock(return_value=create_ret or {"_id": "pocket-xyz"})
-    fake_pockets_dto = types.ModuleType("pocketpaw_ee.cloud.pockets.dto")
 
-    class _CreatePocketRequest:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-    fake_pockets_dto.CreatePocketRequest = _CreatePocketRequest
-
-    fake_pockets_service = types.ModuleType("pocketpaw_ee.cloud.pockets.service")
-    fake_pockets_service.create = pocket_create
-
-    # PydanticObjectId(oid) — just return the string, the stub get/find
-    # operations don't care about the real type.
-    fake_beanie = types.ModuleType("beanie")
-    fake_beanie.PydanticObjectId = lambda s: s  # type: ignore[assignment]
-
-    # Install stubs
-    for name, mod in {
-        "pocketpaw_ee": types.ModuleType("pocketpaw_ee"),
-        "pocketpaw_ee.cloud": types.ModuleType("pocketpaw_ee.cloud"),
-        "pocketpaw_ee.cloud.models": types.ModuleType("pocketpaw_ee.cloud.models"),
-        "pocketpaw_ee.cloud.models.user": fake_user_mod,
-        "pocketpaw_ee.cloud.models.workspace": fake_ws_mod,
-        "pocketpaw_ee.cloud.models.session": fake_session_mod,
-        "pocketpaw_ee.cloud.pockets": types.ModuleType("pocketpaw_ee.cloud.pockets"),
-        "pocketpaw_ee.cloud.pockets.dto": fake_pockets_dto,
-        "pocketpaw_ee.cloud.pockets.service": fake_pockets_service,
-    }.items():
-        monkeypatch.setitem(sys.modules, name, mod)
-
-    # beanie may or may not already be importable — ensure PydanticObjectId
-    # is a callable that doesn't choke on strings like "not-an-oid".
-    monkeypatch.setitem(sys.modules, "beanie", fake_beanie)
+    # Patch exactly what create_pocket_and_session reaches: the lazily
+    # imported model classes, the same-module create() service fn, and
+    # PydanticObjectId (the real one rejects the non-ObjectId test ids).
+    monkeypatch.setattr("pocketpaw_ee.cloud.models.user.User", fake_user)
+    monkeypatch.setattr("pocketpaw_ee.cloud.models.workspace.Workspace", _WorkspaceStub)
+    monkeypatch.setattr("pocketpaw_ee.cloud.models.session.Session", _SessionDoc)
+    monkeypatch.setattr(pockets_service, "create", pocket_create)
+    monkeypatch.setattr(pockets_service, "PydanticObjectId", lambda s: s)
 
     return SimpleNamespace(
+        service=pockets_service,
         pocket_create=pocket_create,
         find_user=find_user,
         get_user=get_user,
@@ -135,10 +105,8 @@ def _mk_workspace(ws_id):
 
 @pytest.mark.asyncio
 async def test_explicit_user_and_workspace_are_used(monkeypatch):
-    """When cloud_user_id + cloud_workspace_id are passed, the pocket is
-    created against exactly those ids — no find_one fallback."""
-    from pocketpaw.agents import loop as loop_mod
-
+    """When user_id + workspace_id are passed, the pocket is created against
+    exactly those ids — no find_one fallback."""
     user = _mk_user(user_id="u-alice", active_workspace="ws-stale")
     ws_active = _mk_workspace("ws-active")
 
@@ -148,9 +116,9 @@ async def test_explicit_user_and_workspace_are_used(monkeypatch):
         workspace_by_id={"ws-active": ws_active},
     )
 
-    result = await loop_mod._create_pocket_and_session(
-        spec={"title": "Dashboard", "metadata": {"category": "custom"}},
-        session_key="websocket:abc",
+    result = await stubs.service.create_pocket_and_session(
+        {"title": "Dashboard", "metadata": {"category": "custom"}},
+        "websocket:abc",
         user_id="u-alice",
         workspace_id="ws-active",
     )
@@ -158,7 +126,7 @@ async def test_explicit_user_and_workspace_are_used(monkeypatch):
     assert result == "pocket-xyz"
     # Workspace.get must have been called with the explicit id.
     stubs.get_ws.assert_awaited_with("ws-active")
-    # PocketService.create must receive the explicit workspace_id + user_id.
+    # create() must receive the explicit workspace_id + user_id.
     args = stubs.pocket_create.await_args.args
     assert args[0] == "ws-active"
     assert args[1] == "u-alice"
@@ -170,8 +138,6 @@ async def test_explicit_user_and_workspace_are_used(monkeypatch):
 async def test_only_user_id_falls_back_to_active_workspace(monkeypatch):
     """When workspace_id is missing but user_id is given, ``user.active_workspace``
     is used — not the legacy ``Workspace.find_one(owner=...)`` fallback."""
-    from pocketpaw.agents import loop as loop_mod
-
     user = _mk_user(user_id="u-alice", active_workspace="ws-active")
     ws_active = _mk_workspace("ws-active")
 
@@ -181,9 +147,9 @@ async def test_only_user_id_falls_back_to_active_workspace(monkeypatch):
         workspace_by_id={"ws-active": ws_active},
     )
 
-    result = await loop_mod._create_pocket_and_session(
-        spec={"title": "Dashboard"},
-        session_key="websocket:abc",
+    result = await stubs.service.create_pocket_and_session(
+        {"title": "Dashboard"},
+        "websocket:abc",
         user_id="u-alice",
     )
 
@@ -196,8 +162,6 @@ async def test_only_user_id_falls_back_to_active_workspace(monkeypatch):
 @pytest.mark.asyncio
 async def test_no_ids_falls_back_to_first_user_and_owned_workspace(monkeypatch):
     """No context → legacy behaviour. Preserves single-user self-hosted."""
-    from pocketpaw.agents import loop as loop_mod
-
     user = _mk_user(user_id="u-first", active_workspace=None)
     ws_owned = _mk_workspace("ws-owned")
 
@@ -208,9 +172,9 @@ async def test_no_ids_falls_back_to_first_user_and_owned_workspace(monkeypatch):
     )
     stubs.find_owned_ws.return_value = ws_owned
 
-    result = await loop_mod._create_pocket_and_session(
-        spec={"title": "Dashboard"},
-        session_key="websocket:abc",
+    result = await stubs.service.create_pocket_and_session(
+        {"title": "Dashboard"},
+        "websocket:abc",
     )
 
     assert result == "pocket-xyz"
@@ -223,12 +187,8 @@ async def test_no_ids_falls_back_to_first_user_and_owned_workspace(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_invalid_user_id_falls_back_cleanly(monkeypatch, caplog):
-    """An unparseable cloud_user_id logs a warning and falls back to
+    """An unparseable user id logs a warning and falls back to
     ``User.find_one`` rather than raising."""
-    import logging
-
-    from pocketpaw.agents import loop as loop_mod
-
     user = _mk_user(user_id="u-fallback", active_workspace="ws-active")
     ws_active = _mk_workspace("ws-active")
 
@@ -239,20 +199,17 @@ async def test_invalid_user_id_falls_back_cleanly(monkeypatch, caplog):
     )
 
     # Force PydanticObjectId to raise on a specific bad id.
-    import beanie  # our stubbed version
-
     def _bad_oid(s):
         if s == "not-an-oid":
             raise ValueError("bad oid")
         return s
 
-    monkeypatch.setattr(beanie, "PydanticObjectId", _bad_oid)
+    monkeypatch.setattr(stubs.service, "PydanticObjectId", _bad_oid)
+    caplog.set_level(logging.WARNING, logger="pocketpaw_ee.cloud.pockets.service")
 
-    caplog.set_level(logging.WARNING, logger="pocketpaw.agents.loop")
-
-    result = await loop_mod._create_pocket_and_session(
-        spec={"title": "Dashboard"},
-        session_key="websocket:abc",
+    result = await stubs.service.create_pocket_and_session(
+        {"title": "Dashboard"},
+        "websocket:abc",
         user_id="not-an-oid",
     )
 
@@ -267,8 +224,6 @@ async def test_invalid_user_id_falls_back_cleanly(monkeypatch, caplog):
 async def test_session_is_linked_with_correct_workspace(monkeypatch):
     """The Session document created alongside the pocket is keyed to the
     explicit workspace/user ids, not the legacy fallback."""
-    from pocketpaw.agents import loop as loop_mod
-
     user = _mk_user(user_id="u-alice", active_workspace=None)
     ws_active = _mk_workspace("ws-active")
 
@@ -278,9 +233,9 @@ async def test_session_is_linked_with_correct_workspace(monkeypatch):
         workspace_by_id={"ws-active": ws_active},
     )
 
-    await loop_mod._create_pocket_and_session(
-        spec={"title": "Dashboard"},
-        session_key="websocket:abc",
+    await stubs.service.create_pocket_and_session(
+        {"title": "Dashboard"},
+        "websocket:abc",
         user_id="u-alice",
         workspace_id="ws-active",
     )
