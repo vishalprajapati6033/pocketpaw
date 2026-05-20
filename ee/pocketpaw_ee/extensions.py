@@ -129,3 +129,19 @@ class CloudStorageBackend:
         from pocketpaw_ee.cloud.uploads.router import _META
 
         return _META
+
+
+class CloudModelProvider:
+    """`pocketpaw.models` — cloud Beanie document classes resolved by name.
+
+    Core looks up ``Agent`` (the only cloud model it references after the
+    Phase 3b split — the agent pool / per-agent loop cache). Other cloud
+    entities are imported directly within `pocketpaw_ee`.
+    """
+
+    def get_model(self, name: str) -> type | None:
+        if name == "Agent":
+            from pocketpaw_ee.cloud.models.agent import Agent
+
+            return Agent
+        return None
