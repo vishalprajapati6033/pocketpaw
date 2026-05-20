@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from pocketpaw_ee.cloud.shared.errors import CloudError, NotFound
 from pocketpaw.ripple import (
     INLINE_RIPPLE_SYSTEM_PROMPT,
     POCKET_DELEGATION_RULE,
@@ -27,6 +26,7 @@ from pocketpaw.ripple import (
     get_pocket_prompts,
 )
 from pocketpaw.ripple._pockets import _MCP_POCKET_BACKENDS
+from pocketpaw_ee.cloud.shared.errors import CloudError, NotFound
 
 logger = logging.getLogger(__name__)
 

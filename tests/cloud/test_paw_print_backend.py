@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
+
 from pocketpaw.paw_print.models import (
     MAX_BLOCKS_PER_SPEC,
     MAX_DOMAINS_PER_WIDGET,

@@ -7,6 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pocketpaw_ee.cloud.chat.agent_service as agent_service
+
 from pocketpaw.ripple import INLINE_RIPPLE_SYSTEM_PROMPT
 
 

@@ -134,8 +134,8 @@ def prune_orphan_auto_intentions() -> int:
 
     Returns the number of intentions pruned.
     """
-    from pocketpaw.daemon.intentions import get_intention_store
     from pocketpaw.automations.store import get_automation_store
+    from pocketpaw.daemon.intentions import get_intention_store
 
     intention_store = get_intention_store()
     automation_store = get_automation_store()

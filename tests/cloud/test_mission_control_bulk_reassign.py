@@ -21,6 +21,7 @@ from pocketpaw_ee.cloud.mission_control import service as mc_service
 from pocketpaw_ee.cloud.mission_control.dto import BulkReassignRequest
 from pocketpaw_ee.cloud.tasks import service as tasks_service
 from pocketpaw_ee.cloud.tasks.dto import AssigneeDTO, CreateTaskRequest
+
 from pocketpaw.instinct.store import InstinctStore
 
 pytestmark = pytest.mark.usefixtures("mongo_db")

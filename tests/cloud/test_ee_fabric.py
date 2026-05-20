@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from pocketpaw.fabric.models import FabricQuery, PropertyDef
 from pocketpaw.fabric.store import FabricStore
 

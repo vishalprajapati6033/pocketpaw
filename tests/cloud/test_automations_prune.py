@@ -10,10 +10,10 @@ from unittest.mock import patch
 
 import pytest
 
-from pocketpaw.daemon.intentions import IntentionStore
 from pocketpaw.automations.bridge import prune_orphan_auto_intentions
 from pocketpaw.automations.models import CreateRuleRequest, RuleType
 from pocketpaw.automations.store import AutomationStore
+from pocketpaw.daemon.intentions import IntentionStore
 
 
 @pytest.fixture

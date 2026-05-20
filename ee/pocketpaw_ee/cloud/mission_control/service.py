@@ -66,6 +66,7 @@ import logging
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+from pocketpaw.instinct.models import Action, ActionStatus
 from pocketpaw_ee.api import get_instinct_store
 from pocketpaw_ee.cloud._core.context import RequestContext
 from pocketpaw_ee.cloud._core.errors import ValidationError
@@ -95,7 +96,6 @@ from pocketpaw_ee.cloud.mission_control.dto import (
     work_item_to_response,
 )
 from pocketpaw_ee.cloud.pockets import service as pockets_service
-from pocketpaw.instinct.models import Action, ActionStatus
 
 logger = logging.getLogger(__name__)
 

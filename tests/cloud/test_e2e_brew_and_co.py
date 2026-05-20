@@ -18,6 +18,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from pocketpaw.fabric.models import FabricQuery, PropertyDef
 from pocketpaw.fabric.store import FabricStore
 from pocketpaw.instinct.models import ActionContext, ActionPriority, ActionTrigger

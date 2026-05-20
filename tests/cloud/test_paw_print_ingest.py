@@ -11,12 +11,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pocketpaw_ee.paw_print.router import router
+
 from pocketpaw.paw_print.models import (
     MAX_PAYLOAD_BYTES,
     PawPrintBlock,
     PawPrintSpec,
 )
-from pocketpaw_ee.paw_print.router import router
 from pocketpaw.paw_print.store import PawPrintStore
 
 

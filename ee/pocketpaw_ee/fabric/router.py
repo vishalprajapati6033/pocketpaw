@@ -24,9 +24,6 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from pocketpaw_ee.cloud._core.deps import require_plan_feature
-from pocketpaw_ee.cloud.license import require_license
-from pocketpaw_ee.cloud.shared.deps import require_action_any_workspace
 from pocketpaw.fabric.models import (
     FabricLink,
     FabricObject,
@@ -36,6 +33,9 @@ from pocketpaw.fabric.models import (
     PropertyDef,
 )
 from pocketpaw.fabric.store import FabricStore
+from pocketpaw_ee.cloud._core.deps import require_plan_feature
+from pocketpaw_ee.cloud.license import require_license
+from pocketpaw_ee.cloud.shared.deps import require_action_any_workspace
 
 logger = logging.getLogger(__name__)
 

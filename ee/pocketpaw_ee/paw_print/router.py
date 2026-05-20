@@ -334,8 +334,8 @@ async def _apply_event_mapping(widget: PawPrintWidget, event: PawPrintEvent) -> 
         return None
 
     try:
-        from pocketpaw_ee.api import get_fabric_store
         from pocketpaw.fabric.models import FabricObject
+        from pocketpaw_ee.api import get_fabric_store
     except ImportError:
         return None
 

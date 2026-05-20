@@ -42,6 +42,7 @@ from soul_protocol.engine.journal import Journal
 
 from pocketpaw.guards.deps import check_workspace_action
 from pocketpaw.guards.rbac import Forbidden as GuardForbidden
+from pocketpaw.journal_dep import get_journal
 from pocketpaw_ee.cloud.auth import current_active_user
 from pocketpaw_ee.cloud.models.user import User
 from pocketpaw_ee.fleet import (
@@ -51,7 +52,6 @@ from pocketpaw_ee.fleet import (
     list_bundled_fleets,
     load_fleet,
 )
-from pocketpaw.journal_dep import get_journal
 
 logger = logging.getLogger(__name__)
 

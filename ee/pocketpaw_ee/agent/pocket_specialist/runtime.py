@@ -14,6 +14,11 @@ from pydantic import BaseModel, Field
 
 from pocketpaw.agents.router import AgentRouter
 from pocketpaw.config import Settings
+from pocketpaw.ripple._pockets import (
+    POCKET_EDIT_SPECIALIST_PROMPT_MCP,
+    POCKET_ID_TOKEN,
+    POCKET_SPECIALIST_PROMPT,
+)
 from pocketpaw_ee.agent.pocket_specialist.settings import (
     _BACKEND_MODEL_FIELD,
     resolve_specialist_model,
@@ -21,11 +26,6 @@ from pocketpaw_ee.agent.pocket_specialist.settings import (
 from pocketpaw_ee.agent.pocket_specialist.tools import (
     make_edit_pocket_tools,
     make_persist_pocket_tool,
-)
-from pocketpaw.ripple._pockets import (
-    POCKET_EDIT_SPECIALIST_PROMPT_MCP,
-    POCKET_ID_TOKEN,
-    POCKET_SPECIALIST_PROMPT,
 )
 
 log = logging.getLogger(__name__)

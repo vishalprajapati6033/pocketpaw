@@ -42,8 +42,9 @@ from fastapi.testclient import TestClient
 from pocketpaw_ee.cloud.auth import current_active_user
 from pocketpaw_ee.fleet import FleetTemplate
 from pocketpaw_ee.fleet.router import router
-from pocketpaw.journal_dep import get_journal, reset_journal_cache
 from soul_protocol.engine.journal import open_journal
+
+from pocketpaw.journal_dep import get_journal, reset_journal_cache
 
 # ---------------------------------------------------------------------------
 # Shared constants used across install tests — the default admin workspace

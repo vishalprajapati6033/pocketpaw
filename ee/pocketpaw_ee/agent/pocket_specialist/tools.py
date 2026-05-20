@@ -19,11 +19,11 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
+from pocketpaw.ripple.manifest import get_manifest as _get_manifest
+from pocketpaw.ripple.manifest import validate_against_manifest
 from pocketpaw_ee.cloud.pockets.service import agent_create as _agent_create
 from pocketpaw_ee.cloud.pockets.service import agent_list as _agent_list_pockets
 from pocketpaw_ee.cloud.pockets.service import agent_update as _agent_update
-from pocketpaw.ripple.manifest import get_manifest as _get_manifest
-from pocketpaw.ripple.manifest import validate_against_manifest
 
 
 class _ListPocketsArgs(BaseModel):

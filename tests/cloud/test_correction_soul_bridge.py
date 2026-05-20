@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
 from pocketpaw.instinct.correction import Correction, CorrectionPatch
 from pocketpaw.instinct.correction_soul_bridge import CorrectionSoulBridge
 from pocketpaw.instinct.models import (

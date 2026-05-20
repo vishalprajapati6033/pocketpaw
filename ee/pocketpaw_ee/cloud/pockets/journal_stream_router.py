@@ -22,9 +22,9 @@ from fastapi.responses import StreamingResponse
 from soul_protocol.engine.journal import Journal
 from soul_protocol.spec.journal import DataRef, EventEntry
 
+from pocketpaw.journal_dep import get_journal
 from pocketpaw_ee.cloud.license import require_license
 from pocketpaw_ee.cloud.shared.deps import require_pocket_edit
-from pocketpaw.journal_dep import get_journal
 
 logger = logging.getLogger(__name__)
 

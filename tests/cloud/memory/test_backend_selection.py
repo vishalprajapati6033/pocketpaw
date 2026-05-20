@@ -89,7 +89,7 @@ class TestOssIsolation:
                 indent = len(line) - len(stripped)
                 if indent == 0 and (
                     stripped.startswith("from pocketpaw_ee.")
-                or stripped.startswith("import pocketpaw_ee.")
+                    or stripped.startswith("import pocketpaw_ee.")
                 ):
                     raise AssertionError(f"top-level ee import in {py}: {stripped}")
 

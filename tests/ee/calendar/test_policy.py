@@ -22,7 +22,6 @@ from typing import Any
 
 import pytest
 from bson import ObjectId
-
 from pocketpaw_ee.calendar import policy
 from pocketpaw_ee.calendar import service as service_module
 from pocketpaw_ee.calendar._context import RequestContext

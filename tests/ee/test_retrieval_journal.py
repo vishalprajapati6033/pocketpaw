@@ -29,6 +29,9 @@ from uuid import uuid4
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from soul_protocol.engine.journal import open_journal
+from soul_protocol.spec.journal import Actor
+
 from pocketpaw.journal_dep import get_journal, reset_journal_cache
 from pocketpaw.retrieval.events import (
     ACTION_GRADUATION_APPLIED,
@@ -43,8 +46,6 @@ from pocketpaw.retrieval.policy import (
 from pocketpaw.retrieval.projection import RetrievalProjection
 from pocketpaw.retrieval.router import reset_store_cache, router
 from pocketpaw.retrieval.store import RetrievalJournalStore
-from soul_protocol.engine.journal import open_journal
-from soul_protocol.spec.journal import Actor
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
 from pocketpaw.instinct.store import InstinctStore
 from pocketpaw.instinct.trace import FabricObjectSnapshot, ReasoningTrace, ToolCallRef
 from pocketpaw.instinct.trace_collector import TraceCollector

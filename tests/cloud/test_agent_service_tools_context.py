@@ -12,6 +12,7 @@ from pocketpaw_ee.cloud.chat.agent_service import (
     build_context_block,
     build_knowledge_context,
 )
+
 from pocketpaw.ripple._design import RIPPLE_DESIGN_RULES
 
 

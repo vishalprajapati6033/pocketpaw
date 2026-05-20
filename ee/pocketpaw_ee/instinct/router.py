@@ -38,9 +38,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from pocketpaw_ee.cloud._core.deps import require_plan_feature
-from pocketpaw_ee.cloud.license import require_license
-from pocketpaw_ee.cloud.shared.deps import require_action_any_workspace
 from pocketpaw.instinct.correction import (
     Correction,
     compute_patches,
@@ -55,6 +52,9 @@ from pocketpaw.instinct.models import (
     AuditEntry,
 )
 from pocketpaw.instinct.trace import FabricObjectSnapshot, ReasoningTrace
+from pocketpaw_ee.cloud._core.deps import require_plan_feature
+from pocketpaw_ee.cloud.license import require_license
+from pocketpaw_ee.cloud.shared.deps import require_action_any_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -365,8 +365,8 @@ async def approve_action(action_id: str, req: ApproveRequest | None = None):
 async def _forward_to_soul(correction: Correction, action: Action) -> None:
     """Hand off to the soul bridge — always best-effort, never breaks approval."""
     try:
-        from pocketpaw.soul import get_soul_manager
         from pocketpaw.instinct.correction_soul_bridge import CorrectionSoulBridge
+        from pocketpaw.soul import get_soul_manager
 
         manager = get_soul_manager()
         if manager is None:

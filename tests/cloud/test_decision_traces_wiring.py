@@ -11,8 +11,9 @@ from unittest.mock import patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pocketpaw.instinct.models import ActionTrigger
 from pocketpaw_ee.instinct.router import router
+
+from pocketpaw.instinct.models import ActionTrigger
 from pocketpaw.instinct.store import InstinctStore
 from pocketpaw.instinct.trace import FabricObjectSnapshot, ReasoningTrace, ToolCallRef
 

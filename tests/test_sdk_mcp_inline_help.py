@@ -26,9 +26,8 @@ async def test_inline_widget_help_handler_returns_payload_for_chart():
 
 @pytest.mark.asyncio
 async def test_inline_widget_help_handler_no_types_returns_full_catalog():
-    from pocketpaw.ripple._design import RIPPLE_DESIGN_RULES
-
     from pocketpaw.agents.sdk_mcp_pocket import _get_inline_widget_help_handler
+    from pocketpaw.ripple._design import RIPPLE_DESIGN_RULES
 
     out = await _get_inline_widget_help_handler({})
     text_block = next(

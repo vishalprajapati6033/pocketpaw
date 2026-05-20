@@ -11,6 +11,8 @@ from unittest.mock import patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pocketpaw_ee.instinct.router import router
+
 from pocketpaw.instinct.correction import (
     Correction,
     CorrectionPatch,
@@ -24,7 +26,6 @@ from pocketpaw.instinct.models import (
     ActionStatus,
     ActionTrigger,
 )
-from pocketpaw_ee.instinct.router import router
 from pocketpaw.instinct.store import InstinctStore
 
 

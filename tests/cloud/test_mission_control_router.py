@@ -20,6 +20,7 @@ from pocketpaw_ee.cloud.activity.buffer import ActivityEvent, get_buffer
 from pocketpaw_ee.cloud.license import require_license
 from pocketpaw_ee.cloud.mission_control import service as mc_service
 from pocketpaw_ee.cloud.mission_control.router import router as mc_router
+
 from pocketpaw.instinct.models import ActionTrigger
 from pocketpaw.instinct.store import InstinctStore
 

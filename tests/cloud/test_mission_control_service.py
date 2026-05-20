@@ -25,6 +25,7 @@ from pocketpaw_ee.cloud.mission_control.dto import (
     ListWorkItemsRequest,
     OutcomesQueryRequest,
 )
+
 from pocketpaw.instinct.models import ActionTrigger
 from pocketpaw.instinct.store import InstinctStore
 

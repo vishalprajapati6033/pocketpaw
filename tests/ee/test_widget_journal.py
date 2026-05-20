@@ -38,6 +38,9 @@ from uuid import uuid4
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from soul_protocol.engine.journal import open_journal
+from soul_protocol.spec.journal import Actor
+
 from pocketpaw.journal_dep import get_journal, reset_journal_cache
 from pocketpaw.widget.events import (
     ACTION_WIDGET_COOCCURRENCE_DETECTED,
@@ -56,8 +59,6 @@ from pocketpaw.widget.policy import (
 from pocketpaw.widget.projection import WidgetProjection
 from pocketpaw.widget.router import reset_store_cache, router
 from pocketpaw.widget.store import WidgetJournalStore
-from soul_protocol.engine.journal import open_journal
-from soul_protocol.spec.journal import Actor
 
 # ---------------------------------------------------------------------------
 # Fixtures

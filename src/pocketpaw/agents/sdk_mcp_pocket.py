@@ -91,9 +91,8 @@ async def _list_pockets_handler(args: dict) -> dict:
 async def _get_widget_spec_handler(args: dict) -> dict:
     """Fetch the manifest, filter to requested widget types, and return a
     formatted markdown reference. Backs the ``get_widget_spec`` MCP tool."""
-    from pocketpaw.ripple.manifest import format_for_prompt, get_manifest
-
     from pocketpaw.config import get_settings
+    from pocketpaw.ripple.manifest import format_for_prompt, get_manifest
 
     raw_types = args.get("types") or []
     if isinstance(raw_types, str):
