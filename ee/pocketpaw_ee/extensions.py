@@ -145,3 +145,18 @@ class CloudModelProvider:
 
             return Agent
         return None
+
+
+class CloudPocketWriter:
+    """`pocketpaw.pockets` — persists agent-created pockets to MongoDB."""
+
+    async def create_pocket_and_session(
+        self,
+        spec: dict,
+        session_key: str,
+        user_id: str | None,
+        workspace_id: str | None,
+    ) -> str | None:
+        from pocketpaw_ee.cloud.pockets.agent_context import create_pocket_and_session
+
+        return await create_pocket_and_session(spec, session_key, user_id, workspace_id)

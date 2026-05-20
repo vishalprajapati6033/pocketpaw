@@ -400,6 +400,9 @@ cloud = "pocketpaw_ee.extensions:CloudStorageBackend"
 [project.entry-points."pocketpaw.models"]
 cloud = "pocketpaw_ee.extensions:CloudModelProvider"
 
+[project.entry-points."pocketpaw.pockets"]
+cloud = "pocketpaw_ee.extensions:CloudPocketWriter"
+
 [project.urls]
 Homepage = "https://pocketpaw.xyz"
 Repository = "https://github.com/pocketpaw/pocketpaw"
