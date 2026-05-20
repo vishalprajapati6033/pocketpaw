@@ -1,13 +1,13 @@
 # RBAC + ABAC guards — re-exports for clean imports.
 # Created: 2026-04-10
 
-from pocketpaw.guards.abac import (
+from pocketpaw_ee.guards.abac import (
     ACTION_ROLES,
     PLAN_FEATURES,
     ROLE_TOOL_LIMITS,
     evaluate_policy,
 )
-from pocketpaw.guards.actions import (
+from pocketpaw_ee.guards.actions import (
     ACTIONS,
     ActionRule,
     GroupRole,
@@ -15,8 +15,8 @@ from pocketpaw.guards.actions import (
     check_group_role,
     get_rule,
 )
-from pocketpaw.guards.audit import log_denial, log_privileged_action
-from pocketpaw.guards.deps import (
+from pocketpaw_ee.guards.audit import log_denial, log_privileged_action
+from pocketpaw_ee.guards.deps import (
     check_group_action,
     check_workspace_action,
     make_require_action,
@@ -27,8 +27,8 @@ from pocketpaw.guards.deps import (
     resolve_group_role,
     resolve_workspace_role,
 )
-from pocketpaw.guards.policy import PolicyContext, PolicyResult
-from pocketpaw.guards.rbac import (
+from pocketpaw_ee.guards.policy import PolicyContext, PolicyResult
+from pocketpaw_ee.guards.rbac import (
     Forbidden,
     PocketAccess,
     WorkspaceRole,

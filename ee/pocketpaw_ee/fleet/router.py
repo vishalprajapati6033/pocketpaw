@@ -40,8 +40,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from soul_protocol.engine.journal import Journal
 
-from pocketpaw.guards.deps import check_workspace_action
-from pocketpaw.guards.rbac import Forbidden as GuardForbidden
 from pocketpaw.journal_dep import get_journal
 from pocketpaw_ee.cloud.auth import current_active_user
 from pocketpaw_ee.cloud.models.user import User
@@ -52,6 +50,8 @@ from pocketpaw_ee.fleet import (
     list_bundled_fleets,
     load_fleet,
 )
+from pocketpaw_ee.guards.deps import check_workspace_action
+from pocketpaw_ee.guards.rbac import Forbidden as GuardForbidden
 
 logger = logging.getLogger(__name__)
 

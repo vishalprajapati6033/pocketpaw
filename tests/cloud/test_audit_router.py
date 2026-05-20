@@ -90,8 +90,7 @@ def _build_app(
             # module's symbol directly so the guard's call site sees the
             # stub.
             from pocketpaw_ee.cloud._core import deps as core_deps
-
-            from pocketpaw.guards.rbac import Forbidden as GuardForbidden
+            from pocketpaw_ee.guards.rbac import Forbidden as GuardForbidden
 
             if permission_denier:
 

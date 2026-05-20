@@ -9,17 +9,17 @@ from typing import Any
 
 from fastapi import HTTPException, Request
 
-from pocketpaw.guards.abac import evaluate_policy
-from pocketpaw.guards.actions import (
+from pocketpaw_ee.guards.abac import evaluate_policy
+from pocketpaw_ee.guards.actions import (
     ActionRule,
     GroupRole,
     check_action,
     check_group_role,
     get_rule,
 )
-from pocketpaw.guards.audit import log_denial
-from pocketpaw.guards.policy import PolicyContext
-from pocketpaw.guards.rbac import (
+from pocketpaw_ee.guards.audit import log_denial
+from pocketpaw_ee.guards.policy import PolicyContext
+from pocketpaw_ee.guards.rbac import (
     Forbidden,
     PocketAccess,
     WorkspaceRole,
@@ -91,7 +91,7 @@ def require_pocket_access(minimum: PocketAccess | str) -> _GuardDep:
 
 def require_plan_feature(feature: str) -> _GuardDep:
     """FastAPI dependency -- checks workspace plan allows feature."""
-    from pocketpaw.guards.abac import PLAN_FEATURES
+    from pocketpaw_ee.guards.abac import PLAN_FEATURES
 
     async def _guard(request: Request) -> None:
         _get_user_context(request)  # enforce authentication

@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from pocketpaw.guards.rbac import Forbidden, PocketAccess, WorkspaceRole
+from pocketpaw_ee.guards.rbac import Forbidden, PocketAccess, WorkspaceRole
 
 # ---------------------------------------------------------------------------
 # Group role — mirrors WorkspaceRole shape but scoped to a single group.

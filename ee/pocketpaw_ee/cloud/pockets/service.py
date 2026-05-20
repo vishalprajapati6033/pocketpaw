@@ -116,7 +116,7 @@ async def _fetch_pocket(pocket_id: str) -> _PocketDoc:
 
 def _check_domain_owner(domain_pocket: Pocket, user_id: str) -> None:
     if domain_pocket.owner != user_id:
-        from pocketpaw.guards.audit import log_denial
+        from pocketpaw_ee.guards.audit import log_denial
 
         log_denial(
             actor=user_id,
@@ -134,7 +134,7 @@ def _check_domain_edit_access(domain_pocket: Pocket, user_id: str) -> None:
         return
     if domain_pocket.visibility == "workspace":
         return
-    from pocketpaw.guards.audit import log_denial
+    from pocketpaw_ee.guards.audit import log_denial
 
     log_denial(
         actor=user_id,
@@ -435,7 +435,7 @@ async def delete(pocket_id: str, user_id: str) -> None:
     """Hard-delete a pocket. Owner only."""
     doc = await _fetch_pocket(pocket_id)
     if doc.owner != user_id:
-        from pocketpaw.guards.audit import log_denial
+        from pocketpaw_ee.guards.audit import log_denial
 
         log_denial(
             actor=user_id,

@@ -14,8 +14,6 @@ from typing import Any, Literal
 
 from beanie import PydanticObjectId
 
-from pocketpaw.guards.actions import GroupRole
-from pocketpaw.guards.audit import log_denial
 from pocketpaw_ee.cloud.chat.domain import Group as _GroupDomain
 from pocketpaw_ee.cloud.chat.domain import GroupAgent as _GroupAgentDomain
 from pocketpaw_ee.cloud.chat.schemas import (
@@ -44,6 +42,8 @@ from pocketpaw_ee.cloud.realtime.events import (
 )
 from pocketpaw_ee.cloud.shared.errors import Forbidden, NotFound, ValidationError
 from pocketpaw_ee.cloud.shared.time import iso_utc
+from pocketpaw_ee.guards.actions import GroupRole
+from pocketpaw_ee.guards.audit import log_denial
 
 logger = logging.getLogger(__name__)
 

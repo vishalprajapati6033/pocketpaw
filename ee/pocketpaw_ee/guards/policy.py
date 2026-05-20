@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from pocketpaw.guards.rbac import PocketAccess, WorkspaceRole
+from pocketpaw_ee.guards.rbac import PocketAccess, WorkspaceRole
 
 
 @dataclass(frozen=True, slots=True)

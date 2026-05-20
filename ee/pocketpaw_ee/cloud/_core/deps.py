@@ -22,12 +22,12 @@ from typing import Any
 
 from fastapi import Depends, HTTPException
 
-from pocketpaw.guards.audit import log_denial
-from pocketpaw.guards.deps import check_workspace_action
-from pocketpaw.guards.rbac import Forbidden as GuardForbidden
 from pocketpaw_ee.cloud._core.errors import Forbidden
 from pocketpaw_ee.cloud.auth import current_active_user
 from pocketpaw_ee.cloud.models.user import User
+from pocketpaw_ee.guards.audit import log_denial
+from pocketpaw_ee.guards.deps import check_workspace_action
+from pocketpaw_ee.guards.rbac import Forbidden as GuardForbidden
 
 # ---------------------------------------------------------------------------
 # Identity / workspace extraction
@@ -160,7 +160,7 @@ def require_plan_feature(feature: str) -> Callable[..., Coroutine[Any, Any, None
             ],
         )
     """
-    from pocketpaw.guards.abac import PLAN_FEATURES
+    from pocketpaw_ee.guards.abac import PLAN_FEATURES
 
     # Compute the minimum plan that unlocks this feature, for the error message.
     needed_plan = "enterprise"

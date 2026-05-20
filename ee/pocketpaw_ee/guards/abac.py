@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import logging
 
-from pocketpaw.guards.policy import PolicyContext, PolicyResult
-from pocketpaw.guards.rbac import WorkspaceRole
+from pocketpaw_ee.guards.policy import PolicyContext, PolicyResult
+from pocketpaw_ee.guards.rbac import WorkspaceRole
 
 logger = logging.getLogger(__name__)
 
