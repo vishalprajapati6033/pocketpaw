@@ -157,8 +157,41 @@ class McpServerProvider(Protocol):
 class AgentExtension(Protocol):
     """Entry-point group: ``pocketpaw.agent_extensions``
 
-    Installs agent-runtime extensions — the cloud chat agent service, the
-    pocket specialist tool, etc.
+    Extends the core agent runtime with EE-only capabilities: extra
+    function-tools for tool-list backends (deep_agents, openai_agents, …)
+    and environment variables carrying cloud identity for subprocess (CLI)
+    backends. An OSS install registers no provider and the runtime runs
+    with only its built-in tools and a bare subprocess environment.
     """
 
-    def install(self, agent_runtime: Any) -> None: ...
+    def agent_tools(self, backend: str) -> list[Any]:
+        """Extra tool instances to expose to *backend*, or ``[]``."""
+        ...
+
+    def subprocess_env(self) -> dict[str, str]:
+        """Environment variables to inject into agent subprocesses —
+        cloud workspace/user/session identity. ``{}`` when no cloud
+        context is active (the common OSS / out-of-stream case)."""
+        ...
+
+
+@runtime_checkable
+class PocketWriter(Protocol):
+    """Entry-point group: ``pocketpaw.pockets``
+
+    Persists a pocket created by an agent. The cloud product writes a
+    Pocket document and links it to the chat Session in MongoDB; an OSS
+    install registers no provider, so agent-emitted pocket specs fan out
+    as SSE events only and are never persisted.
+    """
+
+    async def create_pocket_and_session(
+        self,
+        spec: dict,
+        session_key: str,
+        user_id: str | None,
+        workspace_id: str | None,
+    ) -> str | None:
+        """Create the pocket + linked session. Returns the new pocket id,
+        or ``None`` on failure."""
+        ...
