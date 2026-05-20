@@ -102,9 +102,7 @@ class AgentPool:
             agent_model = _resolve_agent_model()
             try:
                 agent_doc = (
-                    await agent_model.get(PydanticObjectId(agent_id))
-                    if agent_model
-                    else None
+                    await agent_model.get(PydanticObjectId(agent_id)) if agent_model else None
                 )
                 if (
                     agent_doc
@@ -135,9 +133,7 @@ class AgentPool:
         from beanie import PydanticObjectId
 
         agent_model = _resolve_agent_model()
-        agent_doc = (
-            await agent_model.get(PydanticObjectId(agent_id)) if agent_model else None
-        )
+        agent_doc = await agent_model.get(PydanticObjectId(agent_id)) if agent_model else None
         if not agent_doc:
             raise AgentNotFound(agent_id)
 

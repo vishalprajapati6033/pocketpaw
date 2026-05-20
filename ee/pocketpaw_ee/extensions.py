@@ -84,9 +84,7 @@ class CloudLifecycleHook:
 
         from pocketpaw_ee.cloud.db import init_cloud_db
 
-        mongo_uri = os.environ.get(
-            "CLOUD_MONGODB_URI", "mongodb://localhost:27017/paw-enterprise"
-        )
+        mongo_uri = os.environ.get("CLOUD_MONGODB_URI", "mongodb://localhost:27017/paw-enterprise")
         await init_cloud_db(mongo_uri)
 
         from pocketpaw_ee.cloud.auth.core import (
@@ -242,9 +240,7 @@ class CloudAgentExtension:
     # uses its own in-process specialist MCP server — surfacing the tool
     # through the function-tool bridge for either would advertise a name
     # their dispatcher can't resolve.
-    _SPECIALIST_FUNCTION_TOOL_BACKENDS = frozenset(
-        {"deep_agents", "google_adk", "openai_agents"}
-    )
+    _SPECIALIST_FUNCTION_TOOL_BACKENDS = frozenset({"deep_agents", "google_adk", "openai_agents"})
 
     def agent_tools(self, backend: str) -> list[Any]:
         if backend not in self._SPECIALIST_FUNCTION_TOOL_BACKENDS:
