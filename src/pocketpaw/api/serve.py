@@ -194,7 +194,12 @@ def run_api_server(
             reload_dirs=[src_dir],
             reload_includes=["*.py"],
             log_level="debug",
+            # Bound graceful shutdown — uvicorn's default is None (wait
+            # forever). This server exposes WebSocket endpoints (/ws,
+            # /api/v1/ws, /v1/ws); without a bound, Ctrl+C hangs waiting for
+            # an open client socket to close. 5s, then force-close.
+            timeout_graceful_shutdown=5,
         )
     else:
         app = create_api_app()
-        uvicorn.run(app, host=host, port=port)
+        uvicorn.run(app, host=host, port=port, timeout_graceful_shutdown=5)

@@ -1786,6 +1786,8 @@ def run_dashboard(
                 log_level="debug",
                 ws_ping_interval=None,
                 ws_ping_timeout=None,
+                # Bound graceful shutdown — see the non-dev Config below.
+                timeout_graceful_shutdown=5,
             )
             break  # dev mode handles its own reload, no restart loop
         else:
@@ -1799,6 +1801,13 @@ def run_dashboard(
                 # 20s timeout would close the connection mid-stream.
                 ws_ping_interval=None,
                 ws_ping_timeout=None,
+                # Bound graceful shutdown. uvicorn's default is None — it
+                # waits forever for open connections to close. The dashboard
+                # browser tab holds a WebSocket (and ws ping is disabled
+                # above), so on Ctrl+C uvicorn would otherwise hang after
+                # "connection closed" until the tab is closed — leaving the
+                # terminal stuck and the port bound. 5s, then force-close.
+                timeout_graceful_shutdown=5,
             )
             _uvicorn_server = uvicorn.Server(config)
             _uvicorn_server.run()
