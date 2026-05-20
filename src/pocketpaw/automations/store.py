@@ -9,7 +9,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from pocketpaw.ee.automations.models import CreateRuleRequest, Rule, UpdateRuleRequest
+from pocketpaw.automations.models import CreateRuleRequest, Rule, UpdateRuleRequest
 
 logger = logging.getLogger(__name__)
 

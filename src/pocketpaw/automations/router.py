@@ -9,10 +9,10 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from pocketpaw.ee.automations.bridge import sync_rule_to_daemon, unsync_rule_from_daemon
-from pocketpaw.ee.automations.evaluator import get_evaluator
-from pocketpaw.ee.automations.models import CreateRuleRequest, Rule, UpdateRuleRequest
-from pocketpaw.ee.automations.store import get_automation_store
+from pocketpaw.automations.bridge import sync_rule_to_daemon, unsync_rule_from_daemon
+from pocketpaw.automations.evaluator import get_evaluator
+from pocketpaw.automations.models import CreateRuleRequest, Rule, UpdateRuleRequest
+from pocketpaw.automations.store import get_automation_store
 
 logger = logging.getLogger(__name__)
 

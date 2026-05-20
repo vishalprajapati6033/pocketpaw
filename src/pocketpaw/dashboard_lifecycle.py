@@ -351,7 +351,7 @@ async def startup_event(
     # firing crons forever (test fixtures, deleted rules, manual edits).
     try:
         from pocketpaw.daemon.intentions import get_intention_store
-        from pocketpaw.ee.automations.bridge import prune_orphan_auto_intentions
+        from pocketpaw.automations.bridge import prune_orphan_auto_intentions
 
         prune_orphan_auto_intentions()
         # Single line that tells the truth at startup-completion. The

@@ -19,8 +19,8 @@ from typing import Any
 
 from fastapi import Depends
 
-from pocketpaw.ee.guards.audit import log_denial
-from pocketpaw.ee.guards.rbac import Forbidden as GuardForbidden
+from pocketpaw.guards.audit import log_denial
+from pocketpaw.guards.rbac import Forbidden as GuardForbidden
 from pocketpaw_ee.cloud._core.deps import (
     _workspace_id_from_path,
     current_user,
@@ -64,7 +64,7 @@ def require_group_action(action: str) -> Callable[..., Coroutine[Any, Any, Any]]
     ``chat.group_service.resolve_role_for_id`` and checks the ACTIONS
     rule for ``action``. Raises cloud ``Forbidden`` on deny.
     """
-    from pocketpaw.ee.guards.actions import GroupRole, get_rule
+    from pocketpaw.guards.actions import GroupRole, get_rule
 
     rule = get_rule(action)
 

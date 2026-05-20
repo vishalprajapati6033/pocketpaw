@@ -7,14 +7,14 @@ import pytest
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 
-from pocketpaw.ee.guards.abac import (
+from pocketpaw.guards.abac import (
     ACTION_ROLES,
     PLAN_FEATURES,
     ROLE_TOOL_LIMITS,
     evaluate_policy,
 )
-from pocketpaw.ee.guards.policy import PolicyContext, PolicyResult
-from pocketpaw.ee.guards.rbac import (
+from pocketpaw.guards.policy import PolicyContext, PolicyResult
+from pocketpaw.guards.rbac import (
     Forbidden,
     PocketAccess,
     WorkspaceRole,
@@ -477,7 +477,7 @@ def _role_check_app(
     minimum_role: str = "admin",
 ) -> FastAPI:
     """Minimal FastAPI app wiring require_role under test conditions."""
-    from pocketpaw.ee.guards.deps import require_role
+    from pocketpaw.guards.deps import require_role
 
     app = FastAPI()
 
@@ -503,7 +503,7 @@ def _feature_check_app(
     workspace_id: str = "ws1",
 ) -> FastAPI:
     """Minimal FastAPI app wiring require_plan_feature under test conditions."""
-    from pocketpaw.ee.guards.deps import require_plan_feature
+    from pocketpaw.guards.deps import require_plan_feature
 
     app = FastAPI()
 
@@ -554,7 +554,7 @@ class TestRequireRoleDep:
 
     def test_returns_401_when_no_user_context(self):
         """When middleware does not populate user_context, dep must return 401."""
-        from pocketpaw.ee.guards.deps import require_role
+        from pocketpaw.guards.deps import require_role
 
         app = FastAPI()
 
@@ -569,7 +569,7 @@ class TestRequireRoleDep:
 
     def test_returns_403_when_workspace_id_missing(self):
         """Missing X-Workspace-Id header or query param should return 400."""
-        from pocketpaw.ee.guards.deps import require_role
+        from pocketpaw.guards.deps import require_role
 
         app = FastAPI()
 
@@ -636,7 +636,7 @@ def _policy_check_app(
     agent_creator_role: str | None = None,
 ) -> FastAPI:
     """Minimal app wiring require_policy with optional agent context."""
-    from pocketpaw.ee.guards.deps import require_policy
+    from pocketpaw.guards.deps import require_policy
 
     app = FastAPI()
 

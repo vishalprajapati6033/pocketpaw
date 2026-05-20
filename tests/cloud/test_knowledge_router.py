@@ -52,7 +52,7 @@ def client(monkeypatch):
     # Note: knowledge_router goes through ee.cloud.shared.deps.require_action_any_workspace
     # (NOT ee.cloud._core.deps.check_workspace_action), so patching the source here works.
     # For routers that DO consume _core.deps, patch the consumer instead — see test_audit_router.py.
-    from pocketpaw.ee.guards import deps as guards_deps
+    from pocketpaw.guards import deps as guards_deps
 
     monkeypatch.setattr(guards_deps, "check_workspace_action", lambda *a, **k: None)
 

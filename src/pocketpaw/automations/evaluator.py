@@ -18,8 +18,8 @@ import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 
-from pocketpaw.ee.automations.models import ExecutionMode, Rule, RuleType, UpdateRuleRequest
-from pocketpaw.ee.automations.store import get_automation_store
+from pocketpaw.automations.models import ExecutionMode, Rule, RuleType, UpdateRuleRequest
+from pocketpaw.automations.store import get_automation_store
 
 logger = logging.getLogger(__name__)
 

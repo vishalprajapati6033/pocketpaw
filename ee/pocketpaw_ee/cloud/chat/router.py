@@ -29,8 +29,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 
-from pocketpaw.ee.guards.deps import check_workspace_action
-from pocketpaw.ee.guards.rbac import Forbidden as GuardForbidden
+from pocketpaw.guards.deps import check_workspace_action
+from pocketpaw.guards.rbac import Forbidden as GuardForbidden
 from pocketpaw_ee.cloud.chat import group_service, message_service, unread_service
 from pocketpaw_ee.cloud.chat.agent_router import router as agent_router
 from pocketpaw_ee.cloud.chat.schemas import (

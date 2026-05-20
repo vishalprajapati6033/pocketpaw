@@ -14,8 +14,8 @@ from typing import Any, Literal
 
 from beanie import PydanticObjectId
 
-from pocketpaw.ee.guards.actions import GroupRole
-from pocketpaw.ee.guards.audit import log_denial
+from pocketpaw.guards.actions import GroupRole
+from pocketpaw.guards.audit import log_denial
 from pocketpaw_ee.cloud.chat.domain import Group as _GroupDomain
 from pocketpaw_ee.cloud.chat.domain import GroupAgent as _GroupAgentDomain
 from pocketpaw_ee.cloud.chat.schemas import (

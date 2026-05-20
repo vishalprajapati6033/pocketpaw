@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 
-from pocketpaw.ee.automations.models import Rule, RuleType
+from pocketpaw.automations.models import Rule, RuleType
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +135,7 @@ def prune_orphan_auto_intentions() -> int:
     Returns the number of intentions pruned.
     """
     from pocketpaw.daemon.intentions import get_intention_store
-    from pocketpaw.ee.automations.store import get_automation_store
+    from pocketpaw.automations.store import get_automation_store
 
     intention_store = get_intention_store()
     automation_store = get_automation_store()

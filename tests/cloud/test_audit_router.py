@@ -91,7 +91,7 @@ def _build_app(
             # stub.
             from pocketpaw_ee.cloud._core import deps as core_deps
 
-            from pocketpaw.ee.guards.rbac import Forbidden as GuardForbidden
+            from pocketpaw.guards.rbac import Forbidden as GuardForbidden
 
             if permission_denier:
 

@@ -11,9 +11,9 @@ from unittest.mock import patch
 import pytest
 
 from pocketpaw.daemon.intentions import IntentionStore
-from pocketpaw.ee.automations.bridge import prune_orphan_auto_intentions
-from pocketpaw.ee.automations.models import CreateRuleRequest, RuleType
-from pocketpaw.ee.automations.store import AutomationStore
+from pocketpaw.automations.bridge import prune_orphan_auto_intentions
+from pocketpaw.automations.models import CreateRuleRequest, RuleType
+from pocketpaw.automations.store import AutomationStore
 
 
 @pytest.fixture
@@ -35,7 +35,7 @@ def isolated_stores(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             return_value=intention_store,
         ),
         patch(
-            "pocketpaw.ee.automations.store.get_automation_store",
+            "pocketpaw.automations.store.get_automation_store",
             return_value=automation_store,
         ),
     ):

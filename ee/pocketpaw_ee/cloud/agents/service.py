@@ -381,9 +381,9 @@ async def is_owner_or_workspace_admin(agent_id: str, user: Any) -> bool:
     Used by the ``require_agent_owner_or_admin`` FastAPI guard so the
     Agent Beanie load stays inside the service.
     """
-    from pocketpaw.ee.guards.deps import resolve_workspace_role
-    from pocketpaw.ee.guards.rbac import Forbidden as GuardForbidden
-    from pocketpaw.ee.guards.rbac import WorkspaceRole
+    from pocketpaw.guards.deps import resolve_workspace_role
+    from pocketpaw.guards.rbac import Forbidden as GuardForbidden
+    from pocketpaw.guards.rbac import WorkspaceRole
 
     try:
         agent_oid = PydanticObjectId(agent_id)
