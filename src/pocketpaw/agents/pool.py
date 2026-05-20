@@ -22,12 +22,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _resolve_agent_model() -> type | None:
-    """Resolve the cloud ``Agent`` document class via the model registry.
+def _resolve_agent_model() -> Any:
+    """Resolve the cloud ``Agent`` Beanie document class via the model registry.
 
-    Returns ``None`` on an OSS install with no ``pocketpaw.models`` provider
-    registered — the agent pool is a cloud-only feature, so callers treat a
-    missing model the same as "no such agent".
+    Returns the document class (a Beanie ``Document`` subclass — typed ``Any``
+    here since core never imports the concrete EE type), or ``None`` on an OSS
+    install with no ``pocketpaw.models`` provider registered. The agent pool is
+    a cloud-only feature, so callers treat a missing model as "no such agent".
     """
     from pocketpaw._registry import first
 
