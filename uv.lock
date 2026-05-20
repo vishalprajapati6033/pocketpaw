@@ -4190,8 +4190,6 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "jinja2" },
-    { name = "livekit-agents", extra = ["codecs"] },
-    { name = "livekit-plugins-deepgram" },
     { name = "openai" },
     { name = "pillow" },
     { name = "pydantic" },
@@ -4346,22 +4344,6 @@ drive = [
     { name = "google-auth" },
     { name = "google-auth-oauthlib" },
 ]
-enterprise = [
-    { name = "beanie" },
-    { name = "boto3" },
-    { name = "fastapi-users", extra = ["beanie", "oauth"] },
-    { name = "google-api-python-client" },
-    { name = "google-auth" },
-    { name = "google-auth-oauthlib" },
-    { name = "google-cloud-storage" },
-    { name = "livekit-api" },
-    { name = "motor" },
-    { name = "pwdlib", extra = ["argon2"] },
-    { name = "python-socketio" },
-    { name = "redis", extra = ["hiredis"] },
-    { name = "slowapi" },
-    { name = "soul-protocol" },
-]
 extract = [
     { name = "html2text" },
 ]
@@ -4420,6 +4402,9 @@ recommended = [
     { name = "playwright" },
     { name = "psutil" },
     { name = "pyautogui" },
+]
+s3 = [
+    { name = "boto3" },
 ]
 sarvam = [
     { name = "sarvamai" },
@@ -4487,6 +4472,9 @@ dev = [
     { name = "slack-bolt" },
     { name = "types-aiofiles" },
 ]
+ee = [
+    { name = "pocketpaw-ee" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -4498,7 +4486,6 @@ requires-dist = [
     { name = "apscheduler", specifier = ">=3.10.0" },
     { name = "asyncpg", marker = "extra == 'databases'", specifier = ">=0.29.0" },
     { name = "asyncpg", marker = "extra == 'postgresql'", specifier = ">=0.29.0" },
-    { name = "beanie", marker = "extra == 'enterprise'", specifier = ">=1.26.0" },
     { name = "beanie", marker = "extra == 'mongodb'", specifier = ">=1.26.0" },
     { name = "bm25s", marker = "extra == 'knowledge'" },
     { name = "bm25s", marker = "extra == 'vector'" },
@@ -4510,7 +4497,7 @@ requires-dist = [
     { name = "botbuilder-integration-aiohttp", marker = "extra == 'all-channels'", specifier = ">=4.16.0" },
     { name = "botbuilder-integration-aiohttp", marker = "extra == 'dev'", specifier = ">=4.16.0" },
     { name = "botbuilder-integration-aiohttp", marker = "extra == 'teams'", specifier = ">=4.16.0" },
-    { name = "boto3", marker = "extra == 'enterprise'", specifier = ">=1.34.0" },
+    { name = "boto3", marker = "extra == 's3'", specifier = ">=1.34.0" },
     { name = "chromadb", marker = "extra == 'vector'" },
     { name = "claude-agent-sdk", specifier = ">=0.1.72" },
     { name = "click", specifier = ">=8.0" },
@@ -4528,7 +4515,6 @@ requires-dist = [
     { name = "elevenlabs", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "elevenlabs", marker = "extra == 'voice'", specifier = ">=1.0.0" },
     { name = "fastapi", specifier = ">=0.134.0" },
-    { name = "fastapi-users", extras = ["beanie", "oauth"], marker = "extra == 'enterprise'", specifier = ">=13.0.0" },
     { name = "github-copilot-sdk", marker = "extra == 'all'", specifier = ">=0.1.0" },
     { name = "github-copilot-sdk", marker = "extra == 'copilot-sdk'", specifier = ">=0.1.0" },
     { name = "github-copilot-sdk", marker = "extra == 'dev'", specifier = ">=0.1.0" },
@@ -4539,19 +4525,15 @@ requires-dist = [
     { name = "google-api-python-client", marker = "extra == 'all-channels'", specifier = ">=2.100.0" },
     { name = "google-api-python-client", marker = "extra == 'dev'", specifier = ">=2.100.0" },
     { name = "google-api-python-client", marker = "extra == 'drive'", specifier = ">=2.100.0" },
-    { name = "google-api-python-client", marker = "extra == 'enterprise'", specifier = ">=2.100.0" },
     { name = "google-api-python-client", marker = "extra == 'gchat'", specifier = ">=2.100.0" },
     { name = "google-auth", marker = "extra == 'all'", specifier = ">=2.25.0" },
     { name = "google-auth", marker = "extra == 'all-channels'", specifier = ">=2.25.0" },
     { name = "google-auth", marker = "extra == 'dev'", specifier = ">=2.25.0" },
     { name = "google-auth", marker = "extra == 'drive'", specifier = ">=2.25.0" },
-    { name = "google-auth", marker = "extra == 'enterprise'", specifier = ">=2.25.0" },
     { name = "google-auth", marker = "extra == 'gchat'", specifier = ">=2.25.0" },
     { name = "google-auth-oauthlib", marker = "extra == 'all'", specifier = ">=1.2.0" },
     { name = "google-auth-oauthlib", marker = "extra == 'all-channels'", specifier = ">=1.2.0" },
     { name = "google-auth-oauthlib", marker = "extra == 'drive'", specifier = ">=1.2.0" },
-    { name = "google-auth-oauthlib", marker = "extra == 'enterprise'", specifier = ">=1.2.0" },
-    { name = "google-cloud-storage", marker = "extra == 'enterprise'", specifier = ">=2.14.0" },
     { name = "google-genai", marker = "extra == 'all'", specifier = ">=1.0.0" },
     { name = "google-genai", marker = "extra == 'all-tools'", specifier = ">=1.0.0" },
     { name = "google-genai", marker = "extra == 'dev'", specifier = ">=1.0.0" },
@@ -4573,9 +4555,6 @@ requires-dist = [
     { name = "langchain-openai", marker = "extra == 'deep-agents'", specifier = ">=1.2.0,<2.0.0" },
     { name = "langchain-openai", marker = "extra == 'dev'", specifier = ">=1.2.0,<2.0.0" },
     { name = "litellm", marker = "extra == 'litellm'", specifier = ">=1.40.0" },
-    { name = "livekit-agents", extras = ["codecs"], specifier = ">=1.5.9" },
-    { name = "livekit-api", marker = "extra == 'enterprise'", specifier = ">=0.6.0" },
-    { name = "livekit-plugins-deepgram", specifier = ">=1.5.9" },
     { name = "matrix-nio", marker = "extra == 'all'", specifier = ">=0.24.0" },
     { name = "matrix-nio", marker = "extra == 'all-channels'", specifier = ">=0.24.0" },
     { name = "matrix-nio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
@@ -4589,7 +4568,6 @@ requires-dist = [
     { name = "mem0ai", marker = "extra == 'dev'", specifier = ">=0.1.115" },
     { name = "mem0ai", marker = "extra == 'memory'", specifier = ">=0.1.115" },
     { name = "mem0ai", marker = "extra == 'recommended'", specifier = ">=0.1.115" },
-    { name = "motor", marker = "extra == 'enterprise'", specifier = ">=3.3.0" },
     { name = "motor", marker = "extra == 'mongodb'", specifier = ">=3.3.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8.0" },
     { name = "neonize", marker = "extra == 'all'", specifier = ">=0.3.14" },
@@ -4615,13 +4593,11 @@ requires-dist = [
     { name = "playwright", marker = "extra == 'dev'", specifier = ">=1.50.0" },
     { name = "playwright", marker = "extra == 'recommended'", specifier = ">=1.50.0" },
     { name = "pocketpaw", extras = ["openai-agents", "google-adk", "copilot-sdk", "deep-agents", "litellm"], marker = "extra == 'all-backends'" },
-    { name = "pocketpaw", extras = ["soul"], marker = "extra == 'enterprise'" },
     { name = "psutil", marker = "extra == 'all'", specifier = ">=5.9.0" },
     { name = "psutil", marker = "extra == 'all-tools'", specifier = ">=5.9.0" },
     { name = "psutil", marker = "extra == 'desktop'", specifier = ">=5.9.0" },
     { name = "psutil", marker = "extra == 'dev'", specifier = ">=5.9.0" },
     { name = "psutil", marker = "extra == 'recommended'", specifier = ">=5.9.0" },
-    { name = "pwdlib", extras = ["argon2"], marker = "extra == 'enterprise'", specifier = ">=0.2.0" },
     { name = "pyautogui", marker = "extra == 'all'", specifier = ">=0.9.54" },
     { name = "pyautogui", marker = "extra == 'all-tools'", specifier = ">=0.9.54" },
     { name = "pyautogui", marker = "extra == 'desktop'", specifier = ">=0.9.54" },
@@ -4639,14 +4615,12 @@ requires-dist = [
     { name = "pytest-playwright", marker = "extra == 'dev'", specifier = ">=0.4.0" },
     { name = "python-dateutil", specifier = ">=2.8.0" },
     { name = "python-multipart", specifier = ">=0.0.22" },
-    { name = "python-socketio", marker = "extra == 'enterprise'", specifier = ">=5.11.0" },
     { name = "python-telegram-bot", marker = "extra == 'all'", specifier = ">=21.0" },
     { name = "python-telegram-bot", marker = "extra == 'all-channels'", specifier = ">=21.0" },
     { name = "python-telegram-bot", marker = "extra == 'channels'", specifier = ">=21.0" },
     { name = "python-telegram-bot", marker = "extra == 'dev'", specifier = ">=21.0" },
     { name = "python-telegram-bot", marker = "extra == 'telegram'", specifier = ">=21.0" },
     { name = "qrcode", extras = ["pil"], specifier = ">=7.4" },
-    { name = "redis", extras = ["hiredis"], marker = "extra == 'enterprise'", specifier = ">=5.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4.0" },
     { name = "sarvamai", marker = "extra == 'all'", specifier = ">=0.1.25" },
@@ -4658,7 +4632,6 @@ requires-dist = [
     { name = "slack-bolt", marker = "extra == 'channels'", specifier = ">=1.20.0" },
     { name = "slack-bolt", marker = "extra == 'dev'", specifier = ">=1.20.0" },
     { name = "slack-bolt", marker = "extra == 'slack'", specifier = ">=1.20.0" },
-    { name = "slowapi", marker = "extra == 'enterprise'", specifier = ">=0.1.9" },
     { name = "soul-protocol", extras = ["engine"], specifier = ">=0.3.1" },
     { name = "soul-protocol", extras = ["engine"], marker = "extra == 'all'", specifier = ">=0.3.0" },
     { name = "soul-protocol", extras = ["engine"], marker = "extra == 'all-tools'", specifier = ">=0.3.0" },
@@ -4669,7 +4642,7 @@ requires-dist = [
     { name = "trafilatura", marker = "extra == 'knowledge'" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.31.1" },
 ]
-provides-extras = ["vector", "knowledge", "databases", "postgresql", "mysql", "mongodb", "graph", "dashboard", "telegram", "browser", "desktop", "openai-agents", "codex-sdk", "google-adk", "copilot-sdk", "deep-agents", "litellm", "memory", "soul", "discord", "slack", "whatsapp-personal", "matrix", "teams", "gchat", "drive", "image", "extract", "voice", "ocr", "sarvam", "mcp", "recommended", "channels", "all-channels", "all-tools", "all-backends", "enterprise", "all", "dev"]
+provides-extras = ["vector", "knowledge", "databases", "postgresql", "mysql", "mongodb", "s3", "graph", "dashboard", "telegram", "browser", "desktop", "openai-agents", "codex-sdk", "google-adk", "copilot-sdk", "deep-agents", "litellm", "memory", "soul", "discord", "slack", "whatsapp-personal", "matrix", "teams", "gchat", "drive", "image", "extract", "voice", "ocr", "sarvam", "mcp", "recommended", "channels", "all-channels", "all-tools", "all-backends", "all", "dev"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -4710,6 +4683,55 @@ dev = [
     { name = "slack-bolt", specifier = ">=1.20.0" },
     { name = "types-aiofiles", specifier = ">=25.1.0.20260409" },
 ]
+ee = [{ name = "pocketpaw-ee", editable = "ee" }]
+
+[[package]]
+name = "pocketpaw-ee"
+version = "0.4.16"
+source = { editable = "ee" }
+dependencies = [
+    { name = "beanie" },
+    { name = "boto3" },
+    { name = "fastapi-users", extra = ["beanie", "oauth"] },
+    { name = "google-api-python-client" },
+    { name = "google-auth" },
+    { name = "google-auth-oauthlib" },
+    { name = "google-cloud-storage" },
+    { name = "livekit-agents", extra = ["codecs"] },
+    { name = "livekit-api" },
+    { name = "livekit-plugins-deepgram" },
+    { name = "motor" },
+    { name = "pocketpaw" },
+    { name = "pwdlib", extra = ["argon2"] },
+    { name = "python-socketio" },
+    { name = "redis", extra = ["hiredis"] },
+    { name = "slowapi" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "beanie", specifier = ">=1.26.0" },
+    { name = "boto3", specifier = ">=1.34.0" },
+    { name = "fastapi-users", extras = ["beanie", "oauth"], specifier = ">=13.0.0" },
+    { name = "google-api-python-client", specifier = ">=2.100.0" },
+    { name = "google-auth", specifier = ">=2.25.0" },
+    { name = "google-auth-oauthlib", specifier = ">=1.2.0" },
+    { name = "google-cloud-storage", specifier = ">=2.14.0" },
+    { name = "livekit-agents", extras = ["codecs"], specifier = ">=1.5.9" },
+    { name = "livekit-api", specifier = ">=0.6.0" },
+    { name = "livekit-plugins-deepgram", specifier = ">=1.5.9" },
+    { name = "motor", specifier = ">=3.3.0" },
+    { name = "pocketpaw", specifier = "==0.4.16" },
+    { name = "pwdlib", extras = ["argon2"], specifier = ">=0.2.0" },
+    { name = "pypdf", marker = "extra == 'extraction'" },
+    { name = "pytesseract", marker = "extra == 'extraction'", specifier = ">=0.3.10" },
+    { name = "python-docx", marker = "extra == 'extraction'", specifier = ">=1.1.0" },
+    { name = "python-socketio", specifier = ">=5.11.0" },
+    { name = "redis", extras = ["hiredis"], specifier = ">=5.0.0" },
+    { name = "slowapi", specifier = ">=0.1.9" },
+    { name = "trafilatura", marker = "extra == 'extraction'" },
+]
+provides-extras = ["extraction"]
 
 [[package]]
 name = "portalocker"
