@@ -212,7 +212,7 @@ app.include_router(mission_control_router, prefix="/api/mission-control")
 app.include_router(deep_work_router, prefix="/api/deep-work")
 
 # Mount enterprise route providers FIRST (priority over core v1 routers)
-from pocketpaw._registry import first as _first_provider
+from pocketpaw._registry import first as _first_provider  # noqa: E402
 
 _route_provider = _first_provider("pocketpaw.routes")
 if _route_provider is not None:

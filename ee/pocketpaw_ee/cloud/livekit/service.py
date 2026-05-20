@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 # Active meeting agents registry
 # ---------------------------------------------------------------------------
 
-from pocketpaw_ee.cloud.livekit.types import MeetingAgentProtocol
+from pocketpaw_ee.cloud.livekit.types import MeetingAgentProtocol  # noqa: E402
 
 _active_agents: dict[str, MeetingAgentProtocol] = {}
 
@@ -198,7 +198,7 @@ async def create_room(group_id: str) -> dict[str, Any]:
                 empty_timeout=5 * 60,
                 max_participants=50,
             )
-            room = await lk.room.create_room(req)
+            await lk.room.create_room(req)
             logger.info("Created LiveKit room %s for group %s", room_name, group_id)
         except Exception as exc:
             msg = str(exc).lower()

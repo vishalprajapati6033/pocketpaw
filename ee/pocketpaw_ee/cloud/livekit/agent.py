@@ -185,7 +185,6 @@ class CallMeetingAgent:
         import aiohttp
 
         try:
-            from livekit.agents.stt import SpeechEventType
             from livekit.plugins.deepgram import STT as DeepgramSTT
             from livekit.rtc import (
                 AudioStream,

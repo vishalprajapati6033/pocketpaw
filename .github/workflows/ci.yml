@@ -106,22 +106,35 @@ jobs:
       - name: Set Python version
         run: uv python install 3.12
 
-      - name: Install OSS core only
-        run: uv sync --dev
+      # OSS core + all core extras, but NOT the `ee` group — so pocketpaw_ee
+      # stays absent (the point of this job) while optional-extra-gated tests
+      # (codex-sdk, voice, ocr, …) still have their deps.
+      - name: Install OSS core (all extras, no enterprise)
+        run: uv sync --dev --all-extras
 
       # Runtime boundary: with pocketpaw_ee absent every reworked core module
       # must still import and the EE extension registry must degrade to empty.
+      # ALLOW_INTERNAL_URLS: importing dashboard_state builds Settings, whose
+      # defaults are localhost URLs the SSRF validator rejects in a bare env.
       - name: OSS-only import boundary
         run: uv run python scripts/check_oss_boundary.py
+        env:
+          POCKETPAW_ALLOW_INTERNAL_URLS: "true"
 
       - name: Run core tests
         # tests/ee + tests/cloud are EE suites (tests/cloud is also skipped by
         # the addopts in pyproject.toml). tests/e2e needs Playwright browsers.
+        # --deselect: pre-existing flakes/failures, mirrored from tests.yaml
+        # (#1079 concurrency, #1080 kb-context) — tracked separately.
         run: >-
           uv run pytest tests/
           --ignore=tests/e2e
           --ignore=tests/ee
           --ignore=tests/test_frontend_syntax.py
+          --deselect tests/test_concurrency.py::test_session_lock_serialises_same_session
+          --deselect tests/test_concurrency.py::test_cross_session_runs_in_parallel
+          --deselect tests/test_concurrency.py::test_global_semaphore_caps_concurrency
+          --deselect tests/test_context_budget.py::TestKbContext::test_successful_kb_fetch
           -q --tb=short
         env:
           POCKETPAW_LLM_PROVIDER: "ollama"
@@ -129,9 +142,13 @@ jobs:
 
   test:
     # Full install: OSS core + the `pocketpaw-ee` enterprise package. Runs the
-    # complete (non-e2e) suite, including tests/ee.
+    # complete (non-e2e) suite across the Python matrix.
+    # Skipped on PRs targeting `ee` — tests.yaml is the full-suite gate there
+    # (single Python, with its own deselect list); this job would only
+    # duplicate it. It still runs on PRs to dev/main and on pushes.
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    if: github.base_ref != 'ee'
     strategy:
       fail-fast: false
       matrix:
@@ -147,7 +164,7 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install core + enterprise
-        run: uv sync --dev --group ee
+        run: uv sync --dev --all-extras --group ee
 
       - name: Run tests
         run: >-
