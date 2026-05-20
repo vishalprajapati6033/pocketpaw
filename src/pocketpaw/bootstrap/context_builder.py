@@ -278,7 +278,7 @@ class AgentContextBuilder:
         # The full pocket document is NOT embedded here — that would blow the
         # Windows CLI arg limit for large rippleSpec.ui trees. The agent
         # retrieves it on demand via the `mcp__pocketpaw_pocket__get_pocket`
-        # tool (in-process MCP server; see agents/sdk_mcp_pocket.py).
+        # tool (the EE in-process pocketpaw_pocket MCP server).
         if metadata and metadata.get("pocket_context"):
             import json
 

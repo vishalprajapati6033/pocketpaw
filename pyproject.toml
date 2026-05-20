@@ -403,6 +403,12 @@ cloud = "pocketpaw_ee.extensions:CloudModelProvider"
 [project.entry-points."pocketpaw.pockets"]
 cloud = "pocketpaw_ee.extensions:CloudPocketWriter"
 
+[project.entry-points."pocketpaw.mcp_servers"]
+tasks = "pocketpaw_ee.extensions:CloudTasksMcpProvider"
+planner = "pocketpaw_ee.extensions:CloudPlannerMcpProvider"
+pocket = "pocketpaw_ee.extensions:CloudPocketMcpProvider"
+pocket_specialist = "pocketpaw_ee.extensions:CloudPocketSpecialistMcpProvider"
+
 [project.urls]
 Homepage = "https://pocketpaw.xyz"
 Repository = "https://github.com/pocketpaw/pocketpaw"

@@ -172,7 +172,7 @@ def test_format_for_prompt_empty_widgets_returns_empty_string():
 async def test_get_widget_spec_handler_returns_matched_entries(monkeypatch):
     """The get_widget_spec MCP tool returns a formatted reference for the
     requested types, sourced from the manifest."""
-    from pocketpaw.agents.sdk_mcp_pocket import _get_widget_spec_handler
+    from pocketpaw.agents.sdk_mcp_widgets import _get_widget_spec_handler
     from pocketpaw.ripple import manifest as m
 
     async def fake_get(self, url, timeout):
@@ -190,7 +190,7 @@ async def test_get_widget_spec_handler_returns_matched_entries(monkeypatch):
 
 
 async def test_get_widget_spec_handler_errors_on_empty_types():
-    from pocketpaw.agents.sdk_mcp_pocket import _get_widget_spec_handler
+    from pocketpaw.agents.sdk_mcp_widgets import _get_widget_spec_handler
 
     result = await _get_widget_spec_handler({"types": []})
     assert result["is_error"] is True
@@ -198,7 +198,7 @@ async def test_get_widget_spec_handler_errors_on_empty_types():
 
 
 async def test_get_widget_spec_handler_errors_on_unknown_only(monkeypatch):
-    from pocketpaw.agents.sdk_mcp_pocket import _get_widget_spec_handler
+    from pocketpaw.agents.sdk_mcp_widgets import _get_widget_spec_handler
     from pocketpaw.ripple import manifest as m
 
     async def fake_get(self, url, timeout):
@@ -213,7 +213,7 @@ async def test_get_widget_spec_handler_errors_on_unknown_only(monkeypatch):
 
 
 async def test_get_widget_spec_handler_partial_match_includes_warning(monkeypatch):
-    from pocketpaw.agents.sdk_mcp_pocket import _get_widget_spec_handler
+    from pocketpaw.agents.sdk_mcp_widgets import _get_widget_spec_handler
     from pocketpaw.ripple import manifest as m
 
     async def fake_get(self, url, timeout):
@@ -264,7 +264,7 @@ async def test_format_for_prompt_handles_legacy_manifest_without_envelope():
 
 
 async def test_get_widget_spec_handler_errors_when_manifest_unavailable(monkeypatch):
-    from pocketpaw.agents.sdk_mcp_pocket import _get_widget_spec_handler
+    from pocketpaw.agents.sdk_mcp_widgets import _get_widget_spec_handler
     from pocketpaw.ripple import manifest as m
 
     async def fake_get(self, url, timeout):

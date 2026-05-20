@@ -23,22 +23,31 @@ def test_delegation_rule_points_at_mcp_tool():
 
 
 def test_pocket_mcp_server_is_read_only():
-    """The ``pocketpaw_pocket`` MCP server exposes ONLY read tools. All
-    mutation tool ids must be gone — pocket writes flow through the
-    ``pocket_specialist__create`` / ``__edit`` tools, which run an
-    isolated specialist backend with its own StructuredTool wrappers.
-    """
-    from pocketpaw.agents.sdk_mcp_pocket import POCKET_TOOL_IDS
+    """The pocket-context MCP surface exposes ONLY read tools. All mutation
+    tool ids must be gone — pocket writes flow through the
+    ``pocket_specialist__create`` / ``__edit`` tools, which run an isolated
+    specialist backend with its own StructuredTool wrappers.
 
-    expected_read_only = {
+    The OSS-EE split (Phase 3b) split the old ``pocketpaw_pocket`` server in
+    two: ripple widget-spec tools (core ``pocketpaw_widgets``) and the cloud
+    pocket-context tools (EE ``pocketpaw_pocket``). Both must stay read-only.
+    """
+    from pocketpaw.agents.sdk_mcp_widgets import WIDGET_TOOL_IDS
+
+    assert set(WIDGET_TOOL_IDS) == {
+        "mcp__pocketpaw_widgets__get_widget_spec",
+        "mcp__pocketpaw_widgets__get_inline_widget_help",
+    }, f"drift in widget MCP tool surface: {set(WIDGET_TOOL_IDS)}"
+
+    # The cloud pocket-context server is EE-only — skip when absent.
+    try:
+        from pocketpaw_ee.agent.mcp_servers.pockets import POCKET_TOOL_IDS
+    except ImportError:
+        return
+    assert set(POCKET_TOOL_IDS) == {
         "mcp__pocketpaw_pocket__get_pocket",
         "mcp__pocketpaw_pocket__list_pockets",
-        "mcp__pocketpaw_pocket__get_widget_spec",
-        "mcp__pocketpaw_pocket__get_inline_widget_help",
-    }
-    assert set(POCKET_TOOL_IDS) == expected_read_only, (
-        f"drift in pocket MCP tool surface: {set(POCKET_TOOL_IDS) ^ expected_read_only}"
-    )
+    }, f"drift in pocket MCP tool surface: {set(POCKET_TOOL_IDS)}"
 
 
 def test_legacy_subagent_helpers_removed():

@@ -1,91 +1,34 @@
-"""In-process SDK MCP binding that exposes pocket context to the Claude Agent SDK.
+"""In-process SDK MCP server exposing ripple widget-spec lookups to backends.
 
-Why MCP: the Claude Agent SDK passes the system prompt to ``claude.exe`` as a
-CLI argument. Windows ``CreateProcess`` caps command lines at ~32KB (WinError
-206), so embedding a full pocket document — including a large
-``rippleSpec.ui`` tree — in the prompt is unsafe.
+The ``get_widget_spec`` / ``get_inline_widget_help`` tools let an agent fetch
+the canonical prop schema for a ripple widget before composing a ui-spec, so it
+never guesses prop names. Pure core: they read the ripple manifest and the
+inline-widget catalog (``pocketpaw.ripple``), which carry no cloud dependency.
 
-Instead we register an in-process MCP server with read-only pocket tools. The
-agent fetches the full pocket on demand; the response flows through the SDK's
-tool-result channel (stdio JSON, unbounded) and never touches the CLI command
-line.
-
-Mutations DO NOT live on this server. Pocket mutations flow through the
-``pocket_specialist__create`` / ``pocket_specialist__edit`` MCP tools
-(``ee/agent/pocket_specialist/mcp_tool.py``), which run an isolated specialist
-backend with LangChain ``StructuredTool`` wrappers around the same
-``*_for_agent`` functions. See ``ee/agent/pocket_specialist/tools.py``.
-
-This module is a thin adapter — the actual fetch lives in
-``ee/cloud/pockets/agent_context.py``.
+Split out of the old ``sdk_mcp_pocket.py`` in the OSS-EE split (Phase 3b). That
+file also carried cloud ``get_pocket`` / ``list_pockets`` tools, which moved to
+``pocketpaw_ee.agent.mcp_servers.pockets``. The two surfaces are now separate
+in-process MCP servers — ``pocketpaw_widgets`` (this one, core) and
+``pocketpaw_pocket`` (EE).
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-SERVER_NAME = "pocketpaw_pocket"
+SERVER_NAME = "pocketpaw_widgets"
 # Claude Code namespaces in-process MCP tools as ``mcp__<server>__<tool>``.
 # Allowlist entries must use this exact form.
-GET_POCKET_TOOL_ID = f"mcp__{SERVER_NAME}__get_pocket"
-LIST_POCKETS_TOOL_ID = f"mcp__{SERVER_NAME}__list_pockets"
 GET_WIDGET_SPEC_TOOL_ID = f"mcp__{SERVER_NAME}__get_widget_spec"
 GET_INLINE_WIDGET_HELP_TOOL_ID = f"mcp__{SERVER_NAME}__get_inline_widget_help"
 
-POCKET_TOOL_IDS = (
-    GET_POCKET_TOOL_ID,
-    LIST_POCKETS_TOOL_ID,
+WIDGET_TOOL_IDS = (
     GET_WIDGET_SPEC_TOOL_ID,
     GET_INLINE_WIDGET_HELP_TOOL_ID,
 )
-
-
-def _result_payload(result: dict) -> dict:
-    """Translate an ``agent_context`` ``{ok, pocket|error}`` dict into the MCP
-    response shape."""
-    if not result.get("ok"):
-        return {
-            "content": [{"type": "text", "text": f"Error: {result.get('error')}"}],
-            "is_error": True,
-        }
-    body = result.get("pocket", result)
-    return {
-        "content": [
-            {
-                "type": "text",
-                "text": json.dumps(body, separators=(",", ":")),
-            }
-        ]
-    }
-
-
-async def _get_pocket_handler(args: dict) -> dict:
-    from pocketpaw_ee.cloud.pockets.agent_context import fetch_pocket_for_agent
-
-    return _result_payload(await fetch_pocket_for_agent(args.get("pocket_id", "")))
-
-
-async def _list_pockets_handler(args: dict) -> dict:
-    from pocketpaw_ee.cloud.pockets.agent_context import list_pockets_for_agent
-
-    result = await list_pockets_for_agent()
-    if not result.get("ok"):
-        return {
-            "content": [{"type": "text", "text": f"Error: {result.get('error')}"}],
-            "is_error": True,
-        }
-    return {
-        "content": [
-            {
-                "type": "text",
-                "text": json.dumps({"pockets": result.get("pockets", [])}, separators=(",", ":")),
-            }
-        ]
-    }
 
 
 async def _get_widget_spec_handler(args: dict) -> dict:
@@ -160,39 +103,13 @@ async def _get_inline_widget_help_handler(args: dict) -> dict:
     return {"content": [{"type": "text", "text": widget_help([str(t) for t in types])}]}
 
 
-def build_pocket_context_server() -> tuple[str, Any] | None:
-    """Build the in-process SDK MCP server, or return None if the SDK is unavailable."""
+def build_widgets_context_server() -> tuple[str, Any] | None:
+    """Build the in-process SDK MCP server, or None if the SDK is unavailable."""
     try:
         from claude_agent_sdk import create_sdk_mcp_server, tool
     except ImportError:
-        logger.debug("claude_agent_sdk not installed; pocket_context MCP disabled")
+        logger.debug("claude_agent_sdk not installed; pocketpaw_widgets MCP disabled")
         return None
-
-    @tool(
-        "get_pocket",
-        (
-            "Fetch the full PocketPaw pocket document (rippleSpec, widgets, "
-            "visibility, metadata) by id. Call this before answering any "
-            "question about what a pocket contains, its widgets, or its layout."
-        ),
-        {"pocket_id": str},
-    )
-    async def get_pocket(args):  # type: ignore[no-untyped-def]
-        return await _get_pocket_handler(args)
-
-    @tool(
-        "list_pockets",
-        (
-            "List every pocket in the user's workspace they can access "
-            "(owned, shared, or workspace-visible). Returns id + name + "
-            "description + type + icon + color per pocket — no rippleSpec, "
-            "so the call is cheap. No arguments — workspace identity is "
-            "inferred from the active stream."
-        ),
-        {},
-    )
-    async def list_pockets(args):  # type: ignore[no-untyped-def]
-        return await _list_pockets_handler(args)
 
     @tool(
         "get_widget_spec",
@@ -241,11 +158,15 @@ def build_pocket_context_server() -> tuple[str, Any] | None:
     server = create_sdk_mcp_server(
         name=SERVER_NAME,
         version="1.0.0",
-        tools=[
-            get_pocket,
-            list_pockets,
-            get_widget_spec,
-            get_inline_widget_help,
-        ],
+        tools=[get_widget_spec, get_inline_widget_help],
     )
     return SERVER_NAME, server
+
+
+__all__ = [
+    "GET_INLINE_WIDGET_HELP_TOOL_ID",
+    "GET_WIDGET_SPEC_TOOL_ID",
+    "SERVER_NAME",
+    "WIDGET_TOOL_IDS",
+    "build_widgets_context_server",
+]

@@ -160,3 +160,67 @@ class CloudPocketWriter:
         from pocketpaw_ee.cloud.pockets.agent_context import create_pocket_and_session
 
         return await create_pocket_and_session(spec, session_key, user_id, workspace_id)
+
+
+class CloudTasksMcpProvider:
+    """`pocketpaw.mcp_servers` — the Mission Control Tasks in-process server."""
+
+    def build_server(self) -> tuple[str, Any] | None:
+        from pocketpaw_ee.agent.mcp_servers.tasks import build_tasks_context_server
+
+        return build_tasks_context_server()
+
+    def tool_ids(self) -> list[str]:
+        from pocketpaw_ee.agent.mcp_servers.tasks import TASK_TOOL_IDS
+
+        return list(TASK_TOOL_IDS)
+
+
+class CloudPlannerMcpProvider:
+    """`pocketpaw.mcp_servers` — the cloud Planner in-process server."""
+
+    def build_server(self) -> tuple[str, Any] | None:
+        from pocketpaw_ee.agent.mcp_servers.planner import build_planner_context_server
+
+        return build_planner_context_server()
+
+    def tool_ids(self) -> list[str]:
+        from pocketpaw_ee.agent.mcp_servers.planner import PLANNER_TOOL_IDS
+
+        return list(PLANNER_TOOL_IDS)
+
+
+class CloudPocketMcpProvider:
+    """`pocketpaw.mcp_servers` — the cloud pocket-context in-process server."""
+
+    def build_server(self) -> tuple[str, Any] | None:
+        from pocketpaw_ee.agent.mcp_servers.pockets import build_pocket_context_server
+
+        return build_pocket_context_server()
+
+    def tool_ids(self) -> list[str]:
+        from pocketpaw_ee.agent.mcp_servers.pockets import POCKET_TOOL_IDS
+
+        return list(POCKET_TOOL_IDS)
+
+
+class CloudPocketSpecialistMcpProvider:
+    """`pocketpaw.mcp_servers` — the pocket specialist (create/edit) server."""
+
+    def build_server(self) -> tuple[str, Any] | None:
+        try:
+            from pocketpaw_ee.agent.pocket_specialist.mcp_tool import (
+                SERVER_NAME,
+                build_pocket_specialist_server,
+            )
+
+            return SERVER_NAME, build_pocket_specialist_server()
+        except ImportError:
+            # claude_agent_sdk not installed — the specialist server is
+            # unavailable, same as the other in-process servers.
+            return None
+
+    def tool_ids(self) -> list[str]:
+        from pocketpaw_ee.agent.pocket_specialist.mcp_tool import POCKET_SPECIALIST_TOOL_IDS
+
+        return list(POCKET_SPECIALIST_TOOL_IDS)

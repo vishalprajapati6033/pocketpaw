@@ -5,13 +5,15 @@ All SDK imports are mocked.
 
 from unittest.mock import patch
 
+from pocketpaw_ee.agent.mcp_servers.planner import SERVER_NAME as _PLANNER_MCP_SERVER_NAME
+from pocketpaw_ee.agent.mcp_servers.pockets import SERVER_NAME as _POCKET_MCP_SERVER_NAME
+from pocketpaw_ee.agent.mcp_servers.tasks import SERVER_NAME as _TASKS_MCP_SERVER_NAME
 from pocketpaw_ee.agent.pocket_specialist.mcp_tool import (
     SERVER_NAME as _POCKET_SPECIALIST_MCP_SERVER_NAME,
 )
 
 from pocketpaw.agents.claude_sdk import ClaudeAgentSDK
-from pocketpaw.agents.sdk_mcp_pocket import SERVER_NAME as _POCKET_MCP_SERVER_NAME
-from pocketpaw.agents.sdk_mcp_tasks import SERVER_NAME as _TASKS_MCP_SERVER_NAME
+from pocketpaw.agents.sdk_mcp_widgets import SERVER_NAME as _WIDGETS_MCP_SERVER_NAME
 from pocketpaw.config import Settings
 from pocketpaw.mcp.config import MCPServerConfig
 
@@ -19,9 +21,11 @@ from pocketpaw.mcp.config import MCPServerConfig
 def _strip_builtin_servers(result: dict) -> dict:
     """Drop always-on in-process MCP servers so external-config assertions stay focused."""
     out = dict(result)
+    out.pop(_WIDGETS_MCP_SERVER_NAME, None)
     out.pop(_POCKET_MCP_SERVER_NAME, None)
     out.pop(_POCKET_SPECIALIST_MCP_SERVER_NAME, None)
     out.pop(_TASKS_MCP_SERVER_NAME, None)
+    out.pop(_PLANNER_MCP_SERVER_NAME, None)
     return out
 
 

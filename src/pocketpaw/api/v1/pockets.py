@@ -396,7 +396,7 @@ async def pocket_chat_stream(body: ChatRequest):
     if body.pocket_context:
         # Only the small descriptor travels through metadata — the agent
         # retrieves the full pocket document on demand via the in-process
-        # `get_pocket` MCP tool (see agents/sdk_mcp_pocket.py). This keeps
+        # `get_pocket` MCP tool (the EE pocketpaw_pocket server). This keeps
         # the system prompt well below the Windows CLI arg limit regardless
         # of how large rippleSpec.ui is.
         meta["pocket_context"] = body.pocket_context.model_dump(exclude_none=True)

@@ -1,9 +1,10 @@
-# sdk_mcp_tasks.py — in-process MCP server exposing Mission Control Tasks.
-# Created: 2026-05-13 — PR 2 of 3 for Mission Control's backend. Mirrors
-#   the read-only ``sdk_mcp_pocket.py`` pattern but adds the
-#   state-mutating ``claim_task`` and ``complete_task`` verbs that the
-#   agent runtime needs to pick up work routed to it from Mission
-#   Control's create form. Tool ids namespace as
+# tasks.py — in-process MCP server exposing cloud Mission Control Tasks.
+# Created: 2026-05-13 — PR 2 of 3 for Mission Control's backend. Moved from
+#   src/pocketpaw/agents/sdk_mcp_tasks.py to EE in the OSS-EE split (Phase
+#   3b): it wraps the EE pocketpaw_ee.cloud.tasks service, distinct from the
+#   self-contained core src/pocketpaw/mission_control package. Adds the
+#   state-mutating ``claim_task`` / ``complete_task`` verbs the agent runtime
+#   uses to pick up routed work. Tool ids namespace as
 #   ``mcp__pocketpaw_tasks__*`` so the Claude Code allowlist machinery
 #   matches them.
 """Agent-side MCP surface for the Mission Control Tasks entity.
