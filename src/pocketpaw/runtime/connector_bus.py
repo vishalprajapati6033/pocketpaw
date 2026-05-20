@@ -37,6 +37,7 @@ def _get_event_bus() -> Any:
     provider = first("pocketpaw.event_bus")
     return provider.get_event_bus() if provider else None
 
+
 # Topics shared with ee/cloud/connectors/service.py
 EXEC_REQUESTED = "connector.exec.requested"
 EXEC_COMPLETED = "connector.exec.completed"
