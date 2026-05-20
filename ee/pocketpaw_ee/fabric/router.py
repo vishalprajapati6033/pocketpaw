@@ -27,7 +27,7 @@ from pydantic import BaseModel
 from pocketpaw_ee.cloud._core.deps import require_plan_feature
 from pocketpaw_ee.cloud.license import require_license
 from pocketpaw_ee.cloud.shared.deps import require_action_any_workspace
-from pocketpaw_ee.fabric.models import (
+from pocketpaw.fabric.models import (
     FabricLink,
     FabricObject,
     FabricQuery,
@@ -35,7 +35,7 @@ from pocketpaw_ee.fabric.models import (
     ObjectType,
     PropertyDef,
 )
-from pocketpaw_ee.fabric.store import FabricStore
+from pocketpaw.fabric.store import FabricStore
 
 logger = logging.getLogger(__name__)
 

@@ -20,8 +20,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
-from pocketpaw_ee.retrieval.projection import RetrievalProjection
-from pocketpaw_ee.retrieval.store import RetrievalJournalStore
+from pocketpaw.retrieval.projection import RetrievalProjection
+from pocketpaw.retrieval.store import RetrievalJournalStore
 
 logger = logging.getLogger(__name__)
 

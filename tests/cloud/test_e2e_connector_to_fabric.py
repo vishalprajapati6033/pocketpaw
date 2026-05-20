@@ -12,8 +12,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pocketpaw_ee.fabric.models import FabricQuery, PropertyDef
-from pocketpaw_ee.fabric.store import FabricStore
+from pocketpaw.fabric.models import FabricQuery, PropertyDef
+from pocketpaw.fabric.store import FabricStore
 from pocketpaw_ee.instinct.models import ActionTrigger
 from pocketpaw_ee.instinct.store import InstinctStore
 

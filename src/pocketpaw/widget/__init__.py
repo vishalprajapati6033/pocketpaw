@@ -15,7 +15,7 @@
 # path), the policy (graduation + co-occurrence decisions), plus the
 # canonical action names and payload builders for out-of-band emitters.
 
-from pocketpaw_ee.widget.events import (
+from pocketpaw.widget.events import (
     ACTION_WIDGET_COOCCURRENCE_DETECTED,
     ACTION_WIDGET_GRADUATED,
     ACTION_WIDGET_INTERACTION_RECORDED,
@@ -27,7 +27,7 @@ from pocketpaw_ee.widget.events import (
     widget_graduated_payload,
     widget_interaction_payload,
 )
-from pocketpaw_ee.widget.policy import (
+from pocketpaw.widget.policy import (
     DEFAULT_ARCHIVE_DAYS,
     DEFAULT_COOCCURRENCE_THRESHOLD,
     DEFAULT_COOCCURRENCE_WINDOW_DAYS,
@@ -44,7 +44,7 @@ from pocketpaw_ee.widget.policy import (
     scan_for_cooccurrences,
     scan_for_widget_graduations,
 )
-from pocketpaw_ee.widget.projection import (
+from pocketpaw.widget.projection import (
     CooccurrenceProjection,
     CooccurrenceRow,
     GraduationStateProjection,
@@ -54,7 +54,7 @@ from pocketpaw_ee.widget.projection import (
     WidgetUsageProjection,
     WidgetUsageRow,
 )
-from pocketpaw_ee.widget.store import WidgetJournalStore
+from pocketpaw.widget.store import WidgetJournalStore
 
 __all__ = [
     # Actions + payload builders.

@@ -30,19 +30,19 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pocketpaw.journal_dep import get_journal, reset_journal_cache
-from pocketpaw_ee.retrieval.events import (
+from pocketpaw.retrieval.events import (
     ACTION_GRADUATION_APPLIED,
     ACTION_RETRIEVAL_QUERY,
 )
-from pocketpaw_ee.retrieval.policy import (
+from pocketpaw.retrieval.policy import (
     DEFAULT_EPISODIC_THRESHOLD,
     DEFAULT_SEMANTIC_THRESHOLD,
     apply_decisions,
     scan_for_graduations,
 )
-from pocketpaw_ee.retrieval.projection import RetrievalProjection
-from pocketpaw_ee.retrieval.router import reset_store_cache, router
-from pocketpaw_ee.retrieval.store import RetrievalJournalStore
+from pocketpaw.retrieval.projection import RetrievalProjection
+from pocketpaw.retrieval.router import reset_store_cache, router
+from pocketpaw.retrieval.store import RetrievalJournalStore
 from soul_protocol.engine.journal import open_journal
 from soul_protocol.spec.journal import Actor
 
@@ -400,7 +400,7 @@ class TestGraduationPolicy:
         """Journal emission must succeed even when no soul is supplied —
         the soul mutation is best-effort per #937."""
 
-        from pocketpaw_ee.retrieval.policy import GraduationDecision
+        from pocketpaw.retrieval.policy import GraduationDecision
 
         decision = GraduationDecision(
             memory_id="mem_manual",

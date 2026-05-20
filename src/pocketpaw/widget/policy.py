@@ -38,8 +38,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
-from pocketpaw_ee.widget.projection import WidgetProjection
-from pocketpaw_ee.widget.store import WidgetJournalStore
+from pocketpaw.widget.projection import WidgetProjection
+from pocketpaw.widget.store import WidgetJournalStore
 
 logger = logging.getLogger(__name__)
 

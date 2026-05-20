@@ -27,14 +27,14 @@ from typing import Any
 from soul_protocol.engine.journal import Journal
 from soul_protocol.spec.journal import EventEntry
 
-from pocketpaw_ee.fabric.events import (
+from pocketpaw.fabric.events import (
     ACTION_OBJECT_ARCHIVED,
     ACTION_OBJECT_CREATED,
     ACTION_OBJECT_UPDATED,
     ALL_FABRIC_ACTIONS,
 )
-from pocketpaw_ee.fabric.models import FabricObject, FabricQuery, FabricQueryResult
-from pocketpaw_ee.fabric.policy import filter_visible
+from pocketpaw.fabric.models import FabricObject, FabricQuery, FabricQueryResult
+from pocketpaw.fabric.policy import filter_visible
 
 logger = logging.getLogger(__name__)
 

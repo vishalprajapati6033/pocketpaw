@@ -27,13 +27,13 @@ from uuid import UUID, uuid4
 from soul_protocol.engine.journal import Journal
 from soul_protocol.spec.journal import Actor, EventEntry
 
-from pocketpaw_ee.retrieval.events import (
+from pocketpaw.retrieval.events import (
     ACTION_GRADUATION_APPLIED,
     ACTION_RETRIEVAL_QUERY,
     graduation_applied_payload,
     retrieval_query_payload,
 )
-from pocketpaw_ee.retrieval.projection import RetrievalProjection
+from pocketpaw.retrieval.projection import RetrievalProjection
 
 _SYSTEM_RETRIEVAL_ACTOR_ID = "system:retrieval"
 _SYSTEM_GRADUATION_ACTOR_ID = "system:graduation"

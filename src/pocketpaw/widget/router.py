@@ -48,7 +48,7 @@ from soul_protocol.engine.journal import Journal
 from soul_protocol.spec.journal import Actor
 
 from pocketpaw.journal_dep import get_journal
-from pocketpaw_ee.widget.policy import (
+from pocketpaw.widget.policy import (
     DEFAULT_ARCHIVE_DAYS,
     DEFAULT_COOCCURRENCE_THRESHOLD,
     DEFAULT_PIN_THRESHOLD,
@@ -57,7 +57,7 @@ from pocketpaw_ee.widget.policy import (
     scan_for_cooccurrences,
     scan_for_widget_graduations,
 )
-from pocketpaw_ee.widget.store import WidgetJournalStore
+from pocketpaw.widget.store import WidgetJournalStore
 
 logger = logging.getLogger(__name__)
 

@@ -11,7 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from pocketpaw_ee.fabric.models import _gen_id
+from pocketpaw.fabric.models import _gen_id
 
 
 class ActionStatus(StrEnum):

@@ -12,7 +12,7 @@ from typing import Any
 
 import aiosqlite
 
-from pocketpaw_ee.fabric.models import (
+from pocketpaw.fabric.models import (
     FabricLink,
     FabricObject,
     FabricQuery,

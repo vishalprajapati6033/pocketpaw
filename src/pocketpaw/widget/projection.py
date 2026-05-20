@@ -38,8 +38,8 @@ from typing import Any
 from soul_protocol.engine.journal import Journal
 from soul_protocol.spec.journal import EventEntry
 
-from pocketpaw_ee.fabric.policy import filter_visible
-from pocketpaw_ee.widget.events import (
+from pocketpaw.fabric.policy import filter_visible
+from pocketpaw.widget.events import (
     ACTION_WIDGET_COOCCURRENCE_DETECTED,
     ACTION_WIDGET_GRADUATED,
     ACTION_WIDGET_INTERACTION_RECORDED,

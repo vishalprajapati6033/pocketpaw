@@ -31,8 +31,8 @@ from uuid import UUID
 from soul_protocol.engine.journal import Journal
 from soul_protocol.spec.journal import EventEntry
 
-from pocketpaw_ee.fabric.policy import filter_visible
-from pocketpaw_ee.retrieval.events import (
+from pocketpaw.fabric.policy import filter_visible
+from pocketpaw.retrieval.events import (
     ACTION_GRADUATION_APPLIED,
     ACTION_RETRIEVAL_QUERY,
     ALL_RETRIEVAL_ACTIONS,

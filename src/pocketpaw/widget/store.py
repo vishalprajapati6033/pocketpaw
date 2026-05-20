@@ -38,7 +38,7 @@ from uuid import UUID, uuid4
 from soul_protocol.engine.journal import Journal
 from soul_protocol.spec.journal import Actor, EventEntry
 
-from pocketpaw_ee.widget.events import (
+from pocketpaw.widget.events import (
     ACTION_WIDGET_COOCCURRENCE_ACCEPTED,
     ACTION_WIDGET_COOCCURRENCE_DETECTED,
     ACTION_WIDGET_COOCCURRENCE_DISMISSED,
@@ -50,7 +50,7 @@ from pocketpaw_ee.widget.events import (
     widget_graduated_payload,
     widget_interaction_payload,
 )
-from pocketpaw_ee.widget.projection import WidgetProjection
+from pocketpaw.widget.projection import WidgetProjection
 
 _SYSTEM_WIDGET_ACTOR_ID = "system:widget"
 _SYSTEM_GRADUATION_ACTOR_ID = "system:widget-graduation"

@@ -22,14 +22,14 @@ from pydantic import BaseModel
 from soul_protocol.engine.journal import Journal
 
 from pocketpaw.journal_dep import get_journal
-from pocketpaw_ee.retrieval.policy import (
+from pocketpaw.retrieval.policy import (
     DEFAULT_EPISODIC_THRESHOLD,
     DEFAULT_SEMANTIC_THRESHOLD,
     DEFAULT_WINDOW_DAYS,
     GraduationDecision,
     scan_for_graduations,
 )
-from pocketpaw_ee.retrieval.store import RetrievalJournalStore
+from pocketpaw.retrieval.store import RetrievalJournalStore
 
 logger = logging.getLogger(__name__)
 

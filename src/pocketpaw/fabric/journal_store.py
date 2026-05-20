@@ -28,7 +28,7 @@ from uuid import UUID, uuid4
 from soul_protocol.engine.journal import Journal
 from soul_protocol.spec.journal import Actor, EventEntry
 
-from pocketpaw_ee.fabric.events import (
+from pocketpaw.fabric.events import (
     ACTION_OBJECT_ARCHIVED,
     ACTION_OBJECT_CREATED,
     ACTION_OBJECT_UPDATED,
@@ -36,8 +36,8 @@ from pocketpaw_ee.fabric.events import (
     object_created_payload,
     object_updated_payload,
 )
-from pocketpaw_ee.fabric.models import FabricObject, FabricQuery, FabricQueryResult
-from pocketpaw_ee.fabric.projection import FabricProjection
+from pocketpaw.fabric.models import FabricObject, FabricQuery, FabricQueryResult
+from pocketpaw.fabric.projection import FabricProjection
 
 _SYSTEM_ACTOR_ID = "system:fabric"
 

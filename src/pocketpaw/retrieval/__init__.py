@@ -12,14 +12,14 @@
 # the policy (graduation decisions), plus the canonical action names and
 # payload builders for callers that want to emit events out of band.
 
-from pocketpaw_ee.retrieval.events import (
+from pocketpaw.retrieval.events import (
     ACTION_GRADUATION_APPLIED,
     ACTION_RETRIEVAL_QUERY,
     ALL_RETRIEVAL_ACTIONS,
     graduation_applied_payload,
     retrieval_query_payload,
 )
-from pocketpaw_ee.retrieval.policy import (
+from pocketpaw.retrieval.policy import (
     DEFAULT_EPISODIC_THRESHOLD,
     DEFAULT_SEMANTIC_THRESHOLD,
     DEFAULT_WINDOW_DAYS,
@@ -29,12 +29,12 @@ from pocketpaw_ee.retrieval.policy import (
     apply_decisions,
     scan_for_graduations,
 )
-from pocketpaw_ee.retrieval.projection import (
+from pocketpaw.retrieval.projection import (
     GraduationStateRow,
     RetrievalProjection,
     RetrievalView,
 )
-from pocketpaw_ee.retrieval.store import RetrievalJournalStore
+from pocketpaw.retrieval.store import RetrievalJournalStore
 
 __all__ = [
     # Actions + payload builders.

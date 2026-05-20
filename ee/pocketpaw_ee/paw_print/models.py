@@ -12,7 +12,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from pocketpaw_ee.fabric.models import _gen_id
+from pocketpaw.fabric.models import _gen_id
 
 _MAX_BLOCKS_PER_SPEC = 64
 _MAX_ITEMS_PER_LIST = 50

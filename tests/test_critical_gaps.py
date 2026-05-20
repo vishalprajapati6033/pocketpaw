@@ -126,7 +126,7 @@ class TestFabricTools:
 
     @pytest.mark.asyncio
     async def test_fabric_query_with_results(self):
-        from pocketpaw_ee.fabric.models import FabricObject, FabricQueryResult
+        from pocketpaw.fabric.models import FabricObject, FabricQueryResult
 
         from pocketpaw.tools.builtin.fabric_tools import FabricQueryTool
 
@@ -161,7 +161,7 @@ class TestFabricTools:
 
     @pytest.mark.asyncio
     async def test_fabric_create_object(self):
-        from pocketpaw_ee.fabric.models import FabricObject, ObjectType
+        from pocketpaw.fabric.models import FabricObject, ObjectType
 
         from pocketpaw.tools.builtin.fabric_tools import FabricCreateTool
 

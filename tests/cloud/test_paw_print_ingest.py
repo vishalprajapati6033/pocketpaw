@@ -272,7 +272,7 @@ class TestEventIngest:
         fake_api = types.ModuleType("pocketpaw_ee.api")
         fake_api.get_fabric_store = lambda: fabric  # type: ignore[attr-defined]
 
-        fake_fabric_models = types.ModuleType("pocketpaw_ee.fabric.models")
+        fake_fabric_models = types.ModuleType("pocketpaw.fabric.models")
         fake_fabric_models.FabricObject = _FakeFabricObject  # type: ignore[attr-defined]
         fake_fabric_models._gen_id = lambda prefix="x": f"{prefix}_fake"  # type: ignore[attr-defined]
 

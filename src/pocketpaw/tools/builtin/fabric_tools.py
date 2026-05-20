@@ -95,7 +95,7 @@ class FabricQueryTool(BaseTool):
             return "Fabric is not available (enterprise feature)."
 
         try:
-            from pocketpaw_ee.fabric.models import FabricQuery
+            from pocketpaw.fabric.models import FabricQuery
 
             result = await store.query(
                 FabricQuery(
@@ -222,7 +222,7 @@ class FabricCreateTool(BaseTool):
             if action == "define_type":
                 if not type_name:
                     return "type_name is required for define_type"
-                from pocketpaw_ee.fabric.models import PropertyDef
+                from pocketpaw.fabric.models import PropertyDef
 
                 prop_defs = []
                 if properties:

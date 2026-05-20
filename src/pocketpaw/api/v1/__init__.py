@@ -62,6 +62,10 @@ _V1_ROUTERS: list[tuple[str, str, str]] = [
     # a deprecated alias in audit.router and `/instinct/audit` stays in
     # ee.instinct.router; both forward semantically to this one.
     ("pocketpaw.audit.runtime_router", "router", "Runtime Audit"),
+    # Moved to OSS core in the open-core split (Phase 2) — journal-backed
+    # retrieval + widget projections, no multi-tenant cloud dependency.
+    ("pocketpaw.retrieval.router", "router", "Retrieval"),
+    ("pocketpaw.widget.router", "router", "Widgets"),
 ]
 
 # Enterprise API routes (require ee/ module) — skipped silently when ee/ is absent.
@@ -69,8 +73,6 @@ _EE_ROUTERS: list[tuple[str, str, str]] = [
     ("pocketpaw_ee.fabric.router", "router", "Fabric"),
     ("pocketpaw_ee.fleet.router", "router", "Fleet"),
     ("pocketpaw_ee.instinct.router", "router", "Instinct"),
-    ("pocketpaw_ee.retrieval.router", "router", "Retrieval"),
-    ("pocketpaw_ee.widget.router", "router", "Widgets"),
     ("pocketpaw.ee.automations.router", "router", "Automations"),
 ]
 

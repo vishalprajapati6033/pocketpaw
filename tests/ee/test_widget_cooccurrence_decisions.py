@@ -28,11 +28,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pocketpaw.journal_dep import get_journal, reset_journal_cache
-from pocketpaw_ee.widget.events import (
+from pocketpaw.widget.events import (
     ACTION_WIDGET_COOCCURRENCE_ACCEPTED,
     ACTION_WIDGET_COOCCURRENCE_DISMISSED,
 )
-from pocketpaw_ee.widget.router import reset_store_cache, router
+from pocketpaw.widget.router import reset_store_cache, router
 from soul_protocol.engine.journal import open_journal
 
 
