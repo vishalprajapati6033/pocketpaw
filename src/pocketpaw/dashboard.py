@@ -211,16 +211,18 @@ app.include_router(mission_control_router, prefix="/api/mission-control")
 
 app.include_router(deep_work_router, prefix="/api/deep-work")
 
-# Mount enterprise cloud module FIRST (takes priority over core v1 routers)
-try:
-    from pocketpaw_ee.cloud import mount_cloud
+# Mount enterprise route providers FIRST (priority over core v1 routers)
+from pocketpaw._registry import first as _first_provider
 
-    mount_cloud(app)
-    logger.info("Enterprise cloud module mounted successfully")
-except ImportError as exc:
-    logger.debug("Enterprise cloud module not available: %s", exc)
-except Exception:
-    logger.warning("Cloud module mount failed", exc_info=True)
+_route_provider = _first_provider("pocketpaw.routes")
+if _route_provider is not None:
+    try:
+        _route_provider.mount(app)
+        logger.info("Enterprise route provider mounted successfully")
+    except Exception:
+        logger.warning("Route provider mount failed", exc_info=True)
+else:
+    logger.debug("No enterprise route provider registered")
 
 # Mount API v1 routers at /api/v1/ (canonical) — see api/v1/__init__.py
 mount_v1_routers(app)
@@ -1808,21 +1810,6 @@ def run_dashboard(
                 logger.error("Max restart limit (%d) reached, exiting.", _MAX_RESTARTS)
                 break
             logger.info("Restarting server with updated settings...")
-
-
-# ---------------------------------------------------------------------------
-# Wrap FastAPI app with Socket.IO ASGI middleware (enterprise real-time chat)
-# Must be AFTER all routes and middleware are registered.
-# ---------------------------------------------------------------------------
-try:
-    from pocketpaw_ee.cloud.socketio_server import wrap_asgi_app
-
-    app = wrap_asgi_app(app)
-    logger.info("Socket.IO ASGI wrapper applied")
-except ImportError:
-    pass
-except Exception as _sio_exc:
-    logger.warning("Socket.IO wrapper failed: %s", _sio_exc)
 
 
 if __name__ == "__main__":

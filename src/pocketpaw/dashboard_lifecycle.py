@@ -173,41 +173,18 @@ async def startup_event(
     except ImportError:
         pass
 
-    # Initialize enterprise cloud DB (Beanie/MongoDB) — best-effort
-    try:
-        import os
+    # Run enterprise lifecycle startup hooks — best-effort. The cloud hook
+    # initializes the Beanie/MongoDB database, seeds the default admin +
+    # workspace, back-fills agents and registers the chat-title listener.
+    # Discovered via the `pocketpaw.lifecycle` entry-point; an OSS install
+    # has no provider and skips this entirely.
+    from pocketpaw._registry import providers as _ext_providers
 
-        from pocketpaw_ee.cloud.db import init_cloud_db
-
-        mongo_uri = os.environ.get("CLOUD_MONGODB_URI", "mongodb://localhost:27017/paw-enterprise")
-        await init_cloud_db(mongo_uri)
-        # Seed default admin user and workspace
-        from pocketpaw_ee.cloud.auth.core import (
-            ensure_default_agent_all_workspaces,
-            seed_admin,
-            seed_workspace,
-        )
-
-        admin = await seed_admin()
-        await seed_workspace(admin)
-        # Back-fill the pocketpaw agent for workspaces that predate agent seeding.
-        await ensure_default_agent_all_workspaces()
-
-        # Persist Haiku-generated chat titles into MongoDB. The pocketpaw bus
-        # emits ``session_titled`` after the first user message; this listener
-        # writes the title onto the Session document so it survives a refresh.
+    for _hook in _ext_providers("pocketpaw.lifecycle"):
         try:
-            from pocketpaw_ee.cloud.sessions.title_listener import (
-                register as register_title_listener,
-            )
-
-            register_title_listener()
+            await _hook.on_startup(None)
         except Exception as exc:
-            logger.warning("Cloud chat-title listener registration failed: %s", exc)
-    except ImportError:
-        logger.debug("Enterprise cloud module not available — skipping MongoDB init")
-    except Exception as exc:
-        logger.warning("Enterprise cloud DB init failed (cloud features disabled): %s", exc)
+            logger.warning("Lifecycle startup hook failed (cloud features disabled): %s", exc)
 
     # Start the cloud agent pool GC task. Previously registered via
     # ``@app.on_event("startup")`` inside ``mount_cloud()`` but that path is

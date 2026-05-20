@@ -61,3 +61,71 @@ class CloudAuthProvider:
         from pocketpaw_ee.cloud.auth.core import current_optional_user
 
         return current_optional_user
+
+
+class CloudRouteProvider:
+    """`pocketpaw.routes` — mounts the multi-tenant cloud API."""
+
+    def mount(self, app: Any) -> None:
+        from pocketpaw_ee.cloud import mount_cloud
+
+        mount_cloud(app)
+
+
+class CloudLifecycleHook:
+    """`pocketpaw.lifecycle` — cloud DB init + admin/workspace seeding +
+    chat-title listener registration, run on dashboard startup."""
+
+    async def on_startup(self, app: Any) -> None:
+        import logging
+        import os
+
+        logger = logging.getLogger(__name__)
+
+        from pocketpaw_ee.cloud.db import init_cloud_db
+
+        mongo_uri = os.environ.get(
+            "CLOUD_MONGODB_URI", "mongodb://localhost:27017/paw-enterprise"
+        )
+        await init_cloud_db(mongo_uri)
+
+        from pocketpaw_ee.cloud.auth.core import (
+            ensure_default_agent_all_workspaces,
+            seed_admin,
+            seed_workspace,
+        )
+
+        admin = await seed_admin()
+        await seed_workspace(admin)
+        # Back-fill the pocketpaw agent for workspaces that predate agent seeding.
+        await ensure_default_agent_all_workspaces()
+
+        # Persist Haiku-generated chat titles into MongoDB.
+        try:
+            from pocketpaw_ee.cloud.sessions.title_listener import (
+                register as register_title_listener,
+            )
+
+            register_title_listener()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Cloud chat-title listener registration failed: %s", exc)
+
+    async def on_shutdown(self, app: Any) -> None:
+        # Cloud teardown is handled inside mount_cloud's own shutdown hook.
+        return None
+
+
+class CloudStorageBackend:
+    """`pocketpaw.storage_backends` — the EE Mongo-backed upload store."""
+
+    name = "cloud"
+
+    def adapter(self) -> Any:
+        from pocketpaw_ee.cloud.uploads.router import _ADAPTER
+
+        return _ADAPTER
+
+    def meta(self) -> Any:
+        from pocketpaw_ee.cloud.uploads.router import _META
+
+        return _META

@@ -89,11 +89,12 @@ class RouteProvider(Protocol):
     """Entry-point group: ``pocketpaw.routes``
 
     Mounts additional sub-applications / routers onto the dashboard app
-    (the multi-tenant cloud API, the Socket.IO server, …).
+    (the multi-tenant cloud API).
     """
 
-    def mount(self, app: Any) -> Any:
-        """Mount onto *app*; may return a wrapped ASGI app or ``None``."""
+    def mount(self, app: Any) -> None:
+        """Mount sub-applications / routers onto *app*. Called early, before
+        the core v1 routers, so EE routes take priority."""
         ...
 
 
