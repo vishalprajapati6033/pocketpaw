@@ -430,121 +430,6 @@ async def create_pocket_for_agent(
     return result
 
 
-async def create_pocket_and_session(
-    spec: dict[str, Any],
-    session_key: str,
-    user_id: str | None = None,
-    workspace_id: str | None = None,
-) -> str | None:
-    """Create pocket + session in MongoDB. Returns pocket _id or None on failure.
-
-    ``user_id`` / ``workspace_id`` come from the caller's authenticated
-    context (threaded down from the chat endpoint via ``InboundMessage.metadata``).
-    When either is missing we fall back to the legacy heuristics —
-    ``user.active_workspace`` first, then first-owned workspace, then any
-    workspace — so self-hosted single-user deployments (CLI, Telegram) that
-    have no JWT auth still work.
-
-    Backs the core ``pocketpaw.pockets`` PocketWriter extension point:
-    ``pocketpaw.agents.loop`` calls this when a local-mode CreatePocketTool
-    emits a ``pocket_event: created``. Unlike ``create_pocket_for_agent`` it
-    takes identity as explicit arguments rather than per-stream ContextVars,
-    because the agent loop has no SSE request scope.
-    """
-    try:
-        from pocketpaw_ee.cloud.models.session import Session
-        from pocketpaw_ee.cloud.models.user import User
-        from pocketpaw_ee.cloud.models.workspace import Workspace
-
-        # ── User selection ──────────────────────────────────────────────
-        # Prefer an explicitly-threaded user id from the chat context so
-        # agent-created pockets land under the caller, not whichever user
-        # happens to come first out of Mongo.
-        user = None
-        if user_id:
-            try:
-                from beanie import PydanticObjectId
-
-                user = await User.get(PydanticObjectId(user_id))
-            except Exception:  # noqa: BLE001
-                logger.warning("Invalid cloud_user_id %r; falling back to first user", user_id)
-                user = None
-        if not user:
-            user = await User.find_one()
-        if not user:
-            logger.warning("Cannot create pocket — no user in DB")
-            return None
-        user_id = str(user.id)
-
-        # ── Workspace selection ─────────────────────────────────────────
-        # Priority: explicit workspace_id (from JWT) → user.active_workspace
-        # → first owned workspace → any workspace. Without this chain the
-        # pocket lands in whichever workspace Mongo returns first, which
-        # is almost never the one the user has open in the UI.
-        workspace = None
-        target_ws = workspace_id or getattr(user, "active_workspace", None)
-        if target_ws:
-            try:
-                from beanie import PydanticObjectId
-
-                workspace = await Workspace.get(PydanticObjectId(target_ws))
-            except Exception:  # noqa: BLE001
-                workspace = None
-        if not workspace:
-            workspace = await Workspace.find_one(Workspace.owner == user_id)
-        if not workspace:
-            # Try any workspace the user belongs to
-            workspace = await Workspace.find_one()
-        if not workspace:
-            logger.warning("Cannot create pocket — no workspace in DB")
-            return None
-        workspace_id = str(workspace.id)
-
-        # Create pocket
-        from pocketpaw_ee.cloud.pockets.dto import CreatePocketRequest
-
-        meta = spec.get("metadata", {})
-        pocket = await pockets_service.create(
-            workspace_id,
-            user_id,
-            CreatePocketRequest(
-                name=spec.get("title") or spec.get("name") or "Untitled",
-                description=spec.get("description", ""),
-                type=meta.get("category", "custom"),
-                icon="sparkles",
-                color=meta.get("color", "#0A84FF"),
-                rippleSpec=spec,
-            ),
-        )
-        pocket_id = str(pocket["_id"])
-
-        # Create session linked to this pocket
-        safe_key = session_key.replace(":", "_") if session_key else ""
-        if safe_key:
-            existing = await Session.find_one(Session.sessionId == safe_key)
-            if existing:
-                existing.pocket = pocket_id
-                await existing.save()
-            else:
-                from datetime import UTC, datetime
-
-                session = Session(
-                    sessionId=safe_key,
-                    workspace=workspace_id,
-                    owner=user_id,
-                    title=spec.get("title") or "New Chat",
-                    pocket=pocket_id,
-                    lastActivity=datetime.now(UTC),
-                )
-                await session.insert()
-
-        logger.info("Created pocket %s + session %s in MongoDB", pocket_id, safe_key)
-        return pocket_id
-    except Exception:
-        logger.warning("Failed to create pocket/session in MongoDB", exc_info=True)
-        return None
-
-
 # ---------------------------------------------------------------------------
 # Granular rippleSpec.ui mutations (the "Read/Edit/Write" surface)
 # ---------------------------------------------------------------------------
@@ -749,7 +634,6 @@ __all__ = [
     "add_node_for_agent",
     "add_widget_for_agent",
     "append_state_for_agent",
-    "create_pocket_and_session",
     "create_pocket_for_agent",
     "fetch_pocket_for_agent",
     "list_pockets_for_agent",

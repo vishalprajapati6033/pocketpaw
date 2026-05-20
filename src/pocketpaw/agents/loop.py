@@ -120,7 +120,7 @@ async def _create_pocket_and_session(
     ``pocketpaw.pockets`` provider, so this returns ``None`` — the pocket
     spec still fans out as an SSE event for local-mode rendering. The
     cloud implementation (workspace/user resolution + Mongo writes) lives
-    in ``pocketpaw_ee.cloud.pockets.agent_context``.
+    in ``pocketpaw_ee.cloud.pockets.service``.
     """
     from pocketpaw._registry import first
 

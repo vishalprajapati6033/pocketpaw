@@ -157,9 +157,11 @@ class CloudPocketWriter:
         user_id: str | None,
         workspace_id: str | None,
     ) -> str | None:
-        from pocketpaw_ee.cloud.pockets.agent_context import create_pocket_and_session
+        from pocketpaw_ee.cloud.pockets import service as pockets_service
 
-        return await create_pocket_and_session(spec, session_key, user_id, workspace_id)
+        return await pockets_service.create_pocket_and_session(
+            spec, session_key, user_id, workspace_id
+        )
 
 
 class CloudTasksMcpProvider:

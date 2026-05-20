@@ -516,6 +516,26 @@ markers = [
 [tool.importlinter]
 root_packages = ["pocketpaw_ee", "pocketpaw"]
 
+# OSS-EE boundary (open-core split). The OSS core package `pocketpaw` must
+# never statically import the enterprise package `pocketpaw_ee`. Optional EE
+# features are reached at runtime via entry-point Protocols — see
+# pocketpaw/extensions.py + pocketpaw/_registry.py — which import-linter's
+# static analysis correctly does not flag. The single exception is the admin
+# CLI: `pocketpaw <cloud subcommands>` administers an EE install directly
+# (documented in docs/plans/2026-05-18-oss-ee-split-phase-3-extension-points.md).
+[[tool.importlinter.contracts]]
+name = "OSS core may not import from EE"
+type = "forbidden"
+source_modules = ["pocketpaw"]
+forbidden_modules = ["pocketpaw_ee"]
+ignore_imports = [
+    "pocketpaw.tools.cli -> pocketpaw_ee.cloud",
+    "pocketpaw.tools.cli -> pocketpaw_ee.cloud.shared.db",
+    "pocketpaw.tools.cli -> pocketpaw_ee.cloud.pockets.service",
+    "pocketpaw.tools.cli -> pocketpaw_ee.cloud.pockets.agent_context",
+    "pocketpaw.tools.cli -> pocketpaw_ee.agent.pocket_specialist.cli_tool",
+]
+
 [[tool.importlinter.contracts]]
 name = "Pockets — Beanie writes only from service.py"
 type = "forbidden"
