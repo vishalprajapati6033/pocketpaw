@@ -368,6 +368,26 @@ dev = [
 [project.scripts]
 pocketpaw = "pocketpaw.__main__:main"
 
+# --- Extension-point providers (OSS-EE split, Phase 3) ---
+# Core (`pocketpaw`) discovers these via importlib entry-points; see
+# pocketpaw/extensions.py for the Protocols and pocketpaw/_registry.py for
+# discovery. These all point at pocketpaw_ee and migrate to ee/pyproject.toml
+# in Phase 4 when the EE package is split out.
+[project.entry-points."pocketpaw.event_bus"]
+cloud = "pocketpaw_ee.extensions:CloudEventBusProvider"
+
+[project.entry-points."pocketpaw.embeddings"]
+cloud = "pocketpaw_ee.extensions:CloudEmbeddingProvider"
+
+[project.entry-points."pocketpaw.memory_backends"]
+mongodb = "pocketpaw_ee.extensions:MongoMemoryBackendProvider"
+
+[project.entry-points."pocketpaw.capabilities"]
+cloud = "pocketpaw_ee.extensions:CloudCapabilityProvider"
+
+[project.entry-points."pocketpaw.auth"]
+cloud = "pocketpaw_ee.extensions:CloudAuthProvider"
+
 [project.urls]
 Homepage = "https://pocketpaw.xyz"
 Repository = "https://github.com/pocketpaw/pocketpaw"
