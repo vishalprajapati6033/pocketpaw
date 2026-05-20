@@ -6,6 +6,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 PocketPaw is a self-hosted AI agent that runs locally and is controlled via Telegram, Discord, Slack, WhatsApp, or a web dashboard. The Python package is named `pocketpaw` (the internal/legacy name), while the public-facing name is `pocketpaw`. Python 3.11+ required.
 
+### Two packages: `pocketpaw` (OSS) + `pocketpaw-ee` (enterprise)
+
+The backend ships as **two installable wheels** (open-core split):
+
+- **`pocketpaw`** (MIT) — the OSS core. Source in `src/pocketpaw/`, packaged by
+  the root `pyproject.toml`. `pip install pocketpaw` gives a fully working local
+  agent with no enterprise code on disk.
+- **`pocketpaw-ee`** (FSL-1.1) — the enterprise layer (multi-tenant cloud, auth,
+  rooms, billing, knowledge base, file storage, fleet, instinct, pocket
+  specialist). Source in `ee/pocketpaw_ee/`, packaged by `ee/pyproject.toml`. It
+  depends on `pocketpaw` and activates through the core's entry-point extension
+  registry (`pocketpaw/extensions.py` + `pocketpaw/_registry.py`).
+
+The OSS core never statically imports `pocketpaw_ee` — an import-linter contract
+enforces it. Optional enterprise behaviour is reached at runtime via
+entry-points. For a full development environment use `uv sync --dev --group ee`.
+
 ## Knowledge Base
 
 A codebase wiki lives at `docs/wiki/` — auto-generated from AST analysis + LLM compilation. **Read the relevant wiki article before modifying a module.**
@@ -37,8 +54,12 @@ The wiki auto-rebuilds on commits that touch `ee/pocketpaw_ee/cloud/` files (via
 ## Commands
 
 ```bash
-# Install dev dependencies
+# Install dev dependencies (OSS core only — no enterprise code, no pocketpaw_ee)
 uv sync --dev
+
+# Full dev install — OSS core + the pocketpaw-ee enterprise package (editable).
+# Required to run tests/ee, tests/cloud, or anything touching ee/pocketpaw_ee.
+uv sync --dev --group ee
 
 # Run the app (web dashboard is the default — auto-starts all configured adapters)
 uv run pocketpaw
@@ -82,8 +103,11 @@ uv run pocketpaw errors                     # Show recent errors (--limit, --sea
 uv run pocketpaw logs                       # Show audit log (--follow to tail)
 uv run pocketpaw update                     # Update to latest version via uv
 
-# Run all tests (excluding E2E tests)
+# Run all tests (excluding E2E tests) — needs the full install: uv sync --dev --group ee
 uv run pytest --ignore=tests/e2e
+
+# Run only the OSS-core test scope (passes on an OSS-only `uv sync --dev`)
+uv run pytest --ignore=tests/e2e --ignore=tests/cloud --ignore=tests/ee
 
 # Run a single test file
 uv run pytest tests/test_bus.py
