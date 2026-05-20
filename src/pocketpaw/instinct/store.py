@@ -25,8 +25,8 @@ from typing import Any
 
 import aiosqlite
 
-from pocketpaw_ee.instinct.correction import Correction, CorrectionPatch
-from pocketpaw_ee.instinct.models import (
+from pocketpaw.instinct.correction import Correction, CorrectionPatch
+from pocketpaw.instinct.models import (
     Action,
     ActionCategory,
     ActionContext,
@@ -36,7 +36,7 @@ from pocketpaw_ee.instinct.models import (
     AuditCategory,
     AuditEntry,
 )
-from pocketpaw_ee.instinct.trace import FabricObjectSnapshot, ReasoningTrace
+from pocketpaw.instinct.trace import FabricObjectSnapshot, ReasoningTrace
 
 
 def _parse_iso(value: Any) -> datetime | None:

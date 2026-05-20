@@ -95,7 +95,7 @@ from pocketpaw_ee.cloud.mission_control.dto import (
     work_item_to_response,
 )
 from pocketpaw_ee.cloud.pockets import service as pockets_service
-from pocketpaw_ee.instinct.models import Action, ActionStatus
+from pocketpaw.instinct.models import Action, ActionStatus
 
 logger = logging.getLogger(__name__)
 

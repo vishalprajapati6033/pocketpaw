@@ -8,8 +8,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from pocketpaw_ee.instinct.correction import Correction, CorrectionPatch
-from pocketpaw_ee.instinct.models import Action
+from pocketpaw.instinct.correction import Correction, CorrectionPatch
+from pocketpaw.instinct.models import Action
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ _PROCEDURAL_IMPORTANCE = 7
 _EPISODIC_IMPORTANCE = 5
 
 if TYPE_CHECKING:
-    from pocketpaw_ee.instinct.store import InstinctStore  # noqa: F401
+    from pocketpaw.instinct.store import InstinctStore  # noqa: F401
 
 
 class CorrectionSoulBridge:

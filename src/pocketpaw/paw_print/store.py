@@ -12,7 +12,7 @@ from typing import Any
 
 import aiosqlite
 
-from pocketpaw_ee.paw_print.models import PawPrintEvent, PawPrintSpec, PawPrintWidget, _gen_token
+from pocketpaw.paw_print.models import PawPrintEvent, PawPrintSpec, PawPrintWidget, _gen_token
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS paw_print_widgets (
@@ -245,7 +245,7 @@ class PawPrintStore:
     # ---------------- Helpers ----------------
 
     def _row_to_widget(self, row: Any) -> PawPrintWidget:
-        from pocketpaw_ee.paw_print.models import PawPrintEventMapping
+        from pocketpaw.paw_print.models import PawPrintEventMapping
 
         raw_domains = json.loads(row["allowed_domains"]) if row["allowed_domains"] else []
         raw_mapping = json.loads(row["event_mapping"]) if row["event_mapping"] else {}

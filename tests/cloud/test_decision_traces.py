@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from pocketpaw_ee.instinct.store import InstinctStore
-from pocketpaw_ee.instinct.trace import FabricObjectSnapshot, ReasoningTrace, ToolCallRef
-from pocketpaw_ee.instinct.trace_collector import TraceCollector
+from pocketpaw.instinct.store import InstinctStore
+from pocketpaw.instinct.trace import FabricObjectSnapshot, ReasoningTrace, ToolCallRef
+from pocketpaw.instinct.trace_collector import TraceCollector
 
 # ---------------------------------------------------------------------------
 # Lightweight bus + event stand-ins (avoids pulling the real MessageBus)

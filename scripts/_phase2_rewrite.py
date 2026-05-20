@@ -25,7 +25,7 @@ EXCLUDE_DIRS = {".venv", ".git", "__pycache__", "dist", "build", "node_modules",
 
 def build_patterns(old: str, new: str) -> list[tuple[re.Pattern[str], str]]:
     o = re.escape(old)
-    # \b after the prefix so "pocketpaw_ee.instinct" does not match
+    # \b after the prefix so "pocketpaw.instinct" does not match
     # "pocketpaw_ee.instinct_tools"; the prefix is followed by either
     # "." (submodule), end, whitespace, quote, or other non-word char.
     return [

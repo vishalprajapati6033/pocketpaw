@@ -41,12 +41,12 @@ from pydantic import BaseModel, Field
 from pocketpaw_ee.cloud._core.deps import require_plan_feature
 from pocketpaw_ee.cloud.license import require_license
 from pocketpaw_ee.cloud.shared.deps import require_action_any_workspace
-from pocketpaw_ee.instinct.correction import (
+from pocketpaw.instinct.correction import (
     Correction,
     compute_patches,
     summarize_correction,
 )
-from pocketpaw_ee.instinct.models import (
+from pocketpaw.instinct.models import (
     Action,
     ActionCategory,
     ActionPriority,
@@ -54,7 +54,7 @@ from pocketpaw_ee.instinct.models import (
     ActionTrigger,
     AuditEntry,
 )
-from pocketpaw_ee.instinct.trace import FabricObjectSnapshot, ReasoningTrace
+from pocketpaw.instinct.trace import FabricObjectSnapshot, ReasoningTrace
 
 logger = logging.getLogger(__name__)
 
@@ -366,7 +366,7 @@ async def _forward_to_soul(correction: Correction, action: Action) -> None:
     """Hand off to the soul bridge — always best-effort, never breaks approval."""
     try:
         from pocketpaw.soul import get_soul_manager
-        from pocketpaw_ee.instinct.correction_soul_bridge import CorrectionSoulBridge
+        from pocketpaw.instinct.correction_soul_bridge import CorrectionSoulBridge
 
         manager = get_soul_manager()
         if manager is None:

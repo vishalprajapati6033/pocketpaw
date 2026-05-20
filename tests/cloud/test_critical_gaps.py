@@ -192,7 +192,7 @@ class TestFabricTools:
 class TestInstinctTools:
     @pytest.mark.asyncio
     async def test_propose_action(self):
-        from pocketpaw_ee.instinct.models import Action, ActionTrigger
+        from pocketpaw.instinct.models import Action, ActionTrigger
 
         from pocketpaw.tools.builtin.instinct_tools import InstinctProposeTool
 
@@ -239,7 +239,7 @@ class TestInstinctTools:
 
     @pytest.mark.asyncio
     async def test_audit_query(self):
-        from pocketpaw_ee.instinct.models import AuditEntry
+        from pocketpaw.instinct.models import AuditEntry
 
         from pocketpaw.tools.builtin.instinct_tools import InstinctAuditTool
 

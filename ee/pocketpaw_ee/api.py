@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pocketpaw_ee.instinct.store import InstinctStore
-from pocketpaw_ee.paw_print.store import PawPrintStore
+from pocketpaw.instinct.store import InstinctStore
+from pocketpaw.paw_print.store import PawPrintStore
 
 _DB_PATH = Path.home() / ".pocketpaw" / "instinct.db"
 _PAW_PRINT_DB_PATH = Path.home() / ".pocketpaw" / "paw_print.db"

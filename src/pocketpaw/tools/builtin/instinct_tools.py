@@ -95,7 +95,7 @@ class InstinctProposeTool(BaseTool):
             return "Instinct is not available (enterprise feature)."
 
         try:
-            from pocketpaw_ee.instinct.models import ActionCategory, ActionPriority, ActionTrigger
+            from pocketpaw.instinct.models import ActionCategory, ActionPriority, ActionTrigger
 
             action = await store.propose(
                 pocket_id=pocket_id,

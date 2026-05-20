@@ -15,8 +15,8 @@ import pytest
 from pocketpaw_ee.cloud._core.context import RequestContext, ScopeKind
 from pocketpaw_ee.cloud.mission_control import service as mc_service
 from pocketpaw_ee.cloud.mission_control.dto import ListWorkItemsRequest
-from pocketpaw_ee.instinct.models import ActionTrigger
-from pocketpaw_ee.instinct.store import InstinctStore
+from pocketpaw.instinct.models import ActionTrigger
+from pocketpaw.instinct.store import InstinctStore
 
 
 def _ctx(workspace_id: str | None = "w1", user_id: str = "u1") -> RequestContext:

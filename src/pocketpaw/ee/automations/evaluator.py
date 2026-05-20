@@ -135,7 +135,7 @@ class AutomationEvaluator:
         try:
             # Lazy import to avoid circular deps and heavy startup cost
             from pocketpaw_ee.api import get_instinct_store
-            from pocketpaw_ee.instinct.models import ActionTrigger
+            from pocketpaw.instinct.models import ActionTrigger
 
             instinct = get_instinct_store()
             trigger = ActionTrigger(

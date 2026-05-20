@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from pocketpaw_ee.cloud._core.deps import current_workspace_id
 from pocketpaw_ee.cloud.auth import current_active_user
 from pocketpaw_ee.cloud.license import require_license
-from pocketpaw_ee.instinct.models import (
+from pocketpaw.instinct.models import (
     ActionCategory,
     ActionPriority,
     ActionStatus,
@@ -26,7 +26,7 @@ from pocketpaw_ee.instinct.models import (
     AuditCategory,
 )
 from pocketpaw_ee.instinct.router import router
-from pocketpaw_ee.instinct.store import InstinctStore
+from pocketpaw.instinct.store import InstinctStore
 
 
 class _FakeMembership:

@@ -15,7 +15,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from pocketpaw_ee.paw_print.models import (
+from pocketpaw.paw_print.models import (
     MAX_PAYLOAD_BYTES,
     PawPrintEvent,
     PawPrintEventMapping,

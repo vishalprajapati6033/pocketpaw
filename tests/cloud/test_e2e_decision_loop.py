@@ -16,8 +16,8 @@ from pathlib import Path
 import pytest
 from pocketpaw.fabric.models import FabricQuery, PropertyDef
 from pocketpaw.fabric.store import FabricStore
-from pocketpaw_ee.instinct.models import ActionTrigger
-from pocketpaw_ee.instinct.store import InstinctStore
+from pocketpaw.instinct.models import ActionTrigger
+from pocketpaw.instinct.store import InstinctStore
 
 # ---------------------------------------------------------------------------
 # Helpers

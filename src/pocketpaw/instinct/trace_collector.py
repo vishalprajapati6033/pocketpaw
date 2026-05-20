@@ -13,7 +13,7 @@ import logging
 import time
 from typing import Any
 
-from pocketpaw_ee.instinct.trace import ReasoningTrace, ToolCallRef
+from pocketpaw.instinct.trace import ReasoningTrace, ToolCallRef
 
 logger = logging.getLogger(__name__)
 

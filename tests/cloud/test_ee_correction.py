@@ -11,13 +11,13 @@ from unittest.mock import patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pocketpaw_ee.instinct.correction import (
+from pocketpaw.instinct.correction import (
     Correction,
     CorrectionPatch,
     compute_patches,
     summarize_correction,
 )
-from pocketpaw_ee.instinct.models import (
+from pocketpaw.instinct.models import (
     Action,
     ActionCategory,
     ActionPriority,
@@ -25,7 +25,7 @@ from pocketpaw_ee.instinct.models import (
     ActionTrigger,
 )
 from pocketpaw_ee.instinct.router import router
-from pocketpaw_ee.instinct.store import InstinctStore
+from pocketpaw.instinct.store import InstinctStore
 
 
 def _trigger() -> ActionTrigger:

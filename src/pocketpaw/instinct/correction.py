@@ -12,7 +12,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from pocketpaw.fabric.models import _gen_id
-from pocketpaw_ee.instinct.models import Action
+from pocketpaw.instinct.models import Action
 
 _CORRECTABLE_SCALAR_FIELDS: tuple[str, ...] = (
     "title",
