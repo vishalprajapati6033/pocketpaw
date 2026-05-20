@@ -224,3 +224,52 @@ class CloudPocketSpecialistMcpProvider:
         from pocketpaw_ee.agent.pocket_specialist.mcp_tool import POCKET_SPECIALIST_TOOL_IDS
 
         return list(POCKET_SPECIALIST_TOOL_IDS)
+
+
+class CloudAgentExtension:
+    """`pocketpaw.agent_extensions` — EE additions to the core agent runtime.
+
+    Contributes the cloud pocket-specialist function tool to MCP-capable
+    tool-list backends, and cloud workspace/user/session identity to agent
+    subprocess environments.
+    """
+
+    # Backends that receive ``PocketSpecialistTool`` as a native function
+    # tool. Shell-CLI backends (codex_cli, opencode, copilot_sdk) use the
+    # cloud_pocket_specialist_create CLI command instead; claude_agent_sdk
+    # uses its own in-process specialist MCP server — surfacing the tool
+    # through the function-tool bridge for either would advertise a name
+    # their dispatcher can't resolve.
+    _SPECIALIST_FUNCTION_TOOL_BACKENDS = frozenset(
+        {"deep_agents", "google_adk", "openai_agents"}
+    )
+
+    def agent_tools(self, backend: str) -> list[Any]:
+        if backend not in self._SPECIALIST_FUNCTION_TOOL_BACKENDS:
+            return []
+        try:
+            from pocketpaw_ee.agent.pocket_specialist.tool import PocketSpecialistTool
+
+            return [PocketSpecialistTool()]
+        except Exception:  # noqa: BLE001
+            return []
+
+    def subprocess_env(self) -> dict[str, str]:
+        try:
+            from pocketpaw_ee.cloud.chat.agent_service import (
+                current_session_mongo_id,
+                current_user_id,
+                current_workspace_id,
+            )
+        except Exception:  # noqa: BLE001
+            return {}
+        env: dict[str, str] = {}
+        for var, fn in (
+            ("POCKETPAW_WORKSPACE_ID", current_workspace_id),
+            ("POCKETPAW_USER_ID", current_user_id),
+            ("POCKETPAW_SESSION_ID", current_session_mongo_id),
+        ):
+            value = fn()
+            if value:
+                env[var] = str(value)
+        return env

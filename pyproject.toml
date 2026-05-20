@@ -409,6 +409,9 @@ planner = "pocketpaw_ee.extensions:CloudPlannerMcpProvider"
 pocket = "pocketpaw_ee.extensions:CloudPocketMcpProvider"
 pocket_specialist = "pocketpaw_ee.extensions:CloudPocketSpecialistMcpProvider"
 
+[project.entry-points."pocketpaw.agent_extensions"]
+cloud = "pocketpaw_ee.extensions:CloudAgentExtension"
+
 [project.urls]
 Homepage = "https://pocketpaw.xyz"
 Repository = "https://github.com/pocketpaw/pocketpaw"

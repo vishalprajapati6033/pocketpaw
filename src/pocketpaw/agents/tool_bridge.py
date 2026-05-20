@@ -42,18 +42,6 @@ _CLAUDE_SDK_EXCLUDED = frozenset(
     }
 )
 
-# Backends that receive ``PocketSpecialistTool`` via this bridge as a native
-# function tool. Must stay in sync with ``ee.ripple._pockets._MCP_POCKET_BACKENDS``
-# minus ``claude_agent_sdk`` (which goes through its own in-process MCP server,
-# not the function-tool bridge).
-_SPECIALIST_FUNCTION_TOOL_BACKENDS: frozenset[str] = frozenset(
-    {
-        "deep_agents",
-        "google_adk",
-        "openai_agents",
-    }
-)
-
 
 def _instantiate_all_tools(backend: str = "claude_agent_sdk") -> list[BaseTool]:
     """Discover and instantiate all builtin tools, filtered by backend.
@@ -97,26 +85,17 @@ def _instantiate_all_tools(backend: str = "claude_agent_sdk") -> list[BaseTool]:
     except Exception:
         pass  # Soul not available
 
-    # Inject the ee/cloud pocket specialist tool for MCP-capable function-tool
-    # backends only (deep_agents, google_adk, openai_agents). Same opt-in
-    # try-import pattern as soul above.
-    #
-    # Shell-CLI bridge backends (codex_cli, opencode, copilot_sdk, gemini_cli)
-    # are excluded: their POCKET_CREATION_PROMPT_CLI tells the agent to use
-    # ``cloud_pocket_specialist_create`` (registered in _CLOUD_HANDLERS), so
-    # surfacing ``pocket_specialist__create`` in their compact tool list
-    # would advertise a name the CLI dispatcher can't resolve.
-    #
-    # claude_agent_sdk is also excluded because that backend uses its own
-    # in-process SDK MCP server (``mcp_tool.build_pocket_specialist_server``)
-    # and never consumes PocketPaw BaseTools through this bridge.
-    if backend in _SPECIALIST_FUNCTION_TOOL_BACKENDS:
-        try:
-            from pocketpaw_ee.agent.pocket_specialist.tool import PocketSpecialistTool
+    # EE agent extensions contribute backend-specific function tools — the
+    # cloud pocket specialist for MCP-capable function-tool backends. The
+    # extension owns the backend gating (which backends get the tool); an
+    # OSS install registers no extension and this loop is a no-op.
+    from pocketpaw._registry import providers as _ext_providers
 
-            tools.append(PocketSpecialistTool())
+    for ext in _ext_providers("pocketpaw.agent_extensions"):
+        try:
+            tools.extend(ext.agent_tools(backend))
         except Exception as exc:  # noqa: BLE001
-            logger.debug("PocketSpecialistTool not available: %s", exc)
+            logger.debug("agent extension %r agent_tools failed: %s", ext, exc)
 
     return tools
 
