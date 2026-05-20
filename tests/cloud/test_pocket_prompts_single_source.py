@@ -53,8 +53,8 @@ def test_no_cloud_pocket_prompt_constants(agent_service_source: str) -> None:
 
 
 def test_agent_service_imports_canonical_prompts(agent_service_source: str) -> None:
-    """The cloud chat agent must source pocket prompts from ee.ripple."""
-    assert "from ee.ripple import" in agent_service_source
+    """The cloud chat agent must source pocket prompts from pocketpaw_ee.ripple."""
+    assert "from pocketpaw_ee.ripple import" in agent_service_source
     assert "get_pocket_prompts" in agent_service_source
     assert "POCKET_ID_TOKEN" in agent_service_source
 

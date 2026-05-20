@@ -88,7 +88,8 @@ class TestOssIsolation:
                 stripped = line.lstrip()
                 indent = len(line) - len(stripped)
                 if indent == 0 and (
-                    stripped.startswith("from ee.") or stripped.startswith("import ee.")
+                    stripped.startswith("from pocketpaw_ee.")
+                or stripped.startswith("import pocketpaw_ee.")
                 ):
                     raise AssertionError(f"top-level ee import in {py}: {stripped}")
 
@@ -107,7 +108,8 @@ class TestOssIsolation:
             stripped = line.lstrip()
             indent = len(line) - len(stripped)
             if indent == 0 and (
-                stripped.startswith("from ee.") or stripped.startswith("import ee.")
+                stripped.startswith("from pocketpaw_ee.")
+                or stripped.startswith("import pocketpaw_ee.")
             ):
                 raise AssertionError(f"manager.py has a top-level ee import: {stripped}")
 
