@@ -33,18 +33,18 @@ def _require_enterprise() -> None:
     """Skip the calling fixture if the ee/cloud dependencies are missing.
 
     The fixtures in this module mount the real ee/cloud router tree, which
-    pulls in ``beanie``, ``motor``, ``fastapi-users``, etc. Those only land
-    when the ``enterprise`` extra is installed (``uv sync --extra enterprise``
-    or the package ``[enterprise]`` install). When they're missing we emit
-    a ``skip`` rather than an ``ImportError`` so the rest of the ``tests/ee/``
-    suite keeps collecting.
+    pulls in ``beanie``, ``motor``, ``fastapi-users``, etc. Those ship with
+    the ``pocketpaw-ee`` package (ee/), which is installed by the ``ee``
+    dependency group (``uv sync --dev --group ee``). When they're missing we
+    emit a ``skip`` rather than an ``ImportError`` so the rest of the
+    ``tests/ee/`` suite keeps collecting.
     """
 
     for module in ("beanie", "motor", "mongomock_motor"):
         if importlib.util.find_spec(module) is None:
             pytest.skip(
                 f"Shared ee fixtures require the '{module}' module "
-                "(install with: uv sync --extra enterprise).",
+                "(install with: uv sync --dev --group ee).",
                 allow_module_level=False,
             )
 
