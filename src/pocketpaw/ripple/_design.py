@@ -1,5 +1,4 @@
-# ee/ripple/_design.py — Shared Ripple UI design rules.
-# Licensed under FSL 1.1 — see ee/LICENSE.
+# pocketpaw/ripple/_design.py — Shared Ripple UI design rules.
 #
 # Source of truth for the cross-surface design language: widget vocabulary,
 # canonical shapes, composition recipes, theme rules, and the design-quality

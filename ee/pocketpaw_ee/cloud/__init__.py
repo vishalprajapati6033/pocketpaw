@@ -130,6 +130,7 @@ def mount_cloud(app: FastAPI) -> None:
     from pocketpaw_ee.cloud.cycles.router import router as cycles_router
     from pocketpaw_ee.cloud.license import get_license_info
     from pocketpaw_ee.cloud.planner.router import router as planner_router
+    from pocketpaw_ee.cloud.pockets.chat_router import router as pocket_chat_router
     from pocketpaw_ee.cloud.pockets.router import router as pockets_router
     from pocketpaw_ee.cloud.projects.router import router as projects_router
     from pocketpaw_ee.cloud.sessions.router import router as sessions_router
@@ -144,6 +145,8 @@ def mount_cloud(app: FastAPI) -> None:
     app.include_router(chat_router, prefix="/api/v1")
     app.include_router(connectors_router, prefix="/api/v1")
     app.include_router(pockets_router, prefix="/api/v1")
+    # Pocket chat — agent-driven pocket creation SSE stream (POST /pockets/chat).
+    app.include_router(pocket_chat_router, prefix="/api/v1")
     app.include_router(projects_router, prefix="/api/v1")
     app.include_router(planner_router, prefix="/api/v1")
     app.include_router(sessions_router, prefix="/api/v1")
@@ -184,6 +187,9 @@ def mount_cloud(app: FastAPI) -> None:
     from pocketpaw_ee.cloud.notifications.router import router as notifications_router
     from pocketpaw_ee.cloud.tasks.router import router as tasks_router
     from pocketpaw_ee.cloud.uploads.router import router as uploads_router
+    from pocketpaw_ee.fabric.router import router as fabric_router
+    from pocketpaw_ee.fleet.router import router as fleet_router
+    from pocketpaw_ee.instinct.router import router as instinct_router
     from pocketpaw_ee.paw_print.router import router as paw_print_router
 
     app.include_router(kb_router, prefix="/api/v1")
@@ -293,6 +299,15 @@ def mount_cloud(app: FastAPI) -> None:
     # routers so the admin UI (paw-enterprise /pockets/<id> Paw Print tab) can
     # reach /api/v1/paw-print/* without a second app setup entry point.
     app.include_router(paw_print_router, prefix="/api/v1")
+
+    # Fabric / Fleet / Instinct also live outside ee/cloud/ (pocketpaw_ee.
+    # {fabric,fleet,instinct}). Their logic split into the OSS core in Phase 2,
+    # but the HTTP routers stay enterprise — they depend on cloud auth — so the
+    # OSS core no longer mounts them. They ride along here, like paw_print
+    # above, instead of through the core's mount_v1_routers().
+    app.include_router(fabric_router, prefix="/api/v1")
+    app.include_router(fleet_router, prefix="/api/v1")
+    app.include_router(instinct_router, prefix="/api/v1")
 
     # Calendar router declares its own full prefix (/api/v1/calendar) so it
     # is mounted without an additional prefix here. See ee/calendar/router.py.

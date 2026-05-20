@@ -76,7 +76,7 @@ class CloudLifecycleHook:
     """`pocketpaw.lifecycle` — cloud DB init + admin/workspace seeding +
     chat-title listener registration, run on dashboard startup."""
 
-    async def on_startup(self, app: Any) -> None:
+    async def on_startup(self) -> None:
         import logging
         import os
 
@@ -108,7 +108,7 @@ class CloudLifecycleHook:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Cloud chat-title listener registration failed: %s", exc)
 
-    async def on_shutdown(self, app: Any) -> None:
+    async def on_shutdown(self) -> None:
         # Cloud teardown is handled inside mount_cloud's own shutdown hook.
         return None
 

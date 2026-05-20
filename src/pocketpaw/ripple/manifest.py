@@ -1,4 +1,4 @@
-# backend/ee/ripple/manifest.py
+# backend/src/pocketpaw/ripple/manifest.py
 """Fetch and cache the Ripple widget manifest from a CDN.
 
 The manifest is generated at ripple build time and published as

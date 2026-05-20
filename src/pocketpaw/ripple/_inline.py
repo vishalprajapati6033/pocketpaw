@@ -1,9 +1,8 @@
-# ee/ripple/_inline.py — Canonical system prompt for cloud chat-inline Ripple.
-# Licensed under FSL 1.1 — see ee/LICENSE.
+# pocketpaw/ripple/_inline.py — Canonical system prompt for chat-inline Ripple.
 #
-# This is the SOURCE OF TRUTH for the cloud chat-inline Ripple system prompt.
-# Imported by ee/cloud/chat/agent_service.py::build_context_block. Edits land
-# here; the agent service does not duplicate any of this content.
+# This is the SOURCE OF TRUTH for the chat-inline Ripple system prompt.
+# Imported by pocketpaw_ee/cloud/chat/agent_service.py::build_context_block.
+# Edits land here; the agent service does not duplicate any of this content.
 #
 # Surface contract: cloud chat (DM / group / pocket-chat scopes). The host
 # (paw-enterprise's MarkdownRenderer) intercepts `emit chat.send` events and
@@ -11,7 +10,7 @@
 # ARE supported and drive the conversation loop.
 #
 # Composition: surface-specific framing here (intro, chat.send loop, fence
-# rules) + the shared design language from ee.ripple._design (widget
+# rules) + the shared design language from pocketpaw.ripple._design (widget
 # catalog, canonical shapes, full-pane rule, theme, design-quality bar).
 
 

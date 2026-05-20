@@ -1,4 +1,13 @@
-# Pocket chat router — dedicated endpoint for pocket creation.
+# Pocket chat router — SSE streaming endpoint for agent-driven pocket
+# creation/interaction (POST /api/v1/pockets/chat).
+#
+# Enterprise (pocketpaw-ee): pockets — interactive dashboards / apps users
+# build for their own needs — are an enterprise feature, so this endpoint is
+# mounted by ``mount_cloud()`` rather than the OSS core's ``mount_v1_routers()``.
+# It carries no Beanie / cloud-model dependency (it only streams ``pocket_created``
+# / ``pocket_mutation`` events off the core message bus and reshapes specs for
+# rendering), but it ships with the enterprise package alongside the cloud
+# pocket CRUD router in this same domain package.
 
 from __future__ import annotations
 

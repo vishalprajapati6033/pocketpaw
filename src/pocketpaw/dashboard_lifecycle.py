@@ -182,7 +182,7 @@ async def startup_event(
 
     for _hook in _ext_providers("pocketpaw.lifecycle"):
         try:
-            await _hook.on_startup(None)
+            await _hook.on_startup()
         except Exception as exc:
             logger.warning("Lifecycle startup hook failed (cloud features disabled): %s", exc)
 

@@ -26,8 +26,8 @@ def providers(group: str) -> tuple[Any, ...]:
 
     Each entry-point must point at a zero-arg callable (typically the
     provider class). A provider whose module fails to import is skipped
-    with a debug log rather than taking the whole process down — a broken
-    EE plugin must not break an otherwise-working core.
+    with a logged warning rather than taking the whole process down — a
+    broken EE plugin must not break an otherwise-working core.
     """
     import logging
 

@@ -4721,7 +4721,7 @@ requires-dist = [
     { name = "livekit-api", specifier = ">=0.6.0" },
     { name = "livekit-plugins-deepgram", specifier = ">=1.5.9" },
     { name = "motor", specifier = ">=3.3.0" },
-    { name = "pocketpaw", specifier = "==0.4.16" },
+    { name = "pocketpaw", specifier = "~=0.4.16" },
     { name = "pwdlib", extras = ["argon2"], specifier = ">=0.2.0" },
     { name = "pypdf", marker = "extra == 'extraction'" },
     { name = "pytesseract", marker = "extra == 'extraction'", specifier = ">=0.3.10" },

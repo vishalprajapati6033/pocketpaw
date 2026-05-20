@@ -1,5 +1,4 @@
-# ee/ripple/__init__.py — System prompts for Ripple UI generation (Enterprise).
-# Licensed under FSL 1.1 — see ee/LICENSE.
+# pocketpaw/ripple/__init__.py — System prompts for Ripple UI generation.
 #
 # Three system-prompt surfaces, one source of truth per surface:
 #

@@ -1,5 +1,4 @@
-# ee/ripple/_inline_core.py — Catalog payload for get_inline_widget_help.
-# Licensed under FSL 1.1 — see ee/LICENSE.
+# pocketpaw/ripple/_inline_core.py — Catalog payload for get_inline_widget_help.
 #
 # The full RIPPLE_DESIGN_RULES text used to ride in every chat-inline
 # system prompt. Most replies use 1-3 widgets, so 90%+ of those tokens

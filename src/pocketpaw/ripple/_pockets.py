@@ -1,5 +1,4 @@
-# ee/ripple/_pockets.py — System prompts for the Ripple Pockets surface.
-# Licensed under FSL 1.1 — see ee/LICENSE.
+# pocketpaw/ripple/_pockets.py — System prompts for the Ripple Pockets surface.
 #
 # Canonical source for every pocket-mode system prompt the agent ever sees.
 # Four strings are exported, one per (action × backend) cell:
@@ -36,7 +35,7 @@
 #
 # Both rules show up in every variant below; the design block (widget
 # catalog, full-pane rule, theme, design-quality bar) lives in
-# ``ee.ripple._design`` and is spliced in once at the bottom of each prompt.
+# ``pocketpaw.ripple._design`` and is spliced in once at the bottom of each prompt.
 
 from __future__ import annotations
 

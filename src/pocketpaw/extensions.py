@@ -104,11 +104,15 @@ class LifecycleHook(Protocol):
 
     Startup/shutdown hooks run by the dashboard lifecycle. Used for things
     like initializing the cloud database or registering event listeners.
+
+    Hooks take no arguments — the dashboard lifecycle (``startup_event`` in
+    ``dashboard_lifecycle.py``) has no FastAPI ``app`` reference to thread
+    through, and the cloud hook resolves what it needs from the environment.
     """
 
-    async def on_startup(self, app: Any) -> None: ...
+    async def on_startup(self) -> None: ...
 
-    async def on_shutdown(self, app: Any) -> None: ...
+    async def on_shutdown(self) -> None: ...
 
 
 @runtime_checkable
