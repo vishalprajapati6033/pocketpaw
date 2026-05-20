@@ -80,6 +80,9 @@ jobs:
           print(f"OK: {core} and {ee} are cleanly separated")
           PY
 
+      # The `pocketpaw` wheel ships to PyPI via publish.yml on release. The
+      # `pocketpaw-ee` wheel is NOT published — for now it is distributed
+      # in-house, and this artifact is where you grab the built EE wheel.
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
