@@ -10,9 +10,9 @@ logger = logging.getLogger(__name__)
 
 
 def _get_fabric_store():
-    """Lazy import to avoid circular deps and missing ee/ module."""
+    """Lazy import to avoid circular deps at module load."""
     try:
-        from pocketpaw_ee.api import get_fabric_store
+        from pocketpaw.stores import get_fabric_store
 
         return get_fabric_store()
     except ImportError:
