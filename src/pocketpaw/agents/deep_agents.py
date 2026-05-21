@@ -275,9 +275,7 @@ def _patch_anthropic_message_serializer() -> None:
                 for b in system
                 if isinstance(b, dict) and b.get("type") == "text"
             )
-            already_cached = any(
-                isinstance(b, dict) and b.get("cache_control") for b in system
-            )
+            already_cached = any(isinstance(b, dict) and b.get("cache_control") for b in system)
             if total_chars >= _ANTHROPIC_CACHE_MIN_CHARS and not already_cached:
                 for block in reversed(system):
                     if isinstance(block, dict) and block.get("type") == "text":
@@ -288,8 +286,7 @@ def _patch_anthropic_message_serializer() -> None:
     _ac._format_messages = patched
     _ANTHROPIC_PATCHED = True
     logger.info(
-        "Patched langchain_anthropic._format_messages for prompt caching "
-        "(threshold=%d chars)",
+        "Patched langchain_anthropic._format_messages for prompt caching (threshold=%d chars)",
         _ANTHROPIC_CACHE_MIN_CHARS,
     )
 
@@ -964,9 +961,7 @@ class DeepAgentsBackend:
                     try:
                         await close()
                     except Exception as exc:  # noqa: BLE001
-                        logger.debug(
-                            "astream aclose error (non-fatal): %s", exc
-                        )
+                        logger.debug("astream aclose error (non-fatal): %s", exc)
 
     async def stop(self) -> None:
         self._stop_flag = True
