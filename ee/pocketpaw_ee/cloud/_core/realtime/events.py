@@ -408,3 +408,20 @@ class PlanGenerated(Event):
 @dataclass
 class PlanGapResolved(Event):
     EVENT_TYPE: ClassVar[str] = "plan.gap_resolved"
+
+
+# Composio — per-user OAuth integrations (Gmail, Slack, GitHub, …)
+# verified via per-toolkit identity probes. ``ComposioConnectionVerified``
+# fires when a probe succeeds and the stored identity matches (or first
+# time storing). ``ComposioConnectionMismatch`` fires when a fresh probe
+# returns a different external identity than the stored one — surfaces
+# to the chat as a "confirm this is what you intended" prompt rather
+# than silently overwriting.
+@dataclass
+class ComposioConnectionVerified(Event):
+    EVENT_TYPE: ClassVar[str] = "composio.connection.verified"
+
+
+@dataclass
+class ComposioConnectionMismatch(Event):
+    EVENT_TYPE: ClassVar[str] = "composio.connection.mismatch"
