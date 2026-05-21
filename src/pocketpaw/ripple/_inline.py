@@ -13,7 +13,7 @@
 # rules) + the shared design language from pocketpaw.ripple._design (widget
 # catalog, canonical shapes, full-pane rule, theme, design-quality bar).
 
-from ee.ripple._design import USE_THE_WIDGET_RULE, WIDGET_CATALOG
+from pocketpaw.ripple._design import USE_THE_WIDGET_RULE, WIDGET_CATALOG
 
 _INLINE_PREAMBLE = """\
 <ripple>
