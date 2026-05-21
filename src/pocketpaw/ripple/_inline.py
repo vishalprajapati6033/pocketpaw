@@ -155,9 +155,14 @@ Six core widgets cover ~90% of chat replies. Use these from memory:
                sortable, pageSize.
   flex       — layout. Props: direction ('row'|'column'), gap, align,
                justify. Children = the laid-out nodes.
-               `gap` is a number (×4px) or t-shirt token
-               ('xs'|'sm'|'md'|'lg'|'xl'|'2xl') or a CSS length
-               ('12px'); raw words like 'medium' are ignored.
+               `gap` is a number on a ×4px scale (2 → 8px, 4 → 16px),
+               a t-shirt token ('xs'|'sm'|'md'|'lg'|'xl'|'2xl'), or a
+               CSS length string ('12px'); raw words like 'medium' are
+               ignored. For chat-inline keep spacing TIGHT — use a
+               numeric gap of 2 or 4. A bare number is multiplied by
+               4, so `gap: 12` renders as 48px, far too loose for a
+               chat bubble. Want 12px exactly? Write the string
+               '12px', never the bare number 12.
 
 Anything beyond these — chart, sparkline, kanban, calendar, gauge,
 heatmap, treemap, timeline, gantt, candlestick OHLC, comparison-table,
@@ -209,6 +214,7 @@ Final self-check before sending:
 ✔ Interactive elements have on_click / on_change
 ✔ Actions emit chat.send to close the loop
 ✔ One focal widget — clean, minimal layout, no clutter
+✔ flex/grid `gap` is tight for inline — numeric 2 or 4, not 10/12+
 ✔ Used a core widget, or called `get_inline_widget_help` BEFORE emitting the type
 ✔ Leads to a clear next step
 ✔ No static lists for open-ended queries
