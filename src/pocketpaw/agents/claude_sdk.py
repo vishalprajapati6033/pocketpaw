@@ -1,5 +1,12 @@
 """
 Claude Agent SDK backend for PocketPaw.
+Updated: 2026-05-21 — Gate the ``pocketpaw_planner`` in-process MCP server
+  behind an explicit policy opt-in (``is_mcp_server_explicitly_allowed``).
+  It was the only in-process MCP server with no gate, so the
+  ``plan_project`` tool schema loaded into every agent run. It now
+  registers only when the agent opts in. ``__init__`` accepts an optional
+  ``policy`` so AgentPool can inject a per-agent ToolPolicy carrying that
+  opt-in; when omitted the policy is built from settings as before.
 Updated: 2026-03-11 — Always bypass permissions in headless mode. Without this,
   tool calls (like memory save via Bash) hang on messaging channels (Telegram,
   Discord, Slack) because there's no terminal to approve permission prompts.
@@ -23,7 +30,7 @@ from pocketpaw.agents.backend import BackendInfo, BaseAgentBackend, Capability
 from pocketpaw.agents.protocol import AgentEvent
 from pocketpaw.config import Settings
 from pocketpaw.security.rails import is_substring_blocked
-from pocketpaw.tools.policy import ToolPolicy
+from pocketpaw.tools.policy import OPT_IN_MCP_SERVERS, ToolPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -101,13 +108,17 @@ class ClaudeSDKBackend(BaseAgentBackend):
             ],
         )
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, policy: ToolPolicy | None = None):
         self.settings = settings
         self._stop_flag = False
         self._sdk_available = False
         self._cli_available = False  # Whether the `claude` CLI binary is installed
         self._cwd = settings.file_jail_path  # Default working directory
-        self._policy = ToolPolicy(
+        # ``policy`` lets a caller (AgentPool) inject a per-agent
+        # ToolPolicy — e.g. one that opts the agent into the planner MCP
+        # server. When omitted, build the process-wide policy from
+        # settings, which is the behaviour every other caller relies on.
+        self._policy = policy or ToolPolicy(
             profile=settings.tool_profile,
             allow=settings.tools_allow,
             deny=settings.tools_deny,
@@ -528,6 +539,17 @@ class ClaudeSDKBackend(BaseAgentBackend):
         # via the ``pocketpaw.mcp_servers`` entry-point (see
         # pocketpaw_ee.extensions); an OSS install registers none and this
         # loop is a no-op.
+        #
+        # Most of these servers are ambient: allow-by-default policy lets
+        # them register on every agent run. The planner is the exception —
+        # it is *opt-in, not ambient*. Most agent runs never plan a
+        # project, and carrying the ``plan_project`` schema in every
+        # context is dead weight. For a server in ``OPT_IN_MCP_SERVERS``
+        # the loop uses ``is_mcp_server_explicitly_allowed``, which
+        # registers it only when the policy's ``mcp_servers_allow`` set
+        # names it. AgentPool builds that set from the cloud agent's
+        # ``tools`` field — an agent enables the planner by listing the
+        # bare token ``pocketpaw_planner`` there. Deny still wins.
         from pocketpaw._registry import providers as _ext_providers
 
         for provider in _ext_providers("pocketpaw.mcp_servers"):
@@ -539,7 +561,16 @@ class ClaudeSDKBackend(BaseAgentBackend):
             if built is None:
                 continue
             name, cfg_entry = built
-            if not self._policy.is_mcp_server_allowed(name):
+            if name in OPT_IN_MCP_SERVERS:
+                if not self._policy.is_mcp_server_explicitly_allowed(name):
+                    logger.debug(
+                        "MCP server '%s' not registered — agent has not opted "
+                        "in (add '%s' to the agent's tools)",
+                        name,
+                        name,
+                    )
+                    continue
+            elif not self._policy.is_mcp_server_allowed(name):
                 logger.info("MCP server '%s' blocked by tool policy", name)
                 continue
             servers[name] = cfg_entry
@@ -858,15 +889,32 @@ class ClaudeSDKBackend(BaseAgentBackend):
             # ids come from the ``pocketpaw.mcp_servers`` providers (none on
             # an OSS install). Mutations are NOT here — pocket writes flow
             # through the pocket_specialist create/edit tools.
+            #
+            # Opt-in servers (the planner) are skipped here unless the
+            # policy opts them in, mirroring the registration gate in
+            # ``_get_mcp_servers``. An allowlist id without a registered
+            # server is harmless, but keeping the two gates consistent
+            # avoids a misleading entry. Tool ids follow the
+            # ``mcp__<server>__<tool>`` convention, so the server name is
+            # the segment between the first and second ``__``.
             from pocketpaw._registry import providers as _ext_providers
             from pocketpaw.agents.sdk_mcp_widgets import WIDGET_TOOL_IDS
 
             allowed_tools.extend(WIDGET_TOOL_IDS)
             for provider in _ext_providers("pocketpaw.mcp_servers"):
                 try:
-                    allowed_tools.extend(provider.tool_ids())
+                    tool_ids = list(provider.tool_ids())
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("MCP provider tool ids not added to allowlist: %s", exc)
+                    continue
+                for tool_id in tool_ids:
+                    parts = tool_id.split("__")
+                    server = parts[1] if len(parts) >= 3 and parts[0] == "mcp" else ""
+                    if server in OPT_IN_MCP_SERVERS and not (
+                        self._policy.is_mcp_server_explicitly_allowed(server)
+                    ):
+                        continue
+                    allowed_tools.append(tool_id)
 
             # Build hooks for security
             hooks = {
