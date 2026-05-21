@@ -34,7 +34,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, Field, field_validator, model_validator
+from pydantic import AfterValidator, AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from pocketpaw.security.url_validators import validate_external_url
@@ -163,7 +163,12 @@ def validate_api_keys(settings: Settings) -> list[str]:
 class Settings(BaseSettings):
     """PocketPaw settings with env and file support."""
 
-    model_config = SettingsConfigDict(env_prefix="POCKETPAW_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="POCKETPAW_",
+        env_file=".env",
+        extra="ignore",
+        populate_by_name=True,  # allow field-name assignment alongside aliases
+    )
 
     # Telegram
     telegram_bot_token: str | None = Field(
@@ -752,6 +757,67 @@ class Settings(BaseSettings):
     plan_mode_tools: list[str] = Field(
         default_factory=lambda: ["shell", "write_file", "edit_file"],
         description="Tools that require approval in plan mode",
+    )
+
+    # Budget Controls
+    budget_monthly_usd: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Monthly budget cap in USD. 0 = unlimited",
+    )
+    budget_warning_threshold: float = Field(
+        default=0.8,
+        gt=0.0,
+        le=1.0,
+        description="Warn when spend crosses this fraction of budget (0.8 = 80%)",
+    )
+    budget_auto_pause: bool = Field(
+        default=True,
+        description="Auto-pause agent processing when budget is exhausted",
+    )
+    budget_reset_day: int = Field(
+        default=1,
+        ge=1,
+        le=28,
+        description="Day of month when the budget window resets (1-28)",
+    )
+    per_agent_caps: dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "Per-agent monthly budget caps in USD. Keys are agent backend names "
+            "(e.g. 'claude_agent_sdk', 'openai_agents'). "
+            "0 or missing = inherit global cap. Example: {'claude_agent_sdk': 5.0}"
+        ),
+    )
+    budget_paused: bool = Field(
+        default=False,
+        exclude=True,  # excluded from JSON serialization
+        # validation_alias points to an unreachable key so pydantic-settings
+        # never populates this field from the environment
+        # (POCKETPAW_BUDGET_PAUSED is ignored at load time).
+        validation_alias=AliasChoices("__budget_paused_internal__"),
+        description="Internal runtime flag — set programmatically, never from env",
+    )
+    budget_override_usd: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Temporary budget override cap in USD (None = no override)",
+    )
+    budget_override_reason: str = Field(
+        default="",
+        description="Reason for the active budget override",
+    )
+    budget_override_expires_at: str | None = Field(
+        default=None,
+        description="ISO timestamp when the temporary budget override expires",
+    )
+
+    # Trace retention
+    trace_retention_days: int = Field(
+        default=30,
+        ge=1,
+        le=365,
+        description="How many days of trace files to keep",
     )
 
     # Self-Audit Daemon
