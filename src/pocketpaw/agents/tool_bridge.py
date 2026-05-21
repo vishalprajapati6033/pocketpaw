@@ -42,6 +42,87 @@ _CLAUDE_SDK_EXCLUDED = frozenset(
     }
 )
 
+# Tool names (NOT class names) that overlap with Composio's hosted
+# integrations. When Composio is enabled (cloud, with ``composio_api_key``
+# set), these YAML-/native-connector-backed tools are dropped from the
+# agent's surface so the LLM has exactly one path per integration. Without
+# this, the agent gets confused between Composio's ``GMAIL_SEND_EMAIL`` and
+# the legacy ``gmail_send``, and tends to fall back on the legacy tool's
+# "Settings → Google OAuth" auth flow (a paw-enterprise UI affordance, not
+# a chat one).
+_COMPOSIO_OVERLAPPING_TOOL_NAMES = frozenset(
+    {
+        # Gmail
+        "gmail_search",
+        "gmail_read",
+        "gmail_send",
+        "gmail_list_labels",
+        "gmail_create_label",
+        "gmail_modify",
+        "gmail_trash",
+        "gmail_batch_modify",
+        # Google Calendar
+        "calendar_list",
+        "calendar_create",
+        "calendar_prep",
+        # Google Docs
+        "docs_read",
+        "docs_create",
+        "docs_search",
+        # Google Drive
+        "drive_list",
+        "drive_download",
+        "drive_upload",
+        "drive_share",
+        # Reddit
+        "reddit_search",
+        "reddit_read",
+        "reddit_trending",
+        # Spotify
+        "spotify_search",
+        "spotify_now_playing",
+        "spotify_playback",
+        "spotify_playlist",
+    }
+)
+
+
+def _is_composio_enabled() -> bool:
+    """True when Composio is configured. Read lazily so OSS-local runs
+    don't pay the ``Settings.load`` cost up front."""
+    try:
+        from pocketpaw.config import Settings
+
+        s = Settings.load()
+        return bool(s.composio_api_key and s.composio_enterprise_id)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def composio_tools_for(backend: str, settings: Any) -> list[Any]:
+    """Composio integration tools for *backend*, via the
+    ``pocketpaw.composio_tools`` entry point.
+
+    Returns ``[]`` on an OSS install (no provider registered), when
+    Composio is not configured, or when the per-stream fetch fails —
+    Composio is always additive to the agent's tool surface, never
+    load-bearing, so a failure degrades silently rather than aborting
+    the run. Keeps the OSS core free of any ``pocketpaw_ee`` import: the
+    cloud provider is discovered through the entry-point registry.
+    """
+    from pocketpaw._registry import first as _ext_first
+
+    provider = _ext_first("pocketpaw.composio_tools")
+    if provider is None:
+        return []
+    try:
+        return list(provider.build_tools(backend, settings))
+    except ImportError:
+        return []  # composio SDK / provider package not installed
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("composio_tools_for(%s) failed: %s", backend, exc)
+        return []
+
 
 def _instantiate_all_tools(backend: str = "claude_agent_sdk") -> list[BaseTool]:
     """Discover and instantiate all builtin tools, filtered by backend.
@@ -96,6 +177,21 @@ def _instantiate_all_tools(backend: str = "claude_agent_sdk") -> list[BaseTool]:
             tools.extend(ext.agent_tools(backend))
         except Exception as exc:  # noqa: BLE001
             logger.debug("agent extension %r agent_tools failed: %s", ext, exc)
+
+    # When Composio is configured, drop the YAML-/native-connector tools
+    # whose integrations are now served by Composio's hosted ``*_*`` tools
+    # (GMAIL_SEND_EMAIL, etc.). Prevents the LLM from mixing two
+    # integration paths and surfacing paw-enterprise's
+    # "Settings → Google OAuth" affordance in chat.
+    if _is_composio_enabled():
+        before = len(tools)
+        tools = [t for t in tools if t.name not in _COMPOSIO_OVERLAPPING_TOOL_NAMES]
+        dropped = before - len(tools)
+        if dropped:
+            logger.info(
+                "tool_bridge: dropped %d YAML-connector tools (Composio is enabled)",
+                dropped,
+            )
 
     return tools
 
