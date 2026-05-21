@@ -64,6 +64,18 @@ dependencies = [
     "google-api-python-client>=2.100.0",
     "google-auth>=2.25.0",
     "google-auth-oauthlib>=1.2.0",
+    # --- Composio — 200+ pre-built OAuth integrations (Gmail, Slack,
+    # GitHub, Calendar, Drive, Linear, …). Each agent backend gets its
+    # own Composio provider package; the wiring lives in
+    # ee/pocketpaw_ee/cloud/composio/providers.py and is reached from the
+    # OSS core via the ``pocketpaw.composio_tools`` entry point. The
+    # pocket specialist runs on deep_agents but is deliberately kept
+    # Composio-free, so Composio reaches only the parent agent.
+    "composio>=0.7.0",
+    "composio_claude_agent_sdk>=0.7.0",
+    "composio_openai_agents>=0.7.0",
+    "composio_google_adk>=0.7.0",
+    "composio_langgraph>=0.7.0",
 ]
 
 [project.optional-dependencies]
@@ -121,9 +133,13 @@ tasks = "pocketpaw_ee.extensions:CloudTasksMcpProvider"
 planner = "pocketpaw_ee.extensions:CloudPlannerMcpProvider"
 pocket = "pocketpaw_ee.extensions:CloudPocketMcpProvider"
 pocket_specialist = "pocketpaw_ee.extensions:CloudPocketSpecialistMcpProvider"
+composio = "pocketpaw_ee.extensions:CloudComposioMcpProvider"
 
 [project.entry-points."pocketpaw.agent_extensions"]
 cloud = "pocketpaw_ee.extensions:CloudAgentExtension"
+
+[project.entry-points."pocketpaw.composio_tools"]
+cloud = "pocketpaw_ee.extensions:CloudComposioToolProvider"
 
 [tool.hatch.build.targets.wheel]
 packages = ["pocketpaw_ee"]

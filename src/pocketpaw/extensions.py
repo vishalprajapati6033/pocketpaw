@@ -199,3 +199,20 @@ class PocketWriter(Protocol):
         """Create the pocket + linked session. Returns the new pocket id,
         or ``None`` on failure."""
         ...
+
+
+@runtime_checkable
+class ComposioToolProvider(Protocol):
+    """Entry-point group: ``pocketpaw.composio_tools``
+
+    Fetches Composio integration tools for an agent backend. Composio
+    wires 200+ pre-built OAuth integrations (Gmail, Slack, GitHub,
+    Calendar, Drive, …); the cloud product fetches them per-stream and
+    returns them in the tool format native to *backend*. An OSS install
+    registers no provider, so agents run with only their built-in tools.
+    """
+
+    def build_tools(self, backend: str, settings: Any) -> list[Any]:
+        """Composio tool instances for *backend*, or ``[]`` when Composio
+        is not configured / not applicable."""
+        ...

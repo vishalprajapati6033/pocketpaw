@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pocketpaw_ee.cloud.models.agent import Agent, AgentConfig
 from pocketpaw_ee.cloud.models.comment import Comment, CommentAuthor, CommentTarget
+from pocketpaw_ee.cloud.models.composio_connection import ComposioConnection
 from pocketpaw_ee.cloud.models.connector import WorkspaceConnector
 from pocketpaw_ee.cloud.models.cycle import Cycle, CycleDailyPoint
 from pocketpaw_ee.cloud.models.file import FileObj
@@ -43,6 +44,7 @@ __all__ = [
     "Comment",
     "CommentAuthor",
     "CommentTarget",
+    "ComposioConnection",
     "Cycle",
     "CycleDailyPoint",
     "FileFolder",
@@ -91,6 +93,7 @@ def get_all_documents():
         FileFolder,
         Workspace,
         WorkspaceConnector,
+        ComposioConnection,
         Invite,
         Group,
         Message,

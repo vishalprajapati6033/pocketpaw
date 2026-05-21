@@ -271,3 +271,57 @@ class CloudAgentExtension:
             if value:
                 env[var] = str(value)
         return env
+
+
+class CloudComposioToolProvider:
+    """`pocketpaw.composio_tools` — Composio integration tools for the
+    parent cloud chat agent.
+
+    Composio supplies 200+ pre-built OAuth integrations (Gmail, Slack,
+    GitHub, Calendar, Drive, …). Tools are fetched per-stream via the
+    official Composio provider package for the requesting backend and
+    returned in that backend's native tool format. The pocket specialist
+    deliberately does not receive Composio — the parent agent fetches the
+    data and passes it down in the brief.
+    """
+
+    def build_tools(self, backend: str, settings: Any) -> list[Any]:
+        from pocketpaw_ee.cloud.composio.providers import build_tools_for_backend
+
+        return list(build_tools_for_backend(backend, settings=settings))
+
+
+class CloudComposioMcpProvider:
+    """`pocketpaw.mcp_servers` — Composio integrations for the
+    ``claude_agent_sdk`` backend, exposed as an in-process MCP server.
+
+    The other agent backends consume Composio as native function tools
+    via ``CloudComposioToolProvider``; ``claude_agent_sdk`` instead
+    discovers MCP servers, so Composio reaches it this way. ``build_server``
+    runs once per ``_get_mcp_servers`` call (i.e. per stream) and the
+    tools are bound to the active user via Composio's per-user sessions,
+    so the server stays multi-tenant safe.
+    """
+
+    def build_server(self) -> tuple[str, Any] | None:
+        try:
+            from claude_agent_sdk import create_sdk_mcp_server
+
+            from pocketpaw_ee.cloud.composio.providers import build_tools_for_backend
+        except ImportError:
+            # claude_agent_sdk / composio provider package not installed.
+            return None
+        try:
+            tools = build_tools_for_backend("claude_agent_sdk")
+        except Exception:  # noqa: BLE001
+            return None
+        if not tools:
+            return None
+        return "composio", create_sdk_mcp_server(name="composio", version="1.0.0", tools=tools)
+
+    def tool_ids(self) -> list[str]:
+        # Composio's tool set is per-user and per-toolkit (resolved at
+        # session-build time), so it can't be statically enumerated.
+        # ``mcp__composio`` is the server-level allowlist entry — it
+        # permits every tool the in-process ``composio`` server exposes.
+        return ["mcp__composio"]
