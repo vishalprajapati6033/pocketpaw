@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError as PydanticValidationError
-
-from ee.cloud.chat.schemas import (
+from pocketpaw_ee.cloud.chat.schemas import (
     AddGroupAgentRequest,
     AddGroupMembersRequest,
     CreateGroupRequest,
@@ -17,6 +15,7 @@ from ee.cloud.chat.schemas import (
     WsInbound,
     WsOutbound,
 )
+from pydantic import ValidationError as PydanticValidationError
 
 
 def test_create_group_defaults():
@@ -154,7 +153,9 @@ def test_add_group_members():
 def test_add_group_agent_defaults():
     req = AddGroupAgentRequest(agent_id="a1")
     assert req.role == "assistant"
-    assert req.respond_mode == "mention_only"
+    # Default in schemas.py is "auto"; test originally asserted
+    # "mention_only" which never matched the schema.
+    assert req.respond_mode == "auto"
 
 
 def test_add_group_agent_custom():

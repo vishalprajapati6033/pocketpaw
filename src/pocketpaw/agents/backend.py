@@ -75,3 +75,33 @@ class AgentBackend(Protocol):
     def get_tool_policy(self) -> ToolPolicy: ...
 
     def set_tool_policy(self, policy: ToolPolicy) -> None: ...
+
+    def attach_specialist_tools(self, tools: list[Any]) -> None:
+        """Attach pocket-specialist-internal tools to this backend instance.
+
+        Called by the specialist runtime to wire list_pockets / validate_spec /
+        persist_pocket into the LLM's tool surface for the duration of an
+        isolated specialist run.
+
+        Backends that cannot accept dynamic tools at runtime should raise
+        NotImplementedError and will be excluded from the valid
+        ``pocket_specialist_backend`` set.
+        """
+        ...
+
+
+class BaseAgentBackend:
+    """Default no-op implementations of optional ``AgentBackend`` methods.
+
+    Backends that don't support a particular optional capability inherit
+    from this mixin to get an informative ``NotImplementedError`` instead
+    of an unhelpful ``AttributeError`` when callers try to use that
+    capability.
+    """
+
+    def attach_specialist_tools(self, tools: list[Any]) -> None:  # noqa: ARG002
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support dynamic tool attachment. "
+            "Set POCKETPAW_POCKET_SPECIALIST_BACKEND=deep_agents (the default) "
+            "to use a backend that supports specialist tool injection."
+        )

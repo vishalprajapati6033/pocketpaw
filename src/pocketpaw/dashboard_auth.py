@@ -11,6 +11,7 @@ Extracted from dashboard.py — contains:
 import hmac
 import io
 import logging
+import re
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -21,6 +22,23 @@ from pocketpaw.http_utils import is_request_secure
 from pocketpaw.security.rate_limiter import api_limiter, auth_limiter
 from pocketpaw.security.session_tokens import create_session_token, verify_session_token
 from pocketpaw.tunnel import get_tunnel_manager
+from pocketpaw.uploads.signing import verify_grant
+
+# Matches `/api/v1/uploads/{file_id}` — not `/grant` and not root. Used to
+# scope the signed-grant bypass so it can't be used to reach any other route.
+_UPLOAD_GET_PATH = re.compile(r"^/api/v1/uploads/(?P<id>[A-Za-z0-9_-]+)$")
+
+
+def _verify_upload_grant(request: Request, secret: str) -> bool:
+    """True if ``request`` carries a valid ``?t=`` grant for its path's file."""
+    m = _UPLOAD_GET_PATH.match(request.url.path)
+    if not m:
+        return False
+    token = request.query_params.get("t")
+    if not token:
+        return False
+    return verify_grant(m.group("id"), token, secret)
+
 
 logger = logging.getLogger(__name__)
 
@@ -317,7 +335,9 @@ async def _auth_dispatch(request: Request) -> Response | None:
             )
         request.state.rate_limit_headers = rl_info.headers()
 
-    # Exempt routes — return None to let the request through
+    # Exempt routes — return None to let the request through without any
+    # token verification. Used for genuinely-unauth endpoints (login, docs,
+    # webhooks, OAuth callbacks).
     exempt_paths = [
         "/static",
         "/uploads",
@@ -343,19 +363,30 @@ async def _auth_dispatch(request: Request) -> Response | None:
         "/api/v1/auth/bearer/login",
         "/api/v1/auth/me",
         "/api/v1/license",
-        # Enterprise cloud endpoints — JWT auth handled by fastapi-users, not this middleware
+        "/ws/cloud",
+    ]
+
+    # Shared-prefix routes — pocketpaw_ee.cloud mounts JWT-authed routers at
+    # these paths, but the non-ee v1 routers (pocketpaw.api.v1.chat/sessions)
+    # also mount there and rely on require_scope() reading
+    # request.state.full_access.
+    # We must run the token-verification cascade so dashboard session cookies
+    # populate state, but skip the final 401 — ee routes authenticate at the
+    # route level via fastapi-users (#888 follow-up).
+    auth_optional_prefixes = (
         "/api/v1/chat",
         "/api/v1/workspaces",
         "/api/v1/pockets",
         "/api/v1/sessions",
         "/api/v1/agents",
         "/api/v1/users",
-        "/ws/cloud",
-    ]
+    )
 
     for exempt in exempt_paths:
         if path.startswith(exempt):
             return None  # allow through
+
+    is_auth_optional = any(path.startswith(p) for p in auth_optional_prefixes)
 
     # Rate limiting — pick tier based on path
     client_ip = request.client.host if request.client else "unknown"
@@ -476,6 +507,14 @@ async def _auth_dispatch(request: Request) -> Response | None:
         is_valid = True
         request.state.full_access = True
 
+    # 7. Short-lived signed grant for uploaded files.
+    # Minted by the authed ``/uploads/{id}/grant`` endpoint; lets the bytes be
+    # loaded from ``<img src>`` / ``<a href download>`` where a Bearer header
+    # cannot be attached. Scope: GETs only, path-bound, 5-minute TTL by default.
+    if not is_valid and request.method == "GET":
+        if _verify_upload_grant(request, current_token):
+            is_valid = True
+
     # Allow frontend assets (/, /static/*, /uploads/*) through for SPA bootstrap.
     if (
         request.url.path == "/"
@@ -488,7 +527,12 @@ async def _auth_dispatch(request: Request) -> Response | None:
     # Previously only API/WS paths were gated here, meaning any non-exempt
     # path that didn't start with /api or /ws (e.g. /internal/*, /v1/agents)
     # would silently fall through unauthenticated.
-    if not is_valid:
+    #
+    # auth_optional_prefixes (ee.cloud shared paths) skip this 401 because
+    # their routes authenticate at the route level via fastapi-users JWT.
+    # State populated above (full_access from dashboard session cookies, etc.)
+    # is still available to any non-ee router mounted at the same prefix.
+    if not is_valid and not is_auth_optional:
         return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
 
     return None  # allow through
