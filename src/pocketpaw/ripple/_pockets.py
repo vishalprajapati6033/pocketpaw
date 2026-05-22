@@ -1,5 +1,10 @@
 # pocketpaw/ripple/_pockets.py — System prompts for the Ripple Pockets surface.
 #
+# Changes: 2026-05-21 (RFC 04 alpha) — added `_LIVE_DATA_SOURCES_BLOCK`,
+# spliced into the create specialist prompt. It teaches the agent to
+# declare a `sources` block (read-only GET bindings) and a `run_source`
+# refresh button when the user wants live data from a real backend.
+#
 # Changes: 2026-05-21 (#1163) — the edit-specialist prompt now splices in
 # `_EDIT_TOOLS_MCP`, a tools block naming the granular edit ops the
 # specialist ACTUALLY holds (get_pocket, the state/node/array-item ops),
@@ -7,6 +12,19 @@
 # update_pocket, add_widget) the specialist does not hold. The
 # `<mutation-strategy>` block gained the Tier-2 prop-array item ops from
 # PR #1159 with guidance on when to use them.
+#
+# Changes: 2026-05-22 (RFC 04 alpha follow-up) — the edit-specialist prompt
+# now also carries RFC 04 `sources` guidance: `_EDIT_TOOLS_MCP` lists the
+# new `set_source` / `remove_source` ops, and `_assemble_interaction()`
+# splices in `_LIVE_DATA_SOURCES_EDIT_BLOCK` so the EDIT specialist (not
+# just the create flow) knows it can author a `rippleSpec.sources` block.
+#
+# Changes: 2026-05-22 (RFC 04 alpha follow-up 2) — `_CURRENT_POCKET_BLOCK`
+# now carries a `Backend:` line (the non-secret {base_url, auth_type,
+# configured} summary), filled via the new `fill_current_pocket` helper +
+# `BACKEND_SUMMARY_TOKEN`. The sources prompt blocks tell the specialist
+# to read that line instead of asking the user for a backend URL it can
+# already see.
 #
 # Canonical source for every pocket-mode system prompt the agent ever sees.
 # Four strings are exported, one per (action × backend) cell:
@@ -93,6 +111,10 @@ _RIPPLE_DESIGN_ESSENTIALS = "\n".join(
 )
 
 POCKET_ID_TOKEN = "__POCKET_ID__"
+# Placeholder in _CURRENT_POCKET_BLOCK_TEMPLATE for the non-secret backend
+# summary line. Filled by ``fill_current_pocket`` — callers that only have
+# the pocket id pass ``backend_summary=None`` and the line reads "unknown".
+BACKEND_SUMMARY_TOKEN = "__BACKEND_SUMMARY__"
 
 # ---------------------------------------------------------------------------
 # Backends that delegate pocket creation/editing to the specialist via a
@@ -442,6 +464,153 @@ Unknown source names resolve to `null`. Stick to the allowlist above.
 """
 
 
+_LIVE_DATA_SOURCES_BLOCK = """\
+<live-data-sources>
+When the user wants live data from THEIR OWN backend (a CRM, an internal
+API, a service with a base URL + token) — not the workspace `$source`
+markers above — declare a `sources` block in the rippleSpec. Alpha is
+READ-ONLY: GET bindings only.
+
+  "rippleSpec": {
+    "sources": {
+      "prs": {
+        "method": "GET",
+        "path": "/pulls?state=open",
+        "bind": "state.prs",
+        "refresh": ["pocket_open", "manual"]
+      }
+    },
+    "ui": [ ... ],
+    "state": { "prs": [] }
+  }
+
+Each source entry: `method` (always "GET"), `path` (a RELATIVE path
+against the pocket's backend — never an absolute URL), `bind` (a dotted
+`state.` path the result is written to), and `refresh` (when to run it —
+`pocket_open` on open, `manual` for a refresh button).
+
+For a manual refresh, add a button wired to the `run_source` action:
+
+  {"type": "button", "props": {"label": "Refresh"},
+   "on_click": {"action": "run_source", "source": "prs"}}
+
+Rules:
+- A pocket using `sources` MUST have a backend configured (base URL +
+  auth, set once via the pocket's backend settings — outside the spec).
+  If no backend is configured, the sources will not run.
+- A source `path` is ALWAYS relative to the configured backend base URL
+  — never put an absolute URL in `path`. You only ever author the
+  relative path. If you are extending an existing pocket, `get_pocket`
+  returns a non-secret `backend` field ({base_url, auth_type,
+  configured}) so you can see whether a backend is already set and what
+  its base URL is — do not ask the user for a URL you can already see.
+- Seed `state` with an empty list/value for each `bind` target so the
+  widget renders before the first fetch.
+- Use `sources` ONLY for the user's real backend. For workspace data use
+  the `$source` markers above; for canvas-local input use literal values.
+
+DO NOT GET THIS WRONG — the runtime reads `rippleSpec.sources` and
+nothing else:
+- Data sources go in `rippleSpec.sources` ONLY. NEVER put them in
+  `tool_specs` — `tool_specs` is for LLM tools, not data, and a
+  `tool_specs` entry inside the rippleSpec is silently inert.
+- A source entry has EXACTLY four fields: `method`, `path`, `bind`,
+  `refresh`. Do NOT invent `kind`, `url`, `auto_fetch`, `into`, or `id` —
+  none of those exist and the source will not run.
+- The refresh button targets the source by `source` (the sources-map
+  key). NEVER use `source_id`.
+
+  WRONG — inert, the runtime ignores all of this:
+    "tool_specs": [{"id": "src_todos", "kind": "rest", "method": "GET",
+                    "url": "/todos", "auto_fetch": true, "into": "todos"}]
+    {"action": "run_source", "source_id": "src_todos"}
+
+  RIGHT:
+    "sources": {"todos": {"method": "GET", "path": "/todos",
+                          "bind": "state.todos",
+                          "refresh": ["pocket_open", "manual"]}}
+    {"action": "run_source", "source": "todos"}
+</live-data-sources>
+"""
+
+
+# Edit-specialist variant of the live-data-sources guidance. The create
+# block above describes authoring the `sources` JSON directly inside the
+# rippleSpec; the EDIT specialist never authors whole-spec JSON — it works
+# through granular ops, so it gets the `set_source` / `remove_source`
+# instructions instead. Spliced into _assemble_interaction.
+_LIVE_DATA_SOURCES_EDIT_BLOCK = """\
+<live-data-sources>
+When the user asks for live data from THEIR OWN backend (a CRM, an
+internal API, a service with a base URL + token) — not the workspace
+`$source` markers — use the `set_source` / `remove_source` ops. Alpha is
+READ-ONLY: GET bindings only. These write the pocket's top-level
+`rippleSpec.sources` block; the state/node ops cannot.
+
+  set_source(
+    source_key="prs",            # the sources map key
+    path="/pulls?state=open",    # RELATIVE path on the backend, never a URL
+    bind="state.prs",            # dotted state path the JSON is written to
+    method="GET",                # always GET
+    refresh=["pocket_open", "manual"],   # when to run it
+  )
+
+  remove_source(source_key="prs")
+
+After `set_source`, do the wiring with the normal ops:
+- `set_state` the `bind` target to an empty list/value so the bound
+  widget renders before the first fetch (e.g. set_state("prs", [])).
+- For a manual refresh, `add_node` a button whose on_click is
+  {"action": "run_source", "source": "prs"} — `run_source` is a
+  client-side action, NOT a chat round-trip.
+
+THE BACKEND IS ALREADY KNOWN — DO NOT ASK FOR IT.
+The `<current-pocket>` block above has a `Backend:` line telling you
+whether this pocket already has a backend configured and its base URL:
+- "Backend: configured — https://api.example.com (auth: bearer)" — a
+  backend EXISTS. Author the source against it directly. A source `path`
+  is ALWAYS relative to that base URL, so you only ever need the
+  relative path — never ask the user for the backend URL, you can see it.
+- "Backend: not configured" — the pocket has no backend. The source
+  cannot run until one is set in the pocket's backend settings. Tell the
+  user to configure a backend first (it's outside the spec — the
+  "Configure Backend" modal), then you can add the source.
+- "Backend: configured state unknown ..." — call `get_pocket`; its
+  result carries a `backend` field with the same summary.
+
+If the backend is configured but you cannot infer the relative path for
+the data the user wants, ask ONLY for the relative path (e.g. "which
+endpoint — /pulls? /issues?"), NOT for the whole backend URL.
+
+Rules:
+- A pocket using sources MUST have a backend configured (base URL + auth,
+  set once in the pocket's backend settings — outside the spec). Without
+  a backend the sources will not run.
+- Do NOT stash a fake source descriptor in `state`, and do NOT build a
+  refresh button that sends a chat message — use `set_source` + the
+  `run_source` action.
+- Use sources ONLY for the user's real backend. For workspace data use
+  the `$source` markers; for canvas-local input use literal values.
+
+DO NOT GET THIS WRONG — the runtime reads `rippleSpec.sources` and
+nothing else:
+- Live data sources go in `rippleSpec.sources` ONLY, written via
+  `set_source`. NEVER author a `tool_specs` entry for data — `tool_specs`
+  is for LLM tools, not data, and is silently inert as a data source.
+- A source is EXACTLY `{method, path, bind, refresh}`. Do NOT invent
+  `kind`, `url`, `auto_fetch`, `into`, or `id` — they do not exist.
+- The refresh button targets the source by `source` (the source key),
+  NEVER `source_id`.
+
+  WRONG — inert, the runtime ignores it:
+    {"action": "run_source", "source_id": "todos"}
+
+  RIGHT:
+    {"action": "run_source", "source": "todos"}
+</live-data-sources>
+"""
+
+
 # ---------------------------------------------------------------------------
 # Tool surface — MCP variant (claude_agent_sdk).
 # Identity (workspace, user, session) is bound from the active SSE
@@ -556,6 +725,16 @@ project-dashboard.team, feed.items, select.options, form-layout.fields…)
 
 `match` (and `after`) is an ItemMatch: {index:N} | {id:"..."} |
 {by_field:"label", equals:"X"} | {by_key:{k:v}}.
+
+DATA-SOURCE OPS — read-only live data bindings (rippleSpec.sources)
+
+  set_source(source_key, path, bind, method?, refresh?)
+                                declare a GET binding that fetches from the
+                                pocket's configured backend into state
+  remove_source(source_key)     delete a data-source declaration
+
+Use these only for the user's OWN backend (a CRM, an internal API). See
+the `<live-data-sources>` block for when and how.
 
 The toolset above is the WHOLE interface. Apply the smallest granular op
 that satisfies the intent.
@@ -1473,6 +1652,7 @@ def _assemble_specialist() -> str:
         _SPECIALIST_WORKFLOW,
         _INTERACTIVE_DEFAULT_BLOCK,
         _STATE_SOURCES_BLOCK,
+        _LIVE_DATA_SOURCES_BLOCK,
         _CREATION_EXAMPLES_MCP,
         _RESEARCH_PROTOCOL,
         _RIPPLE_DESIGN_ESSENTIALS,
@@ -1492,8 +1672,45 @@ _CURRENT_POCKET_BLOCK_TEMPLATE = """\
 You are inside pocket id: `__POCKET_ID__`. Pass this id verbatim as the
 ``pocket_id`` argument to every pocket tool call (get_pocket,
 set_state, set_node_prop, add_node, etc.).
+Backend: __BACKEND_SUMMARY__
 </current-pocket>
 """
+
+
+def fill_current_pocket(prompt: str, pocket_id: str, backend_summary: dict | None) -> str:
+    """Fill the `__POCKET_ID__` and `__BACKEND_SUMMARY__` tokens in a
+    prompt that carries ``_CURRENT_POCKET_BLOCK_TEMPLATE``.
+
+    ``backend_summary`` is the non-secret ``{base_url, auth_type,
+    configured}`` dict from ``pockets.service.get_pocket_backend`` (it
+    never carries the token). ``None`` — or a summary without
+    ``configured`` — renders as "configured state unknown" so the agent
+    falls back to ``get_pocket`` rather than assuming there is no
+    backend.
+
+    Always replace BOTH tokens: a prompt that fills only `__POCKET_ID__`
+    would leak the literal `__BACKEND_SUMMARY__` text to the model.
+    """
+    return prompt.replace(POCKET_ID_TOKEN, pocket_id).replace(
+        BACKEND_SUMMARY_TOKEN, _render_backend_summary(backend_summary)
+    )
+
+
+def _render_backend_summary(summary: dict | None) -> str:
+    """One-line human-readable rendering of the non-secret backend
+    summary for the `<current-pocket>` block.
+
+    "configured — <base_url> (auth: <type>)" when a backend exists,
+    "not configured" when it explicitly does not, "configured state
+    unknown — call get_pocket to check" when the caller had no summary.
+    """
+    if not summary or "configured" not in summary:
+        return "configured state unknown — call get_pocket to check"
+    if not summary.get("configured"):
+        return "not configured"
+    base_url = summary.get("base_url") or "(unknown URL)"
+    auth_type = summary.get("auth_type") or "none"
+    return f"configured — {base_url} (auth: {auth_type})"
 
 
 def _assemble_interaction(*, mcp: bool) -> str:
@@ -1506,7 +1723,13 @@ def _assemble_interaction(*, mcp: bool) -> str:
     (the creation toolset): advertising create_pocket / update_pocket /
     add_widget to a specialist that only holds set_node_prop / add_node /
     *_prop_array_item made the planner pick a non-existent tool and emit
-    zero ops with no error (#1163 root cause B)."""
+    zero ops with no error (#1163 root cause B).
+
+    ``_LIVE_DATA_SOURCES_EDIT_BLOCK`` is spliced in so the edit specialist
+    knows it can author a ``rippleSpec.sources`` block via the
+    ``set_source`` / ``remove_source`` ops (RFC 04 alpha follow-up) —
+    without it, the specialist stashed fake source descriptors in state
+    and built chat-round-trip refresh buttons."""
     parts = [
         _SCOPE_BLOCK,
         _CANVAS_BLOCK,
@@ -1514,6 +1737,7 @@ def _assemble_interaction(*, mcp: bool) -> str:
         _WORKFLOW_INTERACTION_MCP if mcp else _WORKFLOW_INTERACTION_CLI,
         _INTERACTIVE_DEFAULT_BLOCK,
         _STATE_SOURCES_BLOCK,
+        _LIVE_DATA_SOURCES_EDIT_BLOCK,
         RIPPLE_DESIGN_RULES,
         # MUST be last — see _CURRENT_POCKET_BLOCK_TEMPLATE rationale.
         _CURRENT_POCKET_BLOCK_TEMPLATE,
@@ -1701,6 +1925,7 @@ def get_pocket_prompts(*, backend_name: str | None = None) -> tuple[str, str]:
 
 
 __all__ = [
+    "BACKEND_SUMMARY_TOKEN",
     "POCKET_CREATION_PROMPT",
     "POCKET_CREATION_PROMPT_CLI",
     "POCKET_CREATION_PROMPT_MCP",
@@ -1712,5 +1937,6 @@ __all__ = [
     "POCKET_INTERACTION_PROMPT_CLI",
     "POCKET_INTERACTION_PROMPT_MCP",
     "POCKET_SPECIALIST_PROMPT",
+    "fill_current_pocket",
     "get_pocket_prompts",
 ]
