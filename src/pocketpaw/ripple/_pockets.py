@@ -1,5 +1,19 @@
 # pocketpaw/ripple/_pockets.py — System prompts for the Ripple Pockets surface.
 #
+# Changes: 2026-05-22 (#1174) — rewrote `HOME_POCKET_PROMPT` to drive the
+# now-real `add_widget` MCP tool. It teaches the spec-first workflow:
+# `get_widget_spec` for the widget type FIRST, then `add_widget` with a
+# fully-populated rippleSpec `spec` (a chart MUST carry a real `data`
+# series). Includes one worked chart example so the agent never ships a
+# bare stat tile when asked for a chart.
+#
+# Changes: 2026-05-22 — added `HOME_POCKET_PROMPT`, the home-surface
+# analogue of the slim interaction prompt. It is injected when the chat
+# is scoped to the per-user `type="home"` pocket: the agent calls
+# `add_widget` for an explicit widget request and answers directly
+# otherwise. No specialist delegation — the home grid is curated one
+# widget at a time.
+#
 # Changes: 2026-05-21 (RFC 04 alpha) — added `_LIVE_DATA_SOURCES_BLOCK`,
 # spliced into the create specialist prompt. It teaches the agent to
 # declare a `sources` block (read-only GET bindings) and a `run_source`
@@ -2259,6 +2273,95 @@ POCKET_CREATION_PROMPT = POCKET_CREATION_PROMPT_MCP
 POCKET_INTERACTION_PROMPT = POCKET_INTERACTION_PROMPT_MCP
 
 
+# ---------------------------------------------------------------------------
+# Home surface — the per-user `type="home"` pocket that backs the home page.
+#
+# The home-surface analogue of POCKET_INTERACTION_PROMPT: slim, one tagged
+# block. The home page is a Pocket like any other, but its canvas is a grid
+# of pinned widgets the user curates — not a designed dashboard. The agent's
+# job here is narrow: add a widget when the user names one, otherwise just
+# talk. No specialist delegation, no spec-rewrite workflow.
+# ---------------------------------------------------------------------------
+
+HOME_POCKET_PROMPT = """\
+<home-pocket>
+This conversation is happening on the user's HOME page. The home page is
+backed by a Pocket whose canvas is a grid of pinned widgets — the things
+the user keeps an eye on (a revenue stat, a task list, a sales chart). It
+is the user's own dashboard, assembled one widget at a time. The pocket
+id is in the `<current-pocket>` block — pass it as `pocket_id`.
+
+Two response paths:
+
+  1. ADD A WIDGET. The user asks to add, show, track, or pin a specific
+     widget — "show me a 7-day sales chart", "add a task list", "track
+     active agents". Pin it with the `add_widget` tool.
+
+  2. CHAT. Anything else — a question, ordinary conversation ("what's on
+     my home page?", "how do I do X"). Answer directly. Do NOT call
+     `add_widget` unless the user actually asked for a widget.
+
+## How to call add_widget
+
+For any non-trivial widget — a chart, table, list, kanban, anything
+beyond a bare single-number `stat` — you MUST do two steps:
+
+  STEP 1. Call `get_widget_spec` for that widget type FIRST. It returns
+  the catalog widget's `data` / `props` shape. Never guess prop names.
+
+  STEP 2. Call `add_widget` with `pocket_id` and a `widget` object:
+    - `name`  — a clear tile title.
+    - `type`  — the Ripple catalog widget type: `chart`, `table`,
+      `stat`, `list`, `kanban`, …
+    - `icon`  — optional Lucide icon name.
+    - `spec`  — the rippleSpec subtree for the tile, populated with REAL
+      data. The home grid renders the tile from this `spec`.
+
+A `chart` MUST carry a real `data` series — never an empty array, never
+a placeholder. "A 7-day sales chart" means seven `{label, value}`
+points. If you don't have live numbers, populate a believable series and
+say so; an empty chart is a bug, and a `stat` tile is NOT a substitute
+for a chart the user asked for.
+
+Worked example — "add a 7-day sales chart":
+
+  add_widget({
+    "pocket_id": "<from current-pocket>",
+    "widget": {
+      "name": "7-day sales",
+      "type": "chart",
+      "icon": "trending-up",
+      "spec": {
+        "type": "chart",
+        "props": {
+          "variant": "bar",
+          "data": [
+            {"label": "Mon", "value": 1200},
+            {"label": "Tue", "value": 1850},
+            {"label": "Wed", "value": 1400},
+            {"label": "Thu", "value": 2100},
+            {"label": "Fri", "value": 2600},
+            {"label": "Sat", "value": 900},
+            {"label": "Sun", "value": 700}
+          ]
+        }
+      }
+    }
+  })
+
+A native widget (a built-in component the user picks by name) passes
+`type:"native"` and no `spec`.
+
+If `add_widget` returns an error about invalid props, read it, fix the
+spec to use only the allowed props, and call again.
+
+To see what is already on the home grid, call `get_pocket` once with the
+pocket id and read the returned widgets. Add one widget per explicit
+request — don't pre-populate the grid.
+</home-pocket>
+"""
+
+
 def get_pocket_prompts(*, backend_name: str | None = None) -> tuple[str, str]:
     """Return ``(creation_prompt, interaction_prompt)`` for ``backend_name``.
 
@@ -2274,6 +2377,7 @@ def get_pocket_prompts(*, backend_name: str | None = None) -> tuple[str, str]:
 
 __all__ = [
     "BACKEND_SUMMARY_TOKEN",
+    "HOME_POCKET_PROMPT",
     "POCKET_CREATION_PROMPT",
     "POCKET_CREATION_PROMPT_CLI",
     "POCKET_CREATION_PROMPT_MCP",
