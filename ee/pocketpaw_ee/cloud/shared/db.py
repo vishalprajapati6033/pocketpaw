@@ -16,7 +16,6 @@ async def init_cloud_db(mongo_uri: str = "mongodb://localhost:27017/paw-enterpri
     """Initialize Beanie ODM with all document models."""
     global _client
 
-    from pocketpaw_ee.calendar.models import _CalendarDoc, _EventDoc
     from pocketpaw_ee.cloud.memory.bootstrap import register_default_backend
     from pocketpaw_ee.cloud.memory.documents import MemoryFactDoc
     from pocketpaw_ee.cloud.models import ALL_DOCUMENTS
@@ -27,7 +26,7 @@ async def init_cloud_db(mongo_uri: str = "mongodb://localhost:27017/paw-enterpri
 
     # Memory-facts doc lives in its own package to avoid circular imports with
     # ee.cloud.models; register it alongside the core documents here.
-    documents = [*ALL_DOCUMENTS, MemoryFactDoc, _CalendarDoc, _EventDoc]
+    documents = [*ALL_DOCUMENTS, MemoryFactDoc]
     await init_beanie(database=db, document_models=documents)
     logger.info("Cloud DB initialized: %s (%d models)", db_name, len(documents))
 
