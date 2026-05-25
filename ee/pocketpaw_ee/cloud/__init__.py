@@ -142,6 +142,7 @@ def mount_cloud(app: FastAPI) -> None:
     from pocketpaw_ee.cloud.audit.router import router as audit_router
     from pocketpaw_ee.cloud.auth.router import router as auth_router
     from pocketpaw_ee.cloud.chat.router import router as chat_router
+    from pocketpaw_ee.cloud.chat.runs.router import router as runs_router
     from pocketpaw_ee.cloud.connectors.router import router as connectors_router
     from pocketpaw_ee.cloud.cycles.router import router as cycles_router
     from pocketpaw_ee.cloud.license import get_license_info
@@ -160,6 +161,7 @@ def mount_cloud(app: FastAPI) -> None:
     app.include_router(agents_router, prefix="/api/v1")
     app.include_router(audit_router, prefix="/api/v1")
     app.include_router(chat_router, prefix="/api/v1")
+    app.include_router(runs_router, prefix="/api/v1")
     app.include_router(connectors_router, prefix="/api/v1")
     app.include_router(pockets_router, prefix="/api/v1")
     # Pocket chat — agent-driven pocket creation SSE stream (POST /pockets/chat).
@@ -538,3 +540,15 @@ def mount_cloud(app: FastAPI) -> None:
         from pocketpaw.agents.pool import get_agent_pool
 
         await get_agent_pool().stop()
+
+    # Defence-in-depth drain. Under ``FastAPI(lifespan=...)`` (the host's
+    # default in ``src/pocketpaw/dashboard.py``) this hook is silently dropped
+    # — the real drain runs in ``dashboard_lifecycle.shutdown_event``. Kept
+    # here so a host that doesn't pass ``lifespan=`` still drains in-flight runs.
+    @app.on_event("shutdown")
+    async def _drain_chat_runs() -> None:
+        from pocketpaw_ee.cloud.chat.runs.executor import InProcessExecutor, get_executor
+
+        executor = get_executor()
+        if isinstance(executor, InProcessExecutor):
+            await executor.drain()
