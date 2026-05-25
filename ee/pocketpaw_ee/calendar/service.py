@@ -285,8 +285,8 @@ async def update_event(
     if body.attendees is not None:
         doc.attendees = [a.model_dump() for a in body.attendees]
         changed_fields.append("attendees")
-    if body.recurrence is not None:
-        doc.recurrence = body.recurrence.model_dump()
+    if "recurrence" in body.model_fields_set:
+        doc.recurrence = body.recurrence.model_dump() if body.recurrence is not None else None
         changed_fields.append("recurrence")
 
     # Cross-field validation after the partial merge — starts_at < ends_at.
