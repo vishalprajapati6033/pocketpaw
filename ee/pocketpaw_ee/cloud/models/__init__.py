@@ -8,6 +8,10 @@ remains registered in ``get_all_documents()`` for Beanie init.
 from __future__ import annotations
 
 from pocketpaw_ee.cloud.models.agent import Agent, AgentConfig
+from pocketpaw_ee.cloud.models.api_key import APIKey
+from pocketpaw_ee.cloud.models.audit_event import AuditEvent
+from pocketpaw_ee.cloud.models.audit_webhook import AuditWebhook
+from pocketpaw_ee.cloud.models.auth_session import AuthSession
 from pocketpaw_ee.cloud.models.chat_run import ChatRunDoc
 from pocketpaw_ee.cloud.models.comment import Comment, CommentAuthor, CommentTarget
 from pocketpaw_ee.cloud.models.composio_connection import ComposioConnection
@@ -61,9 +65,13 @@ def _ensure_calendar_docs():
 
 
 __all__ = [
+    "APIKey",
     "Agent",
     "AgentConfig",
     "Attachment",
+    "AuditEvent",
+    "AuditWebhook",
+    "AuthSession",
     "ChatRunDoc",
     "Comment",
     "CommentAuthor",
@@ -129,6 +137,10 @@ def get_all_documents():
         Project,
         PlanSession,
         ChatRunDoc,
+        AuditEvent,
+        AuditWebhook,
+        AuthSession,
+        APIKey,
         cal_doc,
         evt_doc,
     ]
