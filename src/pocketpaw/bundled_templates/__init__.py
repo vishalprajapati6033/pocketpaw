@@ -37,6 +37,12 @@
 # ``BulkExecutionError``). PR 2e is the LAST library-layer piece —
 # composes the per-row composer (PR 2d) into the batch-approval
 # contract from RFC §"Bulk action execution model".
+# Modified 2026-05-28 (feat/wave-4b-lint-fabric): re-exports
+# ``JSONFileFabricRegistry`` — the OSS-side JSON-backed
+# :class:`FabricRegistry` implementation that powers ``pocketpaw
+# template lint --registry <path>``. Wave 4c will replace it with the
+# live EE FabricRegistry; until then, this is the developer-facing mock
+# for ``tier: registered`` lint workflows.
 """Built-in pocket templates bundled and auto-installed by PocketPaw.
 
 Third sibling to ``pocketpaw.bundled_skills`` and ``pocketpaw.bundled_kb``.
@@ -87,6 +93,14 @@ from pocketpaw.bundled_templates.bulk_executor import (
     RowExecution,
     plan_bulk_execution,
 )
+from pocketpaw.bundled_templates.bundler import (
+    BundleError,
+    InstallResult,
+    TemplateDiff,
+    compute_template_diff,
+    pack_template,
+    unpack_template,
+)
 from pocketpaw.bundled_templates.cel_runtime import (
     CelEvaluationError,
     collect_free_identifiers,
@@ -116,6 +130,10 @@ from pocketpaw.bundled_templates.instinct_composer import (
     InstinctResolutionError,
     InstinctVerdict,
     resolve_instinct,
+)
+from pocketpaw.bundled_templates.json_registry import (
+    JSONFileFabricRegistry,
+    JSONFileFabricRegistryError,
 )
 from pocketpaw.bundled_templates.loader import load_template
 from pocketpaw.bundled_templates.schema import (
@@ -147,6 +165,7 @@ __all__ = [
     "BulkApprovalRequest",
     "BulkExecutionError",
     "BulkPlan",
+    "BundleError",
     "CelEvaluationError",
     "ColumnDef",
     "ConfirmDef",
@@ -156,11 +175,14 @@ __all__ = [
     "FabricResolver",
     "FabricValidationError",
     "IdentifierResolver",
+    "InstallResult",
     "InstinctDecision",
     "InstinctResolutionError",
     "InstinctRule",
     "InstinctRulesDef",
     "InstinctVerdict",
+    "JSONFileFabricRegistry",
+    "JSONFileFabricRegistryError",
     "JoinedEntity",
     "NullFabricRegistry",
     "PermissionsDef",
@@ -169,6 +191,7 @@ __all__ = [
     "SavedView",
     "StateBinding",
     "SweepResult",
+    "TemplateDiff",
     "TemplateIdentifierResolver",
     "TemplateInstallResult",
     "TemplateValidationError",
@@ -177,11 +200,14 @@ __all__ = [
     "TriggerDef",
     "collect_free_identifiers",
     "compile_template",
+    "compute_template_diff",
     "evaluate_cel",
     "install_bundled_templates",
     "load_template",
+    "pack_template",
     "plan_bulk_execution",
     "resolve_instinct",
     "sweep_temporal_triggers",
+    "unpack_template",
     "validate_template_with_registry",
 ]
