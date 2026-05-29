@@ -48,6 +48,12 @@ from pocketpaw_ee.cloud.models.foresight_workspace_scenario import (
 from pocketpaw_ee.cloud.models.group import Group, GroupAgent
 from pocketpaw_ee.cloud.models.instinct_approval import InstinctApproval
 from pocketpaw_ee.cloud.models.invite import Invite
+from pocketpaw_ee.cloud.models.meeting import (
+    Meeting,
+    MeetingProviderCredentials,
+    MeetingsSettings,
+    MeetingTranscript,
+)
 from pocketpaw_ee.cloud.models.message import Attachment, Mention, Message, Reaction
 from pocketpaw_ee.cloud.models.notification import Notification, NotificationSource
 from pocketpaw_ee.cloud.models.planner import PlanSession, PlanSessionAgentGap
@@ -121,6 +127,10 @@ __all__ = [
     "GroupAgent",
     "InstinctApproval",
     "Invite",
+    "Meeting",
+    "MeetingProviderCredentials",
+    "MeetingsSettings",
+    "MeetingTranscript",
     "Mention",
     "Message",
     "Notification",
@@ -175,6 +185,13 @@ def get_all_documents():
         Cycle,
         Project,
         PlanSession,
+        Meeting,
+        MeetingTranscript,
+        MeetingProviderCredentials,
+        MeetingsSettings,
+        # Calendar — sibling enterprise package.
+        _CalendarDoc,
+        _EventDoc,
         ForesightRun,
         ForesightBacktest,
         ForesightProjectedDecision,
