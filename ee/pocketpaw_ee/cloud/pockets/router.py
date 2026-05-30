@@ -1,5 +1,40 @@
 """Pockets domain — FastAPI router.
 
+Updated: 2026-05-25 (PR #1222 R1 fixes) — the loopback bypass on the
+spec-merge + pocket-read endpoints now requires a process-local
+internal token in addition to the previous loopback + magic header +
+tenancy header set. The token (~/.pocketpaw/internal-token, 0600,
+generated once at dashboard boot) is compared via
+``secrets.compare_digest``. Without it, a same-machine non-PocketPaw
+process could forge any tenancy by sending arbitrary
+``X-PocketPaw-Workspace-Id`` / ``X-PocketPaw-User-Id`` headers. The
+prior ``body: dict`` shape on the merge route is replaced with a
+typed ``MergeSpecRequest`` Pydantic model that enforces the
+exactly-one rule at parse time. The dead ``"localhost"`` string
+branch in ``_is_localhost`` is removed and a comment pins the
+no-X-Forwarded-For contract — putting a reverse proxy in front of
+the dashboard requires disabling this bypass.
+
+Updated: 2026-05-24 — added the MVP ``POST /{pocket_id}/spec/merge``
+endpoint. The endpoint accepts a body of exactly one
+``{"replace": <full spec>}`` or ``{"merge": <partial spec>}`` and
+delegates to ``pockets_service.merge_spec``. Supports a localhost-only
+internal bypass so the new bundled ``pocketpaw-pocket-specialist``
+skill (which runs in a Claude Code subprocess and ``curl``s the local
+API directly) can authenticate without round-tripping a real JWT for
+the MVP. The bypass requires:
+
+  - request source IP == 127.0.0.1 / ::1, AND
+  - ``X-PocketPaw-Internal: true`` header, AND
+  - ``X-PocketPaw-Internal-Token`` matching the process-local secret, AND
+  - ``X-PocketPaw-Workspace-Id`` + ``X-PocketPaw-User-Id`` headers
+    carrying the calling user's identity.
+
+The captain greenlights tightening this in PR-2 once we know whether
+the cookie-based auth path works end-to-end (the bypass is the safety
+net, not the primary path). For now the bypass is documented in the
+endpoint docstring as the security caveat.
+
 Updated: 2026-04-19 (Cluster B Sub-PR #3) — Added three new routes that
 close UI-TESTING-GUIDE §11 gap B5 (no widget layout save/share):
 
@@ -86,13 +121,20 @@ invocation has the same blast radius as a write binding.
 
 from __future__ import annotations
 
+import secrets as _secrets
+from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, Query, Request
 from pydantic import BaseModel, Field
 from starlette.responses import Response
 
 from pocketpaw_ee.cloud._core.errors import CloudError
+from pocketpaw_ee.cloud._core.internal_token import (
+    INTERNAL_TOKEN_HEADER,
+    get_internal_token,
+)
+from pocketpaw_ee.cloud.auth import current_optional_user
 from pocketpaw_ee.cloud.license import require_license
 from pocketpaw_ee.cloud.pockets import service as pockets_service
 from pocketpaw_ee.cloud.pockets.dto import (
@@ -102,6 +144,7 @@ from pocketpaw_ee.cloud.pockets.dto import (
     CreatePocketRequest,
     DispatchBulkRequest,
     HomePocketResponse,
+    MergeSpecRequest,
     PocketBackendConfigRequest,
     PocketBackendConfigResponse,
     ReorderWidgetsRequest,
@@ -302,8 +345,34 @@ async def get_home_pocket(
 @router.get("/{pocket_id}")
 async def get_pocket(
     pocket_id: str,
-    user_id: str = Depends(current_user_id),
+    request: Request,
+    user: Any = Depends(current_optional_user),
+    x_pocketpaw_internal: str | None = Header(default=None, alias="X-PocketPaw-Internal"),
+    x_pocketpaw_internal_token: str | None = Header(default=None, alias=INTERNAL_TOKEN_HEADER),
+    x_pocketpaw_workspace_id: str | None = Header(default=None, alias="X-PocketPaw-Workspace-Id"),
+    x_pocketpaw_user_id: str | None = Header(default=None, alias="X-PocketPaw-User-Id"),
 ) -> dict:
+    """Read a pocket. Same loopback-internal bypass as ``/spec/merge`` so
+    the ``pocketpaw-pocket-specialist`` skill can read the spec before
+    computing a partial. Otherwise standard cookie/bearer auth.
+
+    The bypass requires loopback origin + ``X-PocketPaw-Internal: true``
+    + a process-local token matching ``X-PocketPaw-Internal-Token`` +
+    both ``X-PocketPaw-Workspace-Id`` and ``X-PocketPaw-User-Id``
+    headers (PR #1222 R1 tightening — see ``_loopback_bypass_active``).
+    """
+    if _loopback_bypass_active(
+        request,
+        internal_header=x_pocketpaw_internal,
+        internal_token=x_pocketpaw_internal_token,
+        workspace_header=x_pocketpaw_workspace_id,
+        user_header=x_pocketpaw_user_id,
+    ):
+        user_id = x_pocketpaw_user_id  # type: ignore[assignment]
+    elif user is not None:
+        user_id = str(user.id)
+    else:
+        raise CloudError(401, "auth.required", "Authentication required.")
     return await pockets_service.get(pocket_id, user_id)
 
 
@@ -314,6 +383,175 @@ async def update_pocket(
     user_id: str = Depends(current_user_id),
 ) -> dict:
     return await pockets_service.update(pocket_id, user_id, body)
+
+
+# ---------------------------------------------------------------------------
+# Spec merge endpoint — MVP for the new pocketpaw-pocket-specialist skill.
+# ---------------------------------------------------------------------------
+
+
+def _is_localhost(request: Request) -> bool:
+    """Loopback-only check used by the internal-bypass path on the spec
+    merge endpoint. ``starlette`` exposes the immediate peer on
+    ``request.client.host`` — that is the unix socket / TCP peer, not the
+    ``X-Forwarded-For`` header, so a reverse-proxy front-end cannot
+    spoof it. Accept the IPv4 and IPv6 loopback addresses.
+
+    Security contract: we deliberately do NOT honor ``X-Forwarded-For``
+    here. If a future deployment puts a reverse proxy in front of the
+    dashboard, ``request.client.host`` will resolve to the proxy's
+    address (also loopback if the proxy runs on the same box), making
+    every external client appear loopback. This bypass MUST be
+    disabled in that deployment, or this contract revisited. The
+    dead ``"localhost"`` string branch from the original MVP was
+    removed in PR #1222 R1 — ``request.client.host`` resolves to an
+    IP literal, never the hostname, so the branch was unreachable."""
+    client = request.client
+    if not client:
+        return False
+    return client.host in ("127.0.0.1", "::1")
+
+
+def _bypass_token_matches(supplied: str | None) -> bool:
+    """Constant-time compare of the supplied bypass token against the
+    process-local secret.
+
+    Returns False (and never raises) when:
+
+      * The dashboard hasn't called ``ensure_internal_token`` yet
+        (``get_internal_token`` returns None). Treat as "bypass not
+        configured" — the caller must fall through to cookie/bearer
+        auth instead of accepting a no-token compare.
+      * The caller supplied no token, an empty token, or a non-string.
+
+    Uses ``secrets.compare_digest`` to defeat timing attacks across
+    repeated probes from the same loopback client.
+    """
+    expected = get_internal_token()
+    if not expected or not isinstance(supplied, str) or not supplied:
+        return False
+    return _secrets.compare_digest(expected, supplied)
+
+
+def _loopback_bypass_active(
+    request: Request,
+    *,
+    internal_header: str | None,
+    internal_token: str | None,
+    workspace_header: str | None,
+    user_header: str | None,
+) -> bool:
+    """Single source of truth for "is the loopback internal bypass active
+    for this request?"
+
+    The bypass requires ALL of:
+
+      1. The request originated on the loopback interface
+         (``_is_localhost``).
+      2. ``X-PocketPaw-Internal: true`` was sent.
+      3. ``X-PocketPaw-Internal-Token`` matches the process-local
+         secret (constant-time compare).
+      4. Both ``X-PocketPaw-Workspace-Id`` and
+         ``X-PocketPaw-User-Id`` are present (non-empty).
+
+    Any missing factor → bypass denied; the caller falls through to
+    the standard cookie/bearer auth dependency.
+    """
+    if not _is_localhost(request):
+        return False
+    if internal_header != "true":
+        return False
+    if not _bypass_token_matches(internal_token):
+        return False
+    if not workspace_header or not user_header:
+        return False
+    return True
+
+
+@router.post("/{pocket_id}/spec/merge")
+async def merge_pocket_spec(
+    pocket_id: str,
+    body: MergeSpecRequest,
+    request: Request,
+    user: Any = Depends(current_optional_user),
+    x_pocketpaw_internal: str | None = Header(default=None, alias="X-PocketPaw-Internal"),
+    x_pocketpaw_internal_token: str | None = Header(default=None, alias=INTERNAL_TOKEN_HEADER),
+    x_pocketpaw_workspace_id: str | None = Header(default=None, alias="X-PocketPaw-Workspace-Id"),
+    x_pocketpaw_user_id: str | None = Header(default=None, alias="X-PocketPaw-User-Id"),
+) -> dict:
+    """One-shot rippleSpec write: full ``replace`` or partial ``merge``.
+
+    MVP entry point for the new ``pocketpaw-pocket-specialist`` skill —
+    replaces the 17-tool LangChain edit surface with a single endpoint
+    the agent invokes via ``curl``.
+
+    **Body shape.** A ``MergeSpecRequest`` carrying EXACTLY ONE of:
+
+    .. code-block:: json
+
+        {"replace": { "version": "1.0", "state": {...}, "ui": {...} }}
+        {"merge":   { "ui": { "id": "n_xxx", ... } }}
+
+    A body that carries both or neither returns ``422`` (Pydantic
+    rejects at parse time).
+
+    **Auth.** Standard cookie / bearer JWT (mirrors every other pocket
+    route) — OR a loopback-only internal bypass that requires ALL of:
+
+      * The request originates on the loopback interface
+        (127.0.0.1 / ::1, never via a reverse proxy — see
+        ``_is_localhost`` for the contract pin).
+      * ``X-PocketPaw-Internal: true``.
+      * ``X-PocketPaw-Internal-Token`` matches the host's
+        ``~/.pocketpaw/internal-token`` (compared via
+        ``secrets.compare_digest``). The token is generated at
+        dashboard boot and exported to ``POCKETPAW_INTERNAL_TOKEN``
+        so the pocket-specialist subprocess inherits it.
+      * Both ``X-PocketPaw-Workspace-Id`` and
+        ``X-PocketPaw-User-Id`` are present.
+
+    Any missing factor falls through to cookie/bearer auth.
+    Service-level edit-access checks inside ``merge_spec`` still run
+    on the resolved user_id, so a mistyped header cannot escalate.
+    Captain greenlights tightening this in a follow-up PR (short-lived
+    JWT) once we confirm the shape on real traffic — the token gate is
+    interim, dev-grade.
+
+    **Validation.** Runs the strict catalog + action-wiring gates
+    (mirroring the agent-generation path in ``create_from_ripple_spec``).
+    A blocking violation returns ``{ok: false, warnings: [...]}``
+    without persisting; the agent can fix and retry. Non-blocking
+    expression-grammar warnings persist with ``ok: true`` and the
+    warnings folded into the list.
+    """
+    # Resolve identity — try the loopback internal bypass first, then
+    # fall through to the standard session-user identity. The bypass
+    # needs loopback + magic header + token + tenancy headers, ALL
+    # together; any missing piece falls through to the auth dep above.
+    if _loopback_bypass_active(
+        request,
+        internal_header=x_pocketpaw_internal,
+        internal_token=x_pocketpaw_internal_token,
+        workspace_header=x_pocketpaw_workspace_id,
+        user_header=x_pocketpaw_user_id,
+    ):
+        # Mypy: the header values are non-empty by the time the bypass
+        # check passes (it short-circuits on any None / empty header).
+        workspace_id = x_pocketpaw_workspace_id  # type: ignore[assignment]
+        user_id = x_pocketpaw_user_id  # type: ignore[assignment]
+    elif user is not None:
+        user_id = str(user.id)
+        if not user.active_workspace:
+            raise CloudError(
+                400,
+                "workspace.not_set",
+                "No active workspace. Create or join a workspace first.",
+            )
+        workspace_id = user.active_workspace
+    else:
+        raise CloudError(401, "auth.required", "Authentication required.")
+
+    return await pockets_service.merge_spec(workspace_id, user_id, pocket_id, body)
 
 
 @router.delete("/{pocket_id}", status_code=204, dependencies=[Depends(require_pocket_owner)])
