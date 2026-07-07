@@ -227,7 +227,12 @@ class TestInstallSkill:
             (skill_dir / "SKILL.md").write_text("# My skill")
             (skill_dir / "legit.txt").write_text("real content")
             # Create a symlink pointing outside the skill dir
-            (skill_dir / "evil_link").symlink_to("/etc/passwd")
+            try:
+                (skill_dir / "evil_link").symlink_to("/etc/passwd")
+            except OSError as e:
+                if getattr(e, "winerror", None) == 1314:
+                    pytest.skip("Symlink creation requires elevated privilege on this Windows setup")
+                raise
 
             mock_tmpdir_ctx = MagicMock()
             mock_tmpdir_ctx.__enter__ = MagicMock(return_value=tmpdir)

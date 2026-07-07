@@ -108,7 +108,12 @@ class TestSymlinkFilter:
         secret.write_text("do not leak\n")
 
         # Place a symlink inside the jail that points outside
-        (jail / "link_to_secret.txt").symlink_to(secret)
+        try:
+            (jail / "link_to_secret.txt").symlink_to(secret)
+        except OSError as e:
+            if getattr(e, "winerror", None) == 1314:
+                pytest.skip("Symlink creation requires elevated privilege on this Windows setup")
+            raise
 
         app = FastAPI()
 
